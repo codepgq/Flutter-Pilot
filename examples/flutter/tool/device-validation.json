@@ -1,0 +1,33 @@
+{
+  "date": "2026-11-08",
+  "host": "macOS arm64",
+  "flutter": "3.47.8",
+  "dart": "3.13.7",
+  "dio": "5.11.1",
+  "engine": "mitmproxy 12.3.1 macOS standalone",
+  "targets": [
+    { "name": "iPhone 18 Pro", "platform": "iOS 27.2 simulator", "result": "passed" },
+    { "name": "Samsung SM_A1760", "platform": "Android physical, USB adb reverse", "result": "passed" }
+  ],
+  "passedScenarios": [
+    "真实 prepareSetup/applySetup 接入补丁生成与应用",
+    "HTTP 直接 mock，未访问上游",
+    "HTTPS 直接 mock，使用生成 helper 中的 CA 公钥信任，不安装系统证书",
+    "HTTPS 请求转发到测试 HTTP 上游，保留 POST 方法",
+    "请求 JSON 正文和请求头修改",
+    "响应状态码修改为 202，响应头修改",
+    "跨站转发移除 Authorization/Cookie",
+    "https://example.com 真实上游 HTTPS 且保留证书校验",
+    "两端共 8 条历史写入真实 SQLite",
+    "revertSetup 完整撤销示例补丁，删除临时 helper 和 smoke target",
+    "结束后清理本会话 adb reverse 和测试引擎"
+  ],
+  "otherValidation": { "typescriptSetupDeviceTests": 17, "flutterWidgetTests": 3, "flutterAnalyze": "passed", "iosSimulatorBuild": "passed", "androidDebugBuild": "passed" },
+  "notVerified": [
+    "Android emulator",
+    "iOS physical device and LAN route",
+    "macOS Intel",
+    "系统代理零代码接入和系统证书安装流程"
+  ],
+  "notes": "设备级测试验证 Dio 显式开发代理的实际链路。断点行为和其他代理边界由独立代理集成测试覆盖，不将其计为设备级断点验收。"
+}

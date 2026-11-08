@@ -1,0 +1,132 @@
+{
+  "name": "flutter-api-mocks",
+  "displayName": "Flutter API Mocks",
+  "description": "Flutter Dio API 调试工作台：HTTPS 代理、Mock、双向修改、转发、断点和请求历史。",
+  "version": "0.1.0",
+  "publisher": "api-mocks",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Debuggers",
+    "Other"
+  ],
+  "keywords": [
+    "flutter",
+    "dio",
+    "mock",
+    "proxy",
+    "api"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onCommand:flutterApiMocks.open"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "启动本地代理及修改开发接入配置需要受信任的工作区。"
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "flutterApiMocks.open",
+        "title": "Flutter API Mocks: 打开工作台",
+        "icon": "$(radio-tower)"
+      },
+      {
+        "command": "flutterApiMocks.start",
+        "title": "Flutter API Mocks: 启动代理"
+      },
+      {
+        "command": "flutterApiMocks.stop",
+        "title": "Flutter API Mocks: 停止代理"
+      }
+    ],
+    "configuration": {
+      "title": "Flutter API Mocks",
+      "properties": {
+        "flutterApiMocks.enginePath": {
+          "type": "string",
+          "default": "",
+          "description": "可选：本地兼容 mitmdump 的绝对路径。留空则由插件下载和管理。"
+        },
+        "flutterApiMocks.proxyPort": {
+          "type": "number",
+          "default": 8080,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "首选代理端口；占用时自动选择可用端口。"
+        },
+        "flutterApiMocks.retentionDays": {
+          "type": "number",
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "description": "请求历史保留天数。"
+        },
+        "flutterApiMocks.maxRecords": {
+          "type": "number",
+          "default": 10000,
+          "minimum": 1,
+          "maximum": 100000,
+          "description": "历史记录条数上限。"
+        },
+        "flutterApiMocks.maxBodyBytes": {
+          "type": "number",
+          "default": 1048576,
+          "minimum": 1024,
+          "maximum": 10485760,
+          "description": "单个正文保存和可编辑的字节上限。"
+        },
+        "flutterApiMocks.breakpointTimeout": {
+          "type": "number",
+          "default": 60,
+          "minimum": 10,
+          "maximum": 300,
+          "description": "默认断点等待秒数。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit && tsc -p webview/tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:proxy": "python3 -m unittest discover -s tests/proxy -v",
+    "test:ui": "playwright test",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-api-mocks-0.1.0.vsix",
+    "test:ide": "node scripts/ide-test.mjs",
+    "format:check": "prettier --check \"src/**/*.ts\" \"webview/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/*.{mjs,cjs}\" \"*.{json,ts,mts}\""
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/vscode": "^1.96.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^4.1.0",
+    "esbuild": "^0.28.2",
+    "prettier": "^3.9.10",
+    "typescript": "^5.7.0",
+    "vitest": "^5.1.0"
+  },
+  "overrides": {
+    "@vscode/vsce": {
+      "minimatch": "^11.0.5"
+    }
+  }
+}
