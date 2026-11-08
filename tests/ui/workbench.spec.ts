@@ -201,3 +201,69 @@ test('仅改请求头保留正文，关闭全部断点仍可保存 Mock', async 
   const all = (await messages(page)) as typeof sent;
   expect(all.filter((m) => m.action === 'rules.save').at(-1)?.payload.rule).not.toHaveProperty('breakpoint');
 });
+
+test('显示自动后台记录状态与关闭工作台后的行为', async ({ page }) => {
+  await page.goto('/');
+  await state(page);
+  await expect(page.getByText('自动记录中', { exact: true })).toBeVisible();
+  await expect(page.getByText('后台记录中 · 关闭工作台继续记录', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '断点队列' }).click();
+  await expect(
+    page.getByText('工作台打开时可处理手动断点；关闭后自动跳过人工暂停，继续后台记录和自动规则。'),
+  ).toBeVisible();
+});
+
+test('请求历史为空仍保留独立 API 目录与累计调用统计', async ({ page }) => {
+  await page.goto('/');
+  await state(page, {
+    history: { items: [], total: 0 },
+    apis: [{ ...fixture.apis[0], count: 12, firstAt: Date.now() - 86400000 }],
+  });
+  await page.getByRole('button', { name: 'API 与历史' }).click();
+  await expect(page.getByText('API 目录', { exact: false })).toBeVisible();
+  const api = page.getByRole('button', { name: '查看 API GET api.example.test/v1/orders', exact: true });
+  await expect(api).toBeVisible();
+  await expect(api).toContainText('12 次');
+  await expect(api).toContainText('最近');
+  await expect(api).toHaveAttribute('title', /首次发现：[\s\S]*最近调用：/);
+  await api.click();
+  await expect(page.getByRole('heading', { name: '该 API 暂无请求历史' })).toBeVisible();
+  await expect(page.getByText('目录独立保存；清空或过期请求历史不会移除已发现的 API。')).toBeVisible();
+  await expect
+    .poll(async () => messages(page))
+    .toContainEqual({
+      action: 'history.query',
+      payload: { method: 'GET', host: 'api.example.test', path: '/v1/orders', offset: 0 },
+    });
+});
+
+test('目录删除不触发选中或删除历史，确认移除后清除分组过滤', async ({ page }) => {
+  await page.goto('/');
+  await state(page);
+  await page.getByRole('button', { name: 'API 与历史' }).click();
+  const api = page.getByRole('button', { name: '查看 API GET api.example.test/v1/orders', exact: true });
+  await api.click();
+  await expect(api).toHaveAttribute('aria-pressed', 'true');
+  await expect
+    .poll(async () => messages(page))
+    .toContainEqual({
+      action: 'history.query',
+      payload: { method: 'GET', host: 'api.example.test', path: '/v1/orders', offset: 0 },
+    });
+  const before = (await messages(page)).length;
+  await page.getByRole('button', { name: '删除 API GET api.example.test/v1/orders', exact: true }).click();
+  expect((await messages(page)).slice(before)).toEqual([
+    { action: 'api.delete', payload: { method: 'GET', host: 'api.example.test', path: '/v1/orders' } },
+  ]);
+  await expect(api).toHaveAttribute('aria-pressed', 'true');
+  await state(page, { apis: [] });
+  await expect(api).not.toBeVisible();
+  await expect
+    .poll(async () => (await messages(page)).at(-1))
+    .toEqual({
+      action: 'history.query',
+      payload: { offset: 0 },
+    });
+  await expect(page.getByRole('button', { name: /全部 API/ })).toHaveClass(/selected/);
+  await expect(page.getByRole('button', { name: /GET.*200.*MOCK/ })).toBeVisible();
+});

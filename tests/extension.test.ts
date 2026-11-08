@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
@@ -13,7 +13,14 @@ const fake = vi.hoisted(() => ({
   },
   storage: '',
   workspace: '',
+  extraWorkspace: '',
   rejectSync: false,
+  autoStart: true,
+  trusted: true,
+  folderPresent: true,
+  configurationListener: undefined as any,
+  folderListener: undefined as any,
+  confirm: undefined as string | undefined,
 }));
 vi.mock('vscode', async () => {
   const { join } = await import('node:path');
@@ -33,11 +40,27 @@ vi.mock('vscode', async () => {
     StatusBarAlignment: { Left: 1 },
     env: {},
     workspace: {
-      isTrusted: true,
-      get workspaceFolders() {
-        return [{ name: 'project', uri: uri(fake.workspace) }];
+      get isTrusted() {
+        return fake.trusted;
       },
-      getConfiguration: () => ({ get: (_key: string, value: unknown) => value }),
+      get workspaceFolders() {
+        return [
+          ...(fake.folderPresent ? [{ name: 'project', uri: uri(fake.workspace) }] : []),
+          ...(fake.extraWorkspace ? [{ name: 'second', uri: uri(fake.extraWorkspace) }] : []),
+        ];
+      },
+      getConfiguration: () => ({
+        get: (key: string, value: unknown) => (key === 'autoStart' ? fake.autoStart : value),
+      }),
+      onDidGrantWorkspaceTrust: () => ({ dispose() {} }),
+      onDidChangeWorkspaceFolders: (callback: any) => {
+        fake.folderListener = callback;
+        return { dispose() {} };
+      },
+      onDidChangeConfiguration: (callback: any) => {
+        fake.configurationListener = callback;
+        return { dispose() {} };
+      },
       registerTextDocumentContentProvider: () => ({ dispose() {} }),
       textDocuments: [],
     },
@@ -52,7 +75,7 @@ vi.mock('vscode', async () => {
       createOutputChannel: () => ({ appendLine() {}, dispose() {} }),
       createStatusBarItem: () => ({ show() {}, dispose() {} }),
       showErrorMessage: vi.fn(),
-      showWarningMessage: async () => undefined,
+      showWarningMessage: async () => fake.confirm,
       createWebviewPanel: () => {
         const panel = {
           webview: {
@@ -74,6 +97,9 @@ vi.mock('vscode', async () => {
             panel.close = callback;
           },
           reveal() {},
+          dispose() {
+            panel.close?.();
+          },
         };
         fake.panels.push(panel);
         return panel;
@@ -141,21 +167,33 @@ const rule = {
 };
 async function open() {
   await fake.commands.get('flutterApiMocks.open')?.();
-  return fake.panels[0];
+  return fake.panels.at(-1);
 }
 async function message(action: string, payload: unknown = {}) {
-  const panel = fake.panels[0];
+  const panel = fake.panels.at(-1);
   const count = panel.webview.messages.length;
   panel.receive({ action, payload });
   await vi.waitFor(() => expect(panel.webview.messages.length).toBeGreaterThan(count));
   await new Promise((r) => setTimeout(r, 5));
 }
 function latest() {
-  return fake.panels[0].webview.messages.filter((m: any) => m.type === 'state').at(-1);
+  return fake.panels
+    .at(-1)
+    .webview.messages.filter((m: any) => m.type === 'state')
+    .at(-1);
+}
+async function activateCurrent() {
+  await activate({
+    subscriptions: [],
+    globalStorageUri: { fsPath: fake.storage },
+    extensionPath: process.cwd(),
+    extensionUri: { fsPath: process.cwd() },
+  } as any);
 }
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'api-mocks-extension-'));
   fake.workspace = join(directory, 'project');
+  fake.extraWorkspace = '';
   fake.storage = join(directory, 'storage');
   fake.commands.clear();
   fake.panels = [];
@@ -163,7 +201,16 @@ beforeEach(async () => {
   fake.runtime.cached = '/fake/mitmdump';
   fake.runtime.download = undefined;
   fake.rejectSync = false;
-  activate({
+  fake.autoStart = true;
+  fake.trusted = true;
+  fake.folderPresent = true;
+  fake.confirm = undefined;
+  await mkdir(fake.workspace, { recursive: true });
+  await writeFile(
+    join(fake.workspace, 'pubspec.yaml'),
+    'name: app\ndependencies:\n  flutter:\n    sdk: flutter\n  dio: ^5.0.0\n',
+  );
+  await activate({
     subscriptions: [],
     globalStorageUri: { fsPath: fake.storage },
     extensionPath: process.cwd(),
@@ -175,16 +222,22 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 describe('扩展与工作台整合', () => {
-  it('初始化只启动暂停引擎，显式启动停止时调用流量 RPC', async () => {
-    await open();
+  it('打开Flutter项目后无面板自动启动，手动停止后重开面板不恢复监听', async () => {
     const engine = fake.engines[0];
+    expect(fake.panels).toHaveLength(0);
     expect(engine.starts[0].startPaused).toBe(true);
-    expect(latest().state.proxyActive).toBe(false);
+    expect(engine.calls.some((c: any) => c.method === 'proxy.start')).toBe(true);
+    await open();
+    expect(latest().state.proxyActive).toBe(true);
     await fake.commands.get('flutterApiMocks.start')?.();
     expect(engine.calls.some((c: any) => c.method === 'proxy.start')).toBe(true);
     expect(latest().state.proxyActive).toBe(true);
     await fake.commands.get('flutterApiMocks.stop')?.();
     expect(engine.calls.some((c: any) => c.method === 'proxy.stop')).toBe(true);
+    expect(latest().state.proxyActive).toBe(false);
+    expect(engine.stops).toBe(0);
+    fake.panels[0].close();
+    await open();
     expect(latest().state.proxyActive).toBe(false);
     expect(engine.stops).toBe(0);
   });
@@ -216,15 +269,152 @@ describe('扩展与工作台整合', () => {
     expect(latest().state.proxyActive).toBe(false);
     expect(latest().state.lastError).toBe('crashed');
   });
-  it('下载中关闭工作台不会在下载完成后启动遗留引擎', async () => {
+  it('安装下载中关闭工作台仍按用户要求后台启动记录', async () => {
+    await deactivate();
     fake.runtime.cached = undefined;
     let resolve!: (value: string) => void;
     fake.runtime.download = new Promise((r) => (resolve = r));
+    await activate({
+      subscriptions: [],
+      globalStorageUri: { fsPath: fake.storage },
+      extensionPath: process.cwd(),
+      extensionUri: { fsPath: process.cwd() },
+    } as any);
     const panel = await open();
     panel.receive({ action: 'install', payload: {} });
     await vi.waitFor(() => expect(latest().state.busy).toBe(true));
     panel.close();
     resolve('/fake/downloaded');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(fake.engines.at(-1).starts).toHaveLength(1);
+    expect(fake.engines.at(-1).state.proxyActive).toBe(true);
+  });
+});
+
+describe('后台采集与独立API目录控制', () => {
+  it('关闭面板只关闭人工断点，保留代理；重新打开复用同一进程', async () => {
+    await open();
+    const engine = fake.engines[0];
+    const panel = fake.panels.at(-1);
+    panel.close();
+    await vi.waitFor(() =>
+      expect(engine.calls.at(-1)).toMatchObject({
+        method: 'breakpoint.setInteractive',
+        params: { enabled: false },
+      }),
+    );
+    expect(engine.stops).toBe(0);
+    expect(engine.state.proxyActive).toBe(true);
+    await open();
+    expect(engine.starts).toHaveLength(1);
+    expect(engine.calls.some((c: any) => c.method === 'breakpoint.setInteractive' && c.params.enabled)).toBe(
+      true,
+    );
+  });
+  it('autoStart关闭时停止采集，再开启自动恢复', async () => {
+    const engine = fake.engines[0];
+    fake.autoStart = false;
+    fake.configurationListener({ affectsConfiguration: () => true });
+    await vi.waitFor(() => expect(engine.state.proxyActive).toBe(false));
+    fake.autoStart = true;
+    fake.configurationListener({ affectsConfiguration: () => true });
+    await vi.waitFor(() => expect(engine.state.proxyActive).toBe(true));
+  });
+  it('取消目录删除不发RPC，确认只删除目录不删除历史', async () => {
+    await open();
+    const engine = fake.engines[0];
+    const api = { method: 'GET', host: 'api.test', path: '/orders' };
+    await message('api.delete', api);
+    expect(engine.calls.some((c: any) => c.method === 'api.delete')).toBe(false);
+    fake.confirm = '移除 API';
+    await message('api.delete', api);
+    expect(engine.calls).toContainEqual({ method: 'api.delete', params: api });
+    expect(engine.calls.some((c: any) => c.method === 'history.delete' || c.method === 'history.clear')).toBe(
+      false,
+    );
+  });
+  it('移除文件夹会退出对应后台引擎', async () => {
+    const engine = fake.engines[0];
+    fake.folderPresent = false;
+    fake.folderListener({
+      removed: [{ uri: { toString: () => new URL('file://' + fake.workspace).toString() } }],
+      added: [],
+    });
+    await vi.waitFor(() => expect(engine.stops).toBe(1));
+  });
+});
+
+describe('自动记录前提与退出保护', () => {
+  it('多根Flutter工作区独立启动和存储，移除一个不影响另一个', async () => {
+    await deactivate();
+    fake.extraWorkspace = join(directory, 'second');
+    await mkdir(fake.extraWorkspace);
+    await writeFile(
+      join(fake.extraWorkspace, 'pubspec.yaml'),
+      'name: second\ndependencies:\n  flutter:\n    sdk: flutter\n',
+    );
+    fake.engines = [];
+    await activateCurrent();
+    expect(fake.engines).toHaveLength(2);
+    expect(fake.engines.every((engine) => engine.state.proxyActive)).toBe(true);
+    const [first, second] = fake.engines;
+    expect(first.starts[0].storagePath).not.toBe(second.starts[0].storagePath);
+    fake.folderPresent = false;
+    fake.folderListener({
+      removed: [{ uri: { toString: () => new URL('file://' + fake.workspace).toString() } }],
+      added: [],
+    });
+    await vi.waitFor(() => expect(first.stops).toBe(1));
+    expect(second.stops).toBe(0);
+    expect(second.state.proxyActive).toBe(true);
+    await deactivate();
+    expect(second.stops).toBe(1);
+  });
+  it('首次无引擎不静默下载，也不打开面板', async () => {
+    await deactivate();
+    fake.runtime.cached = undefined;
+    fake.panels = [];
+    fake.engines = [];
+    await activateCurrent();
+    expect(fake.panels).toHaveLength(0);
+    expect(fake.engines[0].starts).toHaveLength(0);
+  });
+  it('默认关闭自动启动的工作区只准备引擎不启动监听', async () => {
+    await deactivate();
+    fake.autoStart = false;
+    fake.engines = [];
+    await activateCurrent();
+    expect(fake.engines[0].calls.some((c: any) => c.method === 'proxy.start')).toBe(false);
+    await open();
+    expect(latest().state.proxyActive).toBe(false);
+  });
+  it('不信任的工作区不创建后台会话', async () => {
+    await deactivate();
+    fake.trusted = false;
+    fake.engines = [];
+    await activateCurrent();
+    expect(fake.engines).toHaveLength(0);
+  });
+  it('关闭IDE后完整退出引擎，下次激活恢复默认自动记录', async () => {
+    const engine = fake.engines[0];
+    await deactivate();
+    expect(engine.stops).toBe(1);
+    await activateCurrent();
+    expect(fake.engines.at(-1).state.proxyActive).toBe(true);
+  });
+  it('下载中退出IDE不会在异步完成后重新创建引擎', async () => {
+    await deactivate();
+    fake.runtime.cached = undefined;
+    fake.panels = [];
+    fake.engines = [];
+    let resolve!: (value: string) => void;
+    fake.runtime.download = new Promise((r) => (resolve = r));
+    await activateCurrent();
+    const panel = await open();
+    panel.receive({ action: 'install', payload: {} });
+    await vi.waitFor(() => expect(latest().state.busy).toBe(true));
+    await deactivate();
+    resolve('/fake/download');
     await new Promise((r) => setTimeout(r, 30));
     expect(fake.engines[0].starts).toHaveLength(0);
   });

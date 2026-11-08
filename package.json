@@ -24,6 +24,7 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
+    "workspaceContains:pubspec.yaml",
     "onCommand:flutterApiMocks.open"
   ],
   "capabilities": {
@@ -91,6 +92,11 @@
           "minimum": 10,
           "maximum": 300,
           "description": "默认断点等待秒数。"
+        },
+        "flutterApiMocks.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "打开受信任的 Flutter 项目后，使用已安装引擎后台自动记录。关闭工作台后继续，首次仍需安装引擎及完成 Flutter 接入。"
         }
       }
     }

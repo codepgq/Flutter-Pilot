@@ -1,6 +1,6 @@
 # 本地代理引擎
 
-`addon.py` 由扩展随 mitmdump 启动。规则逻辑位于 `rules.py`，历史保存于工作区私有目录的 `history.sqlite3`。除 mitmproxy 外不要求安装 Python 依赖；官方 macOS 独立包缺少 Python `sqlite3` 时，自动使用系统 `/usr/bin/sqlite3`，通过标准输入传入转义后的 SQL，不调用 shell。
+`addon.py` 由扩展随 mitmdump 启动。规则逻辑位于 `rules.py`，请求历史与独立 API 目录保存于工作区私有目录的 `history.sqlite3`。除 mitmproxy 外不要求安装 Python 依赖；官方 macOS 独立包缺少 Python `sqlite3` 时，自动使用系统 `/usr/bin/sqlite3`，通过标准输入传入转义后的 SQL，不调用 shell。
 
 ## 控制协议
 
@@ -10,13 +10,17 @@
 
 响应：`{"id":"...","result":{...}}`，失败响应为 `{"id":"...","error":{"message":"..."}}`。
 
-支持 `health`、`proxy.start`、`proxy.stop`、`rules.sync`、`history.list`、`history.get`、`history.apis`、`history.update`、`history.delete`、`history.clear`、`breakpoint.resolve` 和 `breakpoint.releaseAll`。
+支持 `health`、`proxy.start`、`proxy.stop`、`rules.sync`、`history.list`、`history.get`、`history.apis`、`history.update`、`history.delete`、`history.clear`、`api.delete`、`api.clear`、`breakpoint.setInteractive`、`breakpoint.resolve` 和 `breakpoint.releaseAll`。
 
-`history.list` 返回分页摘要，包含 `status`，不包含正文快照；`history.get` 返回原始、自动规则处理后、人工修改后三份请求/响应快照。`history.apis` 按方法、主机、路径聚合，`history.list` 支持同名精确筛选。
+`history.list` 返回分页摘要，包含 `status`，不包含正文快照；`history.get` 返回原始、自动规则处理后、人工修改后三份请求/响应快照。`history.apis` 从独立 `api_catalog` 读取，按方法、主机、路径去重，返回 `{items:[{method,host,path,count,firstAt,lastAt}]}`；`count` 为目录保留期间累计发现的调用次数。请求历史清空、删除、过期或数量裁剪不删除目录。旧库首次打开时从现存历史迁移一次，迁移标记避免手动删除的目录在下次启动时由旧历史重新生成。`history.list` 支持同名精确筛选。
 
-`proxy.stop` 关闭流量监听并释放断点，保留控制通道和数据库访问。扩展关闭才终止引擎进程。引擎监听暂定端口由启动参数提供；`health.proxyPort` 返回实际端口。首次安装可以使用 `--set server=false` 启动，按用户操作再调用 `proxy.start`。
+`api.delete` 参数为 `{method,host,path}`，仅删除对应 API 目录项，返回 `{deleted}`；`api.clear` 清空目录但保留请求历史。新的请求再次命中已删除的 API 时，会重新发现并从 1 计数。API 目录与历史共享 SQLite 文件，但拥有独立生命周期。
 
-事件包括 `ready`、`status`、`history`、`breakpoint` 和 `breakpoint.resolved`。时间均为 Unix 毫秒。控制连接断开会释放当前断点并自动重连；断开期间不会创建新的断点。
+`proxy.stop` 关闭流量监听并释放断点，保留控制通道和数据库访问。关闭工作台不终止后台记录；扩展退出或工作区被移除才终止对应引擎进程。引擎监听暂定端口由启动参数提供；`health.proxyPort` 返回实际端口。首次安装可以使用 `--set server=false` 启动，按用户操作再调用 `proxy.start`。
+
+`breakpoint.setInteractive` 参数为 `{enabled:boolean}`，返回 `{enabled,released}`。默认 `false`，后台抓取不创建人工断点；工作台打开时设为 `true`，关闭时设为 `false` 并释放正在等待的断点。自动规则、Mock 与请求记录继续执行。`health.interactive` 可查询当前模式；控制断连也会关闭交互模式，重新连接后由扩展显式恢复。
+
+事件包括 `ready`、`status`、`history`、`api.updated`、`breakpoint` 和 `breakpoint.resolved`。时间均为 Unix 毫秒。控制连接断开会释放当前断点并自动重连；断开期间不会创建新的断点。
 
 ## 正文限制
 

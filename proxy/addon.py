@@ -45,6 +45,7 @@ class ApiMocksAddon:
         self.store = None
         self.settings = {}
         self.max_body = 1024 * 1024
+        self.interactive = False
 
     def load(self, loader):
         raw = json.loads(os.environ.get("API_MOCK_SETTINGS", "{}"))
@@ -138,6 +139,7 @@ class ApiMocksAddon:
             finally:
                 if self.writer is writer:
                     self.writer = None
+                self.interactive = False
                 self._release_all("control-disconnected")
                 if writer:
                     writer.close()
@@ -159,6 +161,7 @@ class ApiMocksAddon:
             "caCertPath": str(Path(ctx.options.confdir).expanduser() / "mitmproxy-ca-cert.pem"),
             "pendingBreakpoints": len(self.pending),
             "revision": self.revision,
+            "interactive": self.interactive,
         }
 
     async def _rpc(self, method, params):
@@ -177,6 +180,14 @@ class ApiMocksAddon:
         if method == "history.apis":
             self.store.prune()
             return self.store.apis(params)
+        if method == "api.delete":
+            result = self.store.delete_api(params.get("method"), params.get("host"), params.get("path"))
+            self.emit("api.updated", {})
+            return result
+        if method == "api.clear":
+            result = self.store.clear_apis()
+            self.emit("api.updated", {})
+            return result
         if method == "history.get":
             return self.store.get(params["id"])
         if method == "history.delete":
@@ -186,6 +197,13 @@ class ApiMocksAddon:
         if method == "history.update":
             current = self.store.get(params["id"])
             return self.store.update(params["id"], params.get("note", current["note"]), params.get("tags", current["tags"]))
+        if method == "breakpoint.setInteractive":
+            enabled = params.get("enabled")
+            if not isinstance(enabled, bool):
+                raise ValueError("enabled 必须为布尔值")
+            self.interactive = enabled
+            released = 0 if enabled else self._release_all("workbench-closed")
+            return {"enabled": enabled, "released": released}
         if method == "breakpoint.resolve":
             return self._resolve(params)
         if method == "breakpoint.releaseAll":
@@ -449,7 +467,7 @@ class ApiMocksAddon:
     async def _break(self, flow, stage):
         entry = self.entries[flow.id]
         rule = select_rule(self.rules, entry["originalRequest"], "breakpoint." + stage)
-        if not rule or self.writer is None:
+        if not rule or self.writer is None or not self.interactive:
             return
         timeout = rule["breakpoint"].get("timeout", self.settings["breakpointTimeout"])
         bp_id = str(uuid.uuid4())

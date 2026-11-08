@@ -76,6 +76,67 @@ class StorageTests(unittest.TestCase):
         grouped = self.store.apis({"search": "users"})
         self.assertEqual(grouped["items"][0]["count"], 2)
 
+    def test_catalog_survives_pruning_history_delete_clear_and_restart(self):
+        now = time.time() * 1000
+        self.store.put(self.entry("expired-api", path="/expired", startedAt=now - 8 * 86400000))
+        self.store.put(self.entry("one", startedAt=now))
+        self.store.put(self.entry("two", startedAt=now + 1))
+        self.store.delete(["one"])
+        self.store.clear()
+        self.assertEqual(self.store.list({})["total"], 0)
+        groups = {item["path"]: item for item in self.store.apis({})["items"]}
+        self.assertEqual(groups["/users"]["count"], 2)
+        self.assertEqual(groups["/users"]["firstAt"], now)
+        self.assertEqual(groups["/users"]["lastAt"], now + 1)
+        self.assertIn("/expired", groups)
+        self.store.close()
+        self.store = HistoryStore(self.temp.name)
+        self.assertEqual(self.store.apis({})["items"], sorted(groups.values(), key=lambda item: -item["lastAt"]))
+
+    def test_catalog_flow_updates_do_not_increment_calls(self):
+        entry = self.entry("same")
+        self.store.put(entry)
+        self.store.put(dict(entry, response={"status": 202}))
+        self.store.update("same", "changed", ["tag"])
+        self.assertEqual(self.store.apis({})["items"][0]["count"], 1)
+
+    def test_deleted_catalog_entry_does_not_return_on_restart_but_new_call_rediscovers(self):
+        self.store.put(self.entry("one"))
+        self.assertEqual(self.store.delete_api("GET", "api.test", "/users"), {"deleted": 1})
+        self.assertEqual(self.store.list({})["total"], 1)
+        self.store.close()
+        self.store = HistoryStore(self.temp.name)
+        self.assertEqual(self.store.apis({})["items"], [])
+        self.store.put(self.entry("two"))
+        self.assertEqual(self.store.apis({})["items"][0]["count"], 1)
+
+    def test_catalog_migrates_legacy_history_once_before_retention(self):
+        now = time.time() * 1000
+        self.store.put(self.entry("one", startedAt=now))
+        self.store.put(self.entry("two", startedAt=now + 1))
+        self.store.db.execute("DROP TABLE api_catalog")
+        self.store.db.execute("DROP TABLE api_catalog_state")
+        self.store.db.commit()
+        self.store.close()
+        self.store = HistoryStore(self.temp.name)
+        item = self.store.apis({})["items"][0]
+        self.assertEqual((item["count"], item["firstAt"], item["lastAt"]), (2, now, now + 1))
+        self.store.clear_apis()
+        self.store.close()
+        self.store = HistoryStore(self.temp.name)
+        self.assertEqual(self.store.apis({})["items"], [])
+        self.assertEqual(self.store.list({})["total"], 2)
+
+    def test_catalog_search_and_delete_treat_inputs_as_data(self):
+        path = "/users_1' ; DROP TABLE history;--"
+        self.store.put(self.entry("one", path=path))
+        self.store.put(self.entry("two", path="/usersA1"))
+        self.assertEqual(self.store.apis({"search": "users_1"})["items"][0]["path"], path)
+        self.assertEqual(self.store.delete_api("GET", "api.test", path), {"deleted": 1})
+        self.assertEqual(self.store.list({})["total"], 2)
+        with self.assertRaises(ValueError):
+            self.store.delete_api(None, "api.test", "/users")
+
     def test_untrusted_strings_remain_data_in_cli_backend(self):
         entry = self.entry("quote'); DROP TABLE history;--", path="/quote'\n.shell touch /tmp/api-mocks-invalid\n")
         self.store.put(entry)

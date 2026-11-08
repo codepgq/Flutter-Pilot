@@ -294,7 +294,7 @@ function App() {
             {state.engine.status === 'starting'
               ? '引擎启动中'
               : running
-                ? '代理运行中'
+                ? '自动记录中'
                 : state.engine.status === 'running'
                   ? '引擎已就绪'
                   : '代理未启动'}
@@ -356,7 +356,7 @@ function App() {
         <span className="footer-brand">
           FLUTTER API MOCKS <span>v0.1.0</span>
         </span>
-        <span>本地存储 · 仅用于开发调试</span>
+        <span>{running ? '后台记录中 · 关闭工作台继续记录' : '本地存储 · 仅用于开发调试'}</span>
       </footer>
     </div>
   );
@@ -596,6 +596,14 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
     return () => clearTimeout(t);
   }, [query, offset, state.engine.status]);
   const groups = state.apis ?? [];
+  const catalogKeys = JSON.stringify(groups.map((g) => `${g.method} ${g.host}${g.path}`));
+  useEffect(() => {
+    if (group && !(JSON.parse(catalogKeys) as string[]).includes(group)) {
+      setGroup('');
+      setQuery((q) => ({ ...q, host: undefined, path: undefined, method: undefined }));
+      setOffset(0);
+    }
+  }, [group, catalogKeys]);
   function update(p: Partial<HistoryQuery>) {
     setQuery((q) => ({ ...q, ...p }));
     setOffset(0);
@@ -679,7 +687,7 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
       <div className="history-layout">
         <aside className="api-sidebar">
           <div className="pane-heading">
-            API 分组 <span>{groups.length}</span>
+            API 目录 <span>{groups.length}</span>
           </div>
           <button
             className={`api-all ${!group ? 'selected' : ''}`}
@@ -688,29 +696,56 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
               update({ host: undefined, path: undefined, method: undefined });
             }}
           >
-            全部 API <span>{groups.reduce((n, g) => n + g.count, 0)}</span>
+            全部 API <span>{groups.length} 个</span>
           </button>
           {groups.map((g) => {
             const id = `${g.method} ${g.host}${g.path}`;
             return (
-              <button
-                className={`api-group ${group === id ? 'selected' : ''}`}
-                key={id}
-                onClick={() => {
-                  setGroup(id);
-                  update({ method: g.method, host: g.host, path: g.path });
-                }}
-              >
-                <span>
-                  <Method method={g.method} />
-                  <b>{g.count}</b>
-                </span>
-                <strong>{g.path}</strong>
-                <small>{g.host}</small>
-              </button>
+              <div className={`api-entry ${group === id ? 'selected' : ''}`} key={id}>
+                <button
+                  className="api-group"
+                  aria-label={`查看 API ${g.method} ${g.host}${g.path}`}
+                  aria-pressed={group === id}
+                  title={`${g.method} ${g.host}${g.path}\n累计调用 ${g.count} 次${g.firstAt ? `\n首次发现：${new Date(g.firstAt).toLocaleString('zh-CN')}` : ''}\n最近调用：${new Date(g.lastAt).toLocaleString('zh-CN')}`}
+                  onClick={() => {
+                    setGroup(id);
+                    update({ method: g.method, host: g.host, path: g.path });
+                  }}
+                >
+                  <span>
+                    <Method method={g.method} />
+                    <b>{g.count} 次</b>
+                  </span>
+                  <strong>{g.path}</strong>
+                  <small>{g.host}</small>
+                  <small className="api-last-seen">
+                    最近{' '}
+                    {new Date(g.lastAt).toLocaleString('zh-CN', {
+                      month: '2-digit',
+                      day: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: false,
+                    })}
+                  </small>
+                </button>
+                <button
+                  className="api-delete"
+                  aria-label={`删除 API ${g.method} ${g.host}${g.path}`}
+                  title="只删除目录项，保留请求历史；下次请求会重新发现"
+                  disabled={state.busy}
+                  onClick={() => send('api.delete', { method: g.method, host: g.host, path: g.path })}
+                >
+                  <Icon name="close" size={12} />
+                </button>
+              </div>
             );
           })}
-          {!groups.length && <p className="sidebar-hint">发起请求后，接口会自动按方法、主机和路径分组。</p>}
+          <p className="sidebar-hint">
+            {groups.length
+              ? '目录独立保存；清空或过期请求历史不会移除已发现的 API。'
+              : '完成接入后自动发现 API，按方法、主机和路径独立保存。'}
+          </p>
         </aside>
         <section className="request-list">
           <div className="pane-heading">
@@ -746,8 +781,12 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
           ) : (
             <Empty
               icon="history"
-              title="等待第一条请求"
-              description="启动代理并完成设备接入后，在应用中触发 API 请求。"
+              title={group ? '该 API 暂无请求历史' : '暂无请求历史'}
+              description={
+                groups.length
+                  ? '已发现的 API 保留在目录中。请求历史可能已清理，新的请求会继续记录。'
+                  : '完成设备接入后，在应用中触发请求；代理会自动记录，并建立 API 目录。'
+              }
             />
           )}
           <div className="pagination">
@@ -1451,7 +1490,7 @@ function Breakpoints({ pending }: { pending: PendingBreakpoint[] }) {
         <div>
           <div className="eyebrow">BREAKPOINTS</div>
           <h2>暂停一下，调整后继续</h2>
-          <p>手动编辑在自动规则后执行。超时按当前自动规则结果放行。</p>
+          <p>工作台打开时可处理手动断点；关闭后自动跳过人工暂停，继续后台记录和自动规则。</p>
         </div>
         <span className="tag warm">{pending.length} 个等待处理</span>
       </div>

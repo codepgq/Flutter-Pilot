@@ -97,10 +97,18 @@ export interface PendingBreakpoint {
   original: RequestSnapshot | ResponseSnapshot;
   current: RequestSnapshot | ResponseSnapshot;
 }
+export interface ApiCatalogEntry {
+  method: string;
+  host: string;
+  path: string;
+  count: number;
+  firstAt?: number;
+  lastAt: number;
+}
 export interface WorkbenchState {
   rules: Rule[];
   history: HistoryResult;
-  apis?: { method: string; host: string; path: string; count: number; lastAt: number }[];
+  apis?: ApiCatalogEntry[];
   pending: PendingBreakpoint[];
   engine: { status: string; proxyPort?: number; listenHost?: string; caCertPath?: string; error?: string };
   proxyActive: boolean;

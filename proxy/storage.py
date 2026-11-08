@@ -27,6 +27,15 @@ class HistoryStore:
         self.db.execute("CREATE TABLE IF NOT EXISTS history (id TEXT PRIMARY KEY, started REAL NOT NULL, method TEXT NOT NULL, host TEXT NOT NULL, path TEXT NOT NULL, status INTEGER, mocked INTEGER NOT NULL, request_rule TEXT, response_rule TEXT, note TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]', payload TEXT NOT NULL)")
         self.db.execute("CREATE INDEX IF NOT EXISTS history_started ON history(started DESC)")
         self.db.execute("CREATE INDEX IF NOT EXISTS history_api ON history(method, host, path)")
+        self.db.execute("CREATE TABLE IF NOT EXISTS api_catalog (method TEXT NOT NULL, host TEXT NOT NULL, path TEXT NOT NULL, calls INTEGER NOT NULL, first_at REAL NOT NULL, last_at REAL NOT NULL, PRIMARY KEY(method,host,path))")
+        self.db.execute("CREATE INDEX IF NOT EXISTS api_catalog_last ON api_catalog(last_at DESC)")
+        self.db.execute("CREATE TABLE IF NOT EXISTS api_catalog_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        # Seed an existing database once, before history retention can prune it.
+        # Re-running the seed after a crash overwrites aggregates, never adds them.
+        migrated = self.db.execute("SELECT value FROM api_catalog_state WHERE key='history_migration_v1'").fetchone()
+        if not migrated:
+            self.db.execute("INSERT OR REPLACE INTO api_catalog SELECT method,host,path,count(*),min(started),max(started) FROM history GROUP BY method,host,path")
+            self.db.execute("INSERT OR REPLACE INTO api_catalog_state VALUES ('history_migration_v1','done')")
         self.db.commit()
         os.chmod(self.path, 0o600)
         self.prune()
@@ -36,6 +45,9 @@ class HistoryStore:
         note, tags = previous if previous else (entry.get("note", ""), json.dumps(entry.get("tags", []), ensure_ascii=False))
         payload = dict(entry, note=note, tags=json.loads(tags))
         self.db.execute("INSERT OR REPLACE INTO history VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (entry["id"], entry["startedAt"], entry["method"], entry["host"], entry["path"], entry.get("response", {}).get("status"), int(entry.get("mocked", False)), entry.get("requestRuleId"), entry.get("responseRuleId"), note, tags, json.dumps(payload, ensure_ascii=False)))
+        # Updating an already stored flow must not inflate discovery counts.
+        if previous is None:
+            self.db.execute("INSERT INTO api_catalog (method,host,path,calls,first_at,last_at) VALUES (?,?,?,?,?,?) ON CONFLICT(method,host,path) DO UPDATE SET calls=calls+1, first_at=min(first_at,excluded.first_at), last_at=max(last_at,excluded.last_at)", (entry["method"], entry["host"], entry["path"], 1, entry["startedAt"], entry["startedAt"]))
         self.db.commit()
         self.prune()
 
@@ -82,8 +94,21 @@ class HistoryStore:
             condition = " WHERE host LIKE ? ESCAPE '\\' OR path LIKE ? ESCAPE '\\' OR method LIKE ? ESCAPE '\\'"
             value = str(params["search"]).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             args = ["%" + value + "%"] * 3
-        rows = self.db.execute("SELECT method,host,path,count(*),max(started) FROM history" + condition + " GROUP BY method,host,path ORDER BY max(started) DESC LIMIT 10000", args).fetchall()
-        return {"items": [dict(zip(("method", "host", "path", "count", "lastAt"), row)) for row in rows]}
+        rows = self.db.execute("SELECT method,host,path,calls,last_at,first_at FROM api_catalog" + condition + " ORDER BY last_at DESC,method,host,path", args).fetchall()
+        return {"items": [dict(zip(("method", "host", "path", "count", "lastAt", "firstAt"), row)) for row in rows]}
+
+    def delete_api(self, method, host, path):
+        if not all(isinstance(value, str) and value for value in (method, host, path)):
+            raise ValueError("API method、host、path 必须为非空字符串")
+        before = self.db.total_changes
+        self.db.execute("DELETE FROM api_catalog WHERE method=? AND host=? AND path=?", (method, host, path))
+        self.db.commit()
+        return {"deleted": self.db.total_changes - before}
+
+    def clear_apis(self):
+        self.db.execute("DELETE FROM api_catalog")
+        self.db.commit()
+        return {"ok": True}
 
     def delete(self, ids):
         if not isinstance(ids, list) or not all(isinstance(item, str) for item in ids):

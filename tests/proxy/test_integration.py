@@ -174,8 +174,8 @@ class ProxyIntegrationTests(unittest.TestCase):
             cls.process.terminate()
             raise RuntimeError("Engine did not authenticate: " + diagnostic)
         health = cls.control.rpc("health")
-        if not health["ready"] or health["proxyActive"]:
-            raise AssertionError("Engine must start ready but paused")
+        if not health["ready"] or health["proxyActive"] or health["interactive"]:
+            raise AssertionError("Engine must start ready but paused and non-interactive")
         health = cls.control.rpc("proxy.start")
         if not health["proxyActive"]:
             raise AssertionError("Proxy listener did not start")
@@ -199,6 +199,8 @@ class ProxyIntegrationTests(unittest.TestCase):
 
     def setUp(self):
         self.control.rpc("breakpoint.releaseAll")
+        self.control.rpc("breakpoint.setInteractive", {"enabled": True})
+        self.control.rpc("api.clear")
         self.sync([])
         self.control.rpc("history.clear")
         Origin.calls.clear()
@@ -235,6 +237,50 @@ class ProxyIntegrationTests(unittest.TestCase):
                 return self.control.rpc("history.get", {"id": rows["items"][0]["id"]})
             time.sleep(0.03)
         raise AssertionError("History not persisted")
+
+    def test_catalog_records_without_mock_and_survives_history_clear(self):
+        self.request("/catalog?one=1")
+        self.latest()
+        self.request("/catalog?two=2")
+        deadline = time.monotonic() + 5
+        while self.control.rpc("history.list")["total"] < 2 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        items = self.control.rpc("history.apis")["items"]
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual((item["method"], item["host"], item["path"], item["count"]), ("GET", "127.0.0.1", "/catalog", 2))
+        self.control.rpc("history.clear")
+        self.assertEqual(self.control.rpc("history.list")["total"], 0)
+        self.assertEqual(self.control.rpc("history.apis")["items"], items)
+        self.assertEqual(self.control.rpc("api.delete", {"method": item["method"], "host": item["host"], "path": item["path"]}), {"deleted": 1})
+        self.assertEqual(self.control.rpc("history.apis")["items"], [])
+        self.request("/catalog?again=1")
+        self.latest()
+        self.assertEqual(self.control.rpc("history.apis")["items"][0]["count"], 1)
+
+    def test_background_mode_skips_breakpoints_but_keeps_modification_and_recording(self):
+        self.control.rpc("breakpoint.setInteractive", {"enabled": False})
+        self.sync([self.rule(request={"headers": {"X-Background": "yes"}}, response={"status": 202}, breakpoint={"request": True, "response": True, "timeout": 10})])
+        started = time.monotonic()
+        status, _, body = self.request("/background")
+        self.assertEqual(status, 202)
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual(json.loads(body)["headers"]["X-Background"], "yes")
+        self.latest()
+        self.assertEqual(self.control.rpc("health")["pendingBreakpoints"], 0)
+        self.assertEqual(self.control.rpc("history.apis")["items"][0]["path"], "/background")
+
+    def test_closing_workbench_releases_existing_and_skips_following_breakpoints(self):
+        self.sync([self.rule(mock={"status": 200, "headers": {}, "body": "auto"}, breakpoint={"request": True, "response": True, "timeout": 60})])
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            future = pool.submit(self.request, "/pending")
+            self.control.event("breakpoint")
+            result = self.control.rpc("breakpoint.setInteractive", {"enabled": False})
+            self.assertEqual(result, {"enabled": False, "released": 1})
+            self.assertEqual(future.result(timeout=5)[2], b"auto")
+        self.assertTrue(self.control.rpc("health")["proxyActive"])
+        self.assertEqual(self.request("/after-close", timeout=5)[2], b"auto")
+        self.assertEqual(self.control.rpc("health")["pendingBreakpoints"], 0)
 
     def test_http_bidirectional_modification_and_original_snapshots(self):
         self.sync([self.rule(request={"method": "POST", "headers": {"X-Test": "modified"}, "query": {"page": "2"}, "body": '{"edited":true}'}, response={"status": 201, "headers": {"X-Mock": "yes"}, "body": '{"result":"mocked"}'})])
@@ -319,7 +365,10 @@ class ProxyIntegrationTests(unittest.TestCase):
             self.control.event("breakpoint")
             self.control.drop()
             self.assertEqual(future.result(timeout=10)[2], b"released")
-        self.assertTrue(self.control.rpc("health")["ready"])
+        health = self.control.rpc("health")
+        self.assertTrue(health["ready"])
+        self.assertFalse(health["interactive"])
+        self.assertEqual(self.request("/after-reconnect", timeout=5)[2], b"released")
 
     def test_large_binary_and_sse_bodies_are_forwarded_without_editing(self):
         self.sync([self.rule(response={"body": "MUST NOT REPLACE"})])

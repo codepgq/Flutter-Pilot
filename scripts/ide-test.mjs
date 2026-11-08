@@ -54,6 +54,7 @@ await writeFile(
         priority: 10,
         match: { host: 'ide.api-mocks.test', path: '/ping' },
         mock: { status: 200, headers: { 'content-type': 'application/json' }, body: '{"ide":true}' },
+        breakpoint: { request: true, response: true, timeout: 60 },
       },
     ],
   }),

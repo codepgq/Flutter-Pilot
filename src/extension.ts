@@ -20,8 +20,23 @@ import * as devices from './devices';
 
 let active: Workbench | undefined;
 let output: vscode.OutputChannel;
+let status: vscode.StatusBarItem;
+let shuttingDown = false;
+const sessions = new Map<string, Workbench>();
 const previewDocuments = new Map<string, string>();
-export function activate(context: vscode.ExtensionContext) {
+function updateStatus() {
+  if (!status) return;
+  const list = [...sessions.values()];
+  const running = list.filter((session) => session.recording);
+  status.text = running.length
+    ? `$(record) API Mocks · ${running.length} 记录中`
+    : '$(radio-tower) API Mocks';
+  status.tooltip = running.length
+    ? running.map((session) => session.summary).join('\n') + '\n点击打开工作台；关闭工作台仍继续记录。'
+    : '打开 Flutter API 工作台；首次请安装引擎并完成接入。';
+}
+export async function activate(context: vscode.ExtensionContext) {
+  shuttingDown = false;
   output = vscode.window.createOutputChannel('Flutter API Mocks');
   context.subscriptions.push(output);
   context.subscriptions.push(
@@ -29,11 +44,16 @@ export function activate(context: vscode.ExtensionContext) {
       provideTextDocumentContent: (uri) => previewDocuments.get(uri.toString()) ?? '',
     }),
   );
-  const open = async () => {
-    if (active) {
-      active.reveal();
-      return active;
+  function sessionFor(folder: vscode.WorkspaceFolder) {
+    const key = folder.uri.toString();
+    let session = sessions.get(key);
+    if (!session) {
+      session = new Workbench(context, folder, updateStatus);
+      sessions.set(key, session);
     }
+    return session;
+  }
+  const open = async () => {
     if (process.platform !== 'darwin') throw new Error('首版支持 macOS 本地桌面 IDE。');
     if (vscode.env.remoteName) throw new Error('首版暂不支持远程扩展宿主，请在本机打开 Flutter 项目。');
     if (!vscode.workspace.isTrusted) throw new Error('请先信任当前工作区，再启动调试代理。');
@@ -48,18 +68,11 @@ export function activate(context: vscode.ExtensionContext) {
               { title: '选择本次 API Mock 工作区' },
             )
           )?.folder;
-    if (!folder) return;
-    const wb = new Workbench(context, folder, () => {
-      if (active === wb) active = undefined;
-    });
-    active = wb;
-    try {
-      await wb.initialize();
-      return wb;
-    } catch (error) {
-      wb.report(error);
-      return wb;
-    }
+    if (!folder || shuttingDown) return;
+    const session = sessionFor(folder);
+    active = session;
+    await session.reveal();
+    return session;
   };
   const command = (name: string, fn: () => Promise<unknown>) =>
     context.subscriptions.push(
@@ -69,26 +82,84 @@ export function activate(context: vscode.ExtensionContext) {
     );
   command('flutterApiMocks.open', open);
   command('flutterApiMocks.start', async () => {
-    const wb = await open();
-    await wb?.start();
+    const session = await open();
+    await session?.start();
   });
   command('flutterApiMocks.stop', async () => {
-    if (active) await active.stop();
+    // With no panel, stop every background workspace; a selected panel targets its own workspace.
+    if (active?.hasPanel) await active.stop();
+    else await Promise.all([...sessions.values()].map((session) => session.stop()));
   });
-  const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 40);
-  status.text = '$(radio-tower) API Mocks';
-  status.tooltip = '打开 Flutter API 调试工作台';
+  status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 40);
   status.command = 'flutterApiMocks.open';
+  updateStatus();
   status.show();
   context.subscriptions.push(status);
+  const discover = async () => {
+    if (shuttingDown || process.platform !== 'darwin' || vscode.env.remoteName || !vscode.workspace.isTrusted)
+      return;
+    const folders = vscode.workspace.workspaceFolders?.filter((f) => f.uri.scheme === 'file') ?? [];
+    await Promise.all(
+      folders.map(async (folder) => {
+        try {
+          const pubspec = await readFile(join(folder.uri.fsPath, 'pubspec.yaml'), 'utf8');
+          if (
+            !/\bflutter\s*:\s*(?:\r?\n)\s+sdk\s*:\s*flutter\b/.test(pubspec) ||
+            shuttingDown ||
+            !vscode.workspace.workspaceFolders?.some(
+              (current) => current.uri.toString() === folder.uri.toString(),
+            )
+          )
+            return;
+          const session = sessionFor(folder);
+          await session.initialize();
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+            output.appendLine(`${folder.name}: ${messageOf(error)}`);
+        }
+      }),
+    );
+  };
+  context.subscriptions.push(
+    vscode.workspace.onDidGrantWorkspaceTrust(() => {
+      void discover();
+    }),
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders((event) => {
+      for (const folder of event.removed) {
+        const key = folder.uri.toString();
+        const session = sessions.get(key);
+        sessions.delete(key);
+        if (active === session) active = undefined;
+        void session?.dispose();
+      }
+      void discover();
+      updateStatus();
+    }),
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      for (const session of sessions.values())
+        if (event.affectsConfiguration('flutterApiMocks.autoStart', session.workspaceUri)) {
+          void session.applyAutoStart().catch((error) => session.report(error));
+        }
+    }),
+  );
   context.subscriptions.push({
     dispose: () => {
-      void active?.dispose();
+      void deactivate();
     },
   });
+  await discover();
 }
 export async function deactivate() {
-  await active?.dispose();
+  shuttingDown = true;
+  const current = [...sessions.values()];
+  sessions.clear();
+  active = undefined;
+  await Promise.allSettled(current.map((session) => session.dispose()));
+  previewDocuments.clear();
   await devices.cleanupAndroidReverses().catch(() => undefined);
 }
 function messageOf(error: unknown) {
@@ -99,7 +170,10 @@ class Workbench {
   private readonly engine = new EngineManager();
   private readonly runtime: RuntimeManager;
   private readonly store: RuleStore;
-  private readonly panel: vscode.WebviewPanel;
+  private panel?: vscode.WebviewPanel;
+  private initialization?: Promise<void>;
+  private connectionDevices: string[] = [];
+  private preferredPort?: number;
   private readonly storage: string;
   private rules: Rule[] = [];
   private pending = new Map<string, PendingBreakpoint>();
@@ -129,7 +203,7 @@ class Workbench {
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly folder: vscode.WorkspaceFolder,
-    private readonly onDispose: () => void,
+    private readonly onChange: () => void,
   ) {
     this.storage = join(
       context.globalStorageUri.fsPath,
@@ -141,26 +215,6 @@ class Workbench {
       context.globalStorageUri.fsPath,
       join(context.extensionPath, 'resources', 'engine-manifest.json'),
     );
-    this.panel = vscode.window.createWebviewPanel(
-      'flutterApiMocks',
-      'Flutter API Mocks',
-      vscode.ViewColumn.One,
-      {
-        enableScripts: true,
-        retainContextWhenHidden: true,
-        localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'dist')],
-      },
-    );
-    this.panel.webview.html = this.html();
-    this.panel.onDidDispose(() => {
-      void this.dispose();
-    });
-    this.panel.webview.onDidReceiveMessage((message: unknown) => {
-      if (!message || typeof message !== 'object') return;
-      this.messageQueue = this.messageQueue
-        .then(() => this.handle(message as Record<string, unknown>))
-        .catch((e) => this.report(e));
-    });
     this.runtime.on('progress', (text: string) => {
       this.log(text);
     });
@@ -173,8 +227,75 @@ class Workbench {
     });
     this.engine.on('event', (event: { event: string; data: unknown }) => this.onEvent(event));
   }
-  reveal() {
-    this.panel.reveal();
+  get recording() {
+    return this.proxyActive;
+  }
+  get hasPanel() {
+    return !!this.panel;
+  }
+  get workspaceUri() {
+    return this.folder.uri;
+  }
+  get summary() {
+    return `${this.folder.name} · ${this.connectionHost}:${this.engine.state.proxyPort ?? 8080}`;
+  }
+  async reveal() {
+    if (this.disposed) return;
+    if (this.panel) {
+      this.panel.reveal();
+      return;
+    }
+    const panel = vscode.window.createWebviewPanel(
+      'flutterApiMocks',
+      'Flutter API Mocks',
+      vscode.ViewColumn.One,
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')],
+      },
+    );
+    this.panel = panel;
+    this.sentSelected = undefined;
+    this.sentPreview = undefined;
+    panel.webview.html = this.html();
+    panel.onDidDispose(() => {
+      if (this.panel !== panel) return;
+      this.panel = undefined;
+      this.pending.clear();
+      void this.enqueue(async () => {
+        if (this.engine.state.status === 'running')
+          await this.engine.rpc('breakpoint.setInteractive', { enabled: !!this.panel });
+      }).catch((error) => this.report(error));
+      this.onChange();
+    });
+    panel.webview.onDidReceiveMessage((message: unknown) => {
+      if (this.panel !== panel || !message || typeof message !== 'object') return;
+      void this.enqueue(() => this.handle(message as Record<string, unknown>)).catch((error) =>
+        this.report(error),
+      );
+    });
+    this.push();
+    try {
+      await this.initialize();
+      await this.enqueue(async () => {
+        if (this.disposed || this.panel !== panel) return;
+        if (this.engine.state.status === 'running') {
+          await this.engine.rpc('breakpoint.setInteractive', { enabled: true });
+          await this.reloadHistory();
+        }
+        this.push();
+      });
+    } catch (error) {
+      this.report(error);
+    }
+  }
+  private enqueue(operation: () => Promise<void>) {
+    const next = this.messageQueue.then(async () => {
+      if (!this.disposed) await operation();
+    });
+    this.messageQueue = next.catch(() => undefined);
+    return next;
   }
   private config() {
     return vscode.workspace.getConfiguration('flutterApiMocks', this.folder.uri);
@@ -195,7 +316,8 @@ class Workbench {
     this.push();
   }
   private push() {
-    if (this.disposed) return;
+    this.onChange();
+    if (this.disposed || !this.panel) return;
     const state: WorkbenchState = {
       rules: this.rules,
       history: this.history,
@@ -231,18 +353,110 @@ class Workbench {
     }
     void this.panel.webview.postMessage(message);
   }
-  async initialize() {
+  initialize(): Promise<void> {
+    if (!this.initialization)
+      this.initialization = this.initializeSession().catch((error) => {
+        this.initialization = undefined;
+        throw error;
+      });
+    return this.initialization;
+  }
+  private async initializeSession() {
     await mkdir(this.storage, { recursive: true, mode: 0o700 });
     this.rules = (await this.store.load()).rules;
+    try {
+      const saved = JSON.parse(await readFile(join(this.storage, 'connection.json'), 'utf8'));
+      this.lan = saved.lan === true;
+      if (
+        typeof saved.connectionHost === 'string' &&
+        this.addresses.some((a) => a.host === saved.connectionHost)
+      )
+        this.connectionHost = this.lan ? saved.connectionHost : '127.0.0.1';
+      if (Array.isArray(saved.androidDevices))
+        this.connectionDevices = saved.androidDevices.filter((id: unknown) => typeof id === 'string');
+      if (
+        saved.configuredPort === this.config().get<number>('proxyPort', 8080) &&
+        Number.isInteger(saved.port) &&
+        saved.port >= 1024 &&
+        saved.port <= 65535
+      )
+        this.preferredPort = saved.port;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+        this.log(`连接设置读取失败：${messageOf(error)}`);
+    }
     this.push();
     const executable = await this.runtime.findExecutable(
       this.config().get<string>('enginePath') || undefined,
     );
     if (executable) {
       await this.ensureEngine(executable);
-      await this.reloadHistory();
-    }
+      if (this.config().get<boolean>('autoStart', true)) await this.startInternal();
+      if (this.panel) await this.reloadHistory();
+    } else this.log('首次使用请打开工作台安装引擎并完成 Flutter 接入，之后打开项目即可后台自动记录。');
     this.push();
+  }
+  async applyAutoStart() {
+    await this.initialize();
+    if (!this.config().get<boolean>('autoStart', true)) {
+      await this.stop();
+      return;
+    }
+    await this.enqueue(async () => {
+      const executable = await this.runtime.findExecutable(
+        this.config().get<string>('enginePath') || undefined,
+      );
+      if (executable) {
+        await this.ensureEngine(executable);
+        await this.startInternal();
+      }
+    });
+  }
+  private async saveConnection() {
+    await mkdir(this.storage, { recursive: true, mode: 0o700 });
+    await writeFile(
+      join(this.storage, 'connection.json'),
+      JSON.stringify(
+        {
+          lan: this.lan,
+          configuredPort: this.config().get<number>('proxyPort', 8080),
+          connectionHost: this.connectionHost,
+          port: this.engine.state.proxyPort ?? this.preferredPort,
+          androidDevices: this.connectionDevices,
+        },
+        null,
+        2,
+      ),
+      { mode: 0o600 },
+    );
+  }
+  private async restoreAndroidConnections() {
+    if (!this.connectionDevices.length) return;
+    const discovered = await devices.discoverDevices();
+    this.discovered = discovered.devices;
+    for (const serial of this.connectionDevices) {
+      if (
+        !discovered.devices.some(
+          (device) => device.id === serial && device.platform === 'android' && device.state === 'device',
+        )
+      )
+        continue;
+      const port = this.engine.state.proxyPort!;
+      try {
+        if (await devices.createAndroidReverse(serial, port)) this.ownedReverses.push({ serial, port });
+      } catch (error) {
+        this.log(`Android USB 恢复失败：${messageOf(error)}`);
+      }
+    }
+  }
+  private async startInternal() {
+    if (this.disposed) return;
+    await this.engine.rpc('proxy.start', {});
+    await this.health();
+    this.preferredPort = this.engine.state.proxyPort;
+    await this.saveConnection();
+    await this.restoreAndroidConnections();
+    this.log(`后台自动记录已启动：${this.connectionHost}:${this.engine.state.proxyPort}`);
   }
   private async ensureEngine(executable?: string) {
     if (this.disposed) throw new Error('工作台已关闭。');
@@ -256,7 +470,7 @@ class Workbench {
       addonPath: join(this.context.extensionPath, 'proxy', 'addon.py'),
       storagePath: this.storage,
       listenHost: this.lan ? '0.0.0.0' : '127.0.0.1',
-      preferredPort: config.get<number>('proxyPort', 8080),
+      preferredPort: this.preferredPort ?? config.get<number>('proxyPort', 8080),
       settings: {
         retentionDays: config.get<number>('retentionDays', 7),
         maxRecords: config.get<number>('maxRecords', 10000),
@@ -270,6 +484,7 @@ class Workbench {
       return;
     }
     await this.syncRules();
+    await this.engine.rpc('breakpoint.setInteractive', { enabled: !!this.panel });
     await this.health();
   }
   private async health() {
@@ -288,25 +503,28 @@ class Workbench {
     }
   }
   async start() {
-    await this.operation(async () => {
-      await this.ensureEngine();
-      await this.engine.rpc('proxy.start', {});
-      await this.health();
-      this.log(`代理已启动：${this.connectionHost}:${this.engine.state.proxyPort}`);
-      await this.reloadHistory();
-    });
+    await this.initialize();
+    await this.enqueue(() =>
+      this.operation(async () => {
+        await this.ensureEngine();
+        await this.startInternal();
+        if (this.panel) await this.reloadHistory();
+      }),
+    );
   }
   async stop() {
-    await this.operation(async () => {
-      if (this.engine.state.status === 'running') {
-        await this.engine.rpc('breakpoint.releaseAll', {});
-        await this.engine.rpc('proxy.stop', {});
-        await this.health();
-      }
-      await this.cleanupReverses();
-      this.pending.clear();
-      this.log('代理已停止。设备仍配置代理时，请移除代理配置或不携带 API_MOCK_PROXY 参数重启应用。');
-    });
+    await this.initialize();
+    await this.enqueue(() => this.operation(() => this.stopInternal()));
+  }
+  private async stopInternal() {
+    if (this.engine.state.status === 'running') {
+      await this.engine.rpc('breakpoint.releaseAll', {});
+      await this.engine.rpc('proxy.stop', {});
+      await this.health();
+    }
+    await this.cleanupReverses();
+    this.pending.clear();
+    this.log('代理已停止。设备仍配置代理时，请移除代理配置或不携带 API_MOCK_PROXY 参数重启应用。');
   }
   private async cleanupReverses() {
     const entries = this.ownedReverses.splice(0);
@@ -351,13 +569,21 @@ class Workbench {
       this.log('控制连接中断，等待中的断点已释放；引擎将自动重连。');
     }
     if (event.event === 'control.connected') {
-      void this.health().catch((e) => this.report(e));
+      void this.health()
+        .then(async () => {
+          if (this.engine.state.status === 'running')
+            await this.engine.rpc('breakpoint.setInteractive', { enabled: !!this.panel });
+        })
+        .catch((e) => this.report(e));
     }
     if (event.event === 'status' && d && typeof d.proxyActive === 'boolean') this.proxyActive = d.proxyActive;
     if (event.event === 'breakpoint' && d?.id)
       this.pending.set(String(d.id), d as unknown as PendingBreakpoint);
     if (event.event === 'breakpoint.resolved' && d?.id) this.pending.delete(String(d.id));
-    if (event.event === 'history' || event.event === 'history.updated') {
+    if (
+      (event.event === 'history' || event.event === 'history.updated' || event.event === 'api.updated') &&
+      this.panel
+    ) {
       if (!this.historyTimer)
         this.historyTimer = setTimeout(() => {
           this.historyTimer = undefined;
@@ -386,18 +612,24 @@ class Workbench {
       this.push();
       return;
     }
+    await this.initialize();
     if (action === 'start') {
-      await this.start();
+      await this.operation(async () => {
+        await this.ensureEngine();
+        await this.startInternal();
+        await this.reloadHistory();
+      });
       return;
     }
     if (action === 'stop') {
-      await this.stop();
+      await this.operation(() => this.stopInternal());
       return;
     }
     await this.operation(async () => {
       switch (action) {
         case 'install':
           await this.ensureEngine();
+          if (this.config().get<boolean>('autoStart', true)) await this.startInternal();
           await this.reloadHistory();
           break;
         case 'setLan': {
@@ -418,10 +650,14 @@ class Workbench {
             await this.engine.rpc('proxy.start', {});
             await this.health();
           }
+          await this.saveConnection();
           break;
         }
         case 'selectHost':
-          if (this.addresses.some((a) => a.host === payload.host)) this.connectionHost = String(payload.host);
+          if (this.addresses.some((a) => a.host === payload.host)) {
+            this.connectionHost = String(payload.host);
+            await this.saveConnection();
+          }
           break;
         case 'devices': {
           const result = await devices.discoverDevices();
@@ -438,6 +674,8 @@ class Workbench {
           const port = this.engine.state.proxyPort!;
           if (await devices.createAndroidReverse(id, port)) this.ownedReverses.push({ serial: id, port });
           this.connectionHost = '127.0.0.1';
+          if (!this.connectionDevices.includes(id)) this.connectionDevices.push(id);
+          await this.saveConnection();
           this.log(`Android USB 已连接。运行 Flutter 时添加 --dart-define=API_MOCK_PROXY=127.0.0.1:${port}`);
           break;
         }
@@ -518,6 +756,22 @@ class Workbench {
           await this.reloadHistory();
           break;
         }
+        case 'api.delete': {
+          this.requireEngine();
+          const { method, host, path } = payload;
+          if ([method, host, path].some((value) => typeof value !== 'string'))
+            throw new Error('API 标识无效');
+          const answer = await vscode.window.showWarningMessage(
+            `从 API 目录移除 ${method} ${host}${path}？请求历史会保留，之后再次调用会重新发现。`,
+            { modal: true },
+            '移除 API',
+          );
+          if (answer === '移除 API') {
+            await this.engine.rpc('api.delete', { method, host, path });
+            await this.reloadHistory();
+          }
+          break;
+        }
         case 'history.select':
           this.requireEngine();
           this.selected = await this.engine.rpc<HistoryEntry>('history.get', { id: payload.id });
@@ -555,7 +809,7 @@ class Workbench {
             throw new Error('未知规则模板');
           const record = await this.engine.rpc<HistoryEntry>('history.get', { id: payload.id });
           const rule = ruleFromHistory(record, payload.kind as 'mock', randomUUID());
-          void this.panel.webview.postMessage({ type: 'editRule', rule });
+          void this.panel?.webview.postMessage({ type: 'editRule', rule });
           break;
         }
         case 'breakpoint.resolve': {
@@ -645,13 +899,13 @@ class Workbench {
   }
   private html() {
     const nonce = randomBytes(16).toString('base64');
-    const script = this.panel.webview.asWebviewUri(
+    const script = this.panel!.webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js'),
     );
-    const css = this.panel.webview.asWebviewUri(
+    const css = this.panel!.webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css'),
     );
-    return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';style-src ${this.panel.webview.cspSource};script-src 'nonce-${nonce}';font-src ${this.panel.webview.cspSource};img-src ${this.panel.webview.cspSource} data:;"><link rel="stylesheet" href="${css}"><title>Flutter API Mocks</title></head><body><div id="root"></div><script nonce="${nonce}" src="${script}"></script></body></html>`;
+    return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';style-src ${this.panel!.webview.cspSource};script-src 'nonce-${nonce}';font-src ${this.panel!.webview.cspSource};img-src ${this.panel!.webview.cspSource} data:;"><link rel="stylesheet" href="${css}"><title>Flutter API Mocks</title></head><body><div id="root"></div><script nonce="${nonce}" src="${script}"></script></body></html>`;
   }
   async dispose() {
     if (this.disposed) return;
@@ -660,7 +914,8 @@ class Workbench {
     if (this.eventTimer) clearTimeout(this.eventTimer);
     await this.engine.stop().catch((e) => output.appendLine(messageOf(e)));
     await this.cleanupReverses();
-    previewDocuments.clear();
-    this.onDispose();
+    this.panel?.dispose();
+    this.panel = undefined;
+    this.onChange();
   }
 }
