@@ -73,7 +73,7 @@ flutter test
 
 | 层级 | 实际结果 |
 | --- | --- |
-| TypeScript | 54 项通过，包含无面板启动、首次无引擎不下载、不受信任工作区、autoStart 热切换、关闭面板保活、手动停止后重开不恢复、退出 / 下载竞态和多工作区隔离 |
+| TypeScript | 59 项通过，包含无面板启动、首次无引擎不下载、不受信任工作区、autoStart 热切换、关闭面板保活、手动停止后重开不恢复、退出 / 下载竞态和多工作区隔离 |
 | Python | 36 项通过：17 项规则 / 存储单测和 19 项真实 HTTP / HTTPS 集成；包含目录迁移、历史清理后保留、删除后重新发现、后台断点和断连释放 |
 | SQLite 后备 | 强制 API_MOCK_SQLITE_CLI=1，12 项存储测试通过 |
 | 工作台 | 9 项 Playwright 测试通过，包含自动记录提示、空历史下目录保留及目录独立删除 |
@@ -82,3 +82,19 @@ flutter test
 | 静态检查 | TypeScript / Webview 类型检查、Prettier 格式检查、构建及 git diff --check 通过 |
 
 连接设置及 Android 已授权设备的自动恢复已实现；本次未重新进行设备重连实际验收。设备 HTTP / HTTPS 能力沿用首版基线，不把代码实现视为新的设备验收通过。
+
+### EXIO 多包项目实际接入（2026-11-08）
+
+- Cursor 打开真实 EXIO Dart workspace 根目录，专用 Debug 入口通过主 API installer 加入代理 CA 公钥证书，保留 TLS 信任链和主机名校验。
+- Cursor 使用 dev flavor 在 iPhone 18 Pro / iOS 27.2 启动成功；已发现 10 个 API，多个真实 HTTPS 接口返回 200。
+- 从法币列表接口的真实响应生成 Mock，应用 hot restart 后 2 条请求返回 200 并命中规则，带自定义响应头；结束时规则停用、保留供用户练习，代理继续采集。
+- 首轮 config / refresh-token 出现超时，随后重试；旧登录态 refresh-token 返回 401，未进行登录或交易操作。
+- 修复 Dart workspace 根目录识别，59 项 TypeScript 回归通过；显式成员列表最多 256 项，不递归、不展开 glob。已安装修复并重载真实 Cursor，未打开工作台即显示后台记录中。
+- 实际操作截图及说明见 [EXIO Cursor 图文教程](exio-cursor-guide/README.md)。
+
+## API 工作台布局优化验收（2026-11-08）
+
+- TypeScript/Webview 类型检查通过，68 项 Vitest 单元测试通过（含 JSON token 格式化、长整数/精度/重复键保留、无效正文与资源边界）。
+- 17 项 Playwright 工作台测试通过：乱序 API 与历史倒序、目录折叠保留筛选与跨标签折叠偏好、新记录默认响应、JSON/原文切换、非 JSON/HTML 安全回退、空/二进制/截断/无响应、680px 长路径布局、详情放大恢复、复制模式与失败提示。
+- 已人工检查生成截图：`artifacts/workbench-history.png`、`artifacts/workbench-api-sorted.png`、`artifacts/workbench-api-focused.png`、`artifacts/workbench-api-narrow.png`，均使用合成数据，不包含真实认证内容。
+- 本轮不修改代理转发行为；未重新执行设备网络或真实登录验收，MFA 代理链路超时问题仍按 `.harness/momory/FAILURES.md` 跟踪。

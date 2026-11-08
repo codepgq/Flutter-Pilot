@@ -267,3 +267,263 @@ test('目录删除不触发选中或删除历史，确认移除后清除分组�
   await expect(page.getByRole('button', { name: /全部 API/ })).toHaveClass(/selected/);
   await expect(page.getByRole('button', { name: /GET.*200.*MOCK/ })).toBeVisible();
 });
+
+test('API 目录和请求记录按最近时间倒序，乱序输入也保持新到旧', async ({ page }) => {
+  await page.goto('/');
+  const time = Date.now();
+  const records = [
+    { ...entry, id: 'older', path: '/v1/older', startedAt: time - 20000 },
+    { ...entry, id: 'latest', path: '/v1/latest', startedAt: time },
+    { ...entry, id: 'middle', path: '/v1/middle', startedAt: time - 10000 },
+  ];
+  await state(page, {
+    history: { items: records, total: records.length },
+    apis: records.map((record) => ({
+      method: record.method,
+      host: record.host,
+      path: record.path,
+      count: 1,
+      lastAt: record.startedAt,
+    })),
+  });
+  await page.getByRole('button', { name: 'API 与历史' }).click();
+  const catalog = page.getByRole('button', { name: /^查看 API / });
+  await expect(catalog).toHaveCount(3);
+  await expect(catalog.nth(0)).toHaveAttribute('aria-label', '查看 API GET api.example.test/v1/latest');
+  await expect(catalog.nth(1)).toHaveAttribute('aria-label', '查看 API GET api.example.test/v1/middle');
+  await expect(catalog.nth(2)).toHaveAttribute('aria-label', '查看 API GET api.example.test/v1/older');
+  const requests = page.locator('.request-row');
+  await expect(requests.nth(0)).toContainText('/v1/latest');
+  await expect(requests.nth(1)).toContainText('/v1/middle');
+  await expect(requests.nth(2)).toContainText('/v1/older');
+  await requests.nth(0).click();
+  expect(await messages(page)).toContainEqual({ action: 'history.select', payload: { id: 'latest' } });
+  await page.screenshot({ path: 'artifacts/workbench-api-sorted.png', fullPage: true });
+});
+
+test('收起目录保留 API 过滤，切换页面后保留折叠偏好', async ({ page }) => {
+  await page.goto('/');
+  await state(page);
+  await page.getByRole('button', { name: 'API 与历史' }).click();
+  const api = page.getByRole('button', { name: '查看 API GET api.example.test/v1/orders', exact: true });
+  await api.click();
+  await expect
+    .poll(async () => messages(page))
+    .toContainEqual({
+      action: 'history.query',
+      payload: { method: 'GET', host: 'api.example.test', path: '/v1/orders', offset: 0 },
+    });
+  await page.getByRole('button', { name: '收起 API 目录', exact: true }).click();
+  await expect(api).not.toBeVisible();
+  await expect(page.getByRole('button', { name: '展开 API 目录', exact: true })).toBeVisible();
+  const queries = ((await messages(page)) as { action: string; payload: unknown }[]).filter(
+    (message) => message.action === 'history.query',
+  );
+  expect(queries.at(-1)?.payload).toMatchObject({
+    method: 'GET',
+    host: 'api.example.test',
+    path: '/v1/orders',
+  });
+  await page.getByRole('button', { name: 'Mock 规则' }).click();
+  await page.getByRole('button', { name: 'API 与历史' }).click();
+  await expect(page.getByRole('button', { name: '展开 API 目录', exact: true })).toBeVisible();
+  await expect(api).not.toBeVisible();
+  await page.getByRole('button', { name: '展开 API 目录', exact: true }).click();
+  await expect(api).toBeVisible();
+});
+
+test('响应自动格式化 JSON，原文切换不改变请求事实，新记录优先响应', async ({ page }) => {
+  await page.goto('/');
+  await state(page, {}, entry);
+  await page.getByRole('button', { name: 'API 与历史' }).click();
+  const responseView = page.getByRole('region', { name: '最终响应', exact: true });
+  await expect(responseView).toBeVisible();
+  await expect(responseView.locator('.body-content')).toHaveJSProperty(
+    'textContent',
+    JSON.stringify(JSON.parse(body.body), null, 2),
+  );
+  await responseView.getByRole('button', { name: '原文', exact: true }).click();
+  await expect(responseView.locator('.body-content')).toHaveJSProperty('textContent', body.body);
+  await responseView.getByRole('button', { name: 'JSON', exact: true }).click();
+  await expect(responseView.locator('.body-content')).toHaveJSProperty(
+    'textContent',
+    JSON.stringify(JSON.parse(body.body), null, 2),
+  );
+  await page.getByRole('button', { name: '请求', exact: true }).click();
+  await expect(page.getByRole('region', { name: '最终请求', exact: true })).toBeVisible();
+  const next = {
+    ...entry,
+    id: 'history-2',
+    response: { ...response, body: '{"ok":true,"data":null}' },
+  };
+  await state(page, { history: { items: [next, entry], total: 2 } }, next);
+  await expect(responseView).toBeVisible();
+  await expect(responseView.locator('.body-content')).toHaveText('{\n  "ok": true,\n  "data": null\n}');
+  expect(
+    (await messages(page)).some((message) => (message as { action?: string }).action === 'history.update'),
+  ).toBe(false);
+});
+
+test('未声明 JSON 的正文仍尝试解析，非法 JSON 回退原文并明确提示', async ({ page }) => {
+  await page.goto('/');
+  const textJson = {
+    ...response,
+    headers: [['content-type', 'text/plain']],
+    body: '{"nested":{"items":[1,2]}}',
+  };
+  await state(page, {}, { ...entry, response: textJson });
+  await page.getByRole('button', { name: 'API 与历史' }).click();
+  const responseView = page.getByRole('region', { name: '最终响应', exact: true });
+  await expect(responseView.locator('.body-content')).toHaveJSProperty(
+    'textContent',
+    JSON.stringify(JSON.parse(textJson.body), null, 2),
+  );
+  const invalid = '<html><body>Bad Gateway</body></html>';
+  await state(page, {}, { ...entry, id: 'invalid-json', response: { ...response, body: invalid } });
+  await expect(responseView).toContainText('无法解析为 JSON，已显示原文');
+  await expect(responseView.locator('.body-content')).toHaveText(invalid);
+  await expect(responseView.locator('.body-content').locator('*')).toHaveCount(0);
+});
+
+test('空正文、二进制、截断与无响应记录不会误报成 JSON 或成功响应', async ({ page }) => {
+  await page.goto('/');
+  await state(page, {}, { ...entry, response: { ...response, status: 204, body: '', bodyBytes: 0 } });
+  await page.getByRole('button', { name: 'API 与历史' }).click();
+  const responseView = page.getByRole('region', { name: '最终响应', exact: true });
+  await expect(responseView).toContainText('空正文');
+  await expect(responseView).not.toContainText('无法解析为 JSON');
+  await state(
+    page,
+    {},
+    {
+      ...entry,
+      id: 'binary',
+      response: { ...response, body: 'eyJvayI6dHJ1ZX0=', bodyEncoding: 'base64', editable: false },
+    },
+  );
+  await expect(responseView).toContainText('Base64');
+  await expect(responseView.locator('.body-content')).toHaveText('eyJvayI6dHJ1ZX0=');
+  await expect(responseView).not.toContainText('无法解析为 JSON');
+  await state(
+    page,
+    {},
+    {
+      ...entry,
+      id: 'truncated',
+      response: {
+        ...response,
+        body: '{"items":[',
+        truncated: true,
+        editable: false,
+        limitation: '正文超过记录上限，保持直通',
+      },
+    },
+  );
+  await expect(responseView).toContainText('正文超过记录上限，保持直通');
+  await expect(responseView.locator('.body-content')).toHaveText('{"items":[');
+  await state(
+    page,
+    {},
+    {
+      ...entry,
+      id: 'no-response',
+      response: undefined,
+      originalResponse: undefined,
+      automaticResponse: undefined,
+      error: 'client disconnected',
+    },
+  );
+  await expect(page.locator('.request-detail')).toContainText('client disconnected');
+  await expect(page.locator('.request-detail')).toContainText(/尚未收到|未收到响应|无响应/);
+  await expect(page.locator('.request-detail')).not.toContainText('HTTP 200');
+});
+
+test('窄面板可展开和收起 API 目录，长路径与响应正文不横向溢出', async ({ page }) => {
+  await page.setViewportSize({ width: 680, height: 920 });
+  await page.goto('/');
+  const path = `/v1/${'long-api-segment-'.repeat(30)}`;
+  const url = `https://api.example.test${path}?cursor=${'x'.repeat(300)}`;
+  const long = {
+    ...entry,
+    path,
+    url,
+    targetUrl: url,
+    request: { ...request, url },
+    response: { ...response, body: JSON.stringify({ data: 'long-response-'.repeat(300) }) },
+  };
+  await state(
+    page,
+    {
+      history: { items: [long], total: 1 },
+      apis: [{ ...fixture.apis[0], path }],
+    },
+    long,
+  );
+  await page.getByRole('button', { name: 'API 与历史' }).click();
+  const expand = page.getByRole('button', { name: '展开 API 目录', exact: true });
+  if (await expand.isVisible()) await expand.click();
+  await expect(
+    page.getByRole('button', { name: `查看 API GET api.example.test${path}`, exact: true }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.getByRole('button', { name: '收起 API 目录', exact: true }).click();
+  await expect(page.getByRole('region', { name: '最终响应', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.screenshot({ path: 'artifacts/workbench-api-narrow.png', fullPage: true });
+});
+
+test('放大详情隐藏列表并保留响应，返回后恢复请求列表', async ({ page }) => {
+  await page.goto('/');
+  await state(page, {}, entry);
+  await page.getByRole('button', { name: 'API 与历史' }).click();
+  const list = page.locator('.request-list');
+  const responseView = page.getByRole('region', { name: '最终响应', exact: true });
+  await expect(list).toBeVisible();
+  await page.getByRole('button', { name: '放大详情', exact: true }).click();
+  await expect(list).not.toBeVisible();
+  await expect(responseView).toBeVisible();
+  await expect(responseView.locator('.body-content')).toHaveJSProperty(
+    'textContent',
+    JSON.stringify(JSON.parse(body.body), null, 2),
+  );
+  await page.screenshot({ path: 'artifacts/workbench-api-focused.png', fullPage: true });
+  await page.getByRole('button', { name: '返回列表', exact: true }).click();
+  await expect(list).toBeVisible();
+  await expect(responseView).toBeVisible();
+});
+
+test('复制正文遵循 JSON 与原文模式，复制失败显示提示且不修改历史', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          const clipboardState = window as unknown as { __copiedBody?: string; __rejectCopy?: boolean };
+          if (clipboardState.__rejectCopy) throw new Error('Clipboard unavailable');
+          clipboardState.__copiedBody = text;
+        },
+      },
+    });
+  });
+  await page.goto('/');
+  await state(page, {}, entry);
+  await page.getByRole('button', { name: 'API 与历史' }).click();
+  const responseView = page.getByRole('region', { name: '最终响应', exact: true });
+  const copy = responseView.getByRole('button', { name: '复制正文', exact: true });
+  const copiedBody = () => page.evaluate(() => (window as unknown as { __copiedBody?: string }).__copiedBody);
+  await copy.click();
+  await expect.poll(copiedBody).toBe(JSON.stringify(JSON.parse(body.body), null, 2));
+  await expect(responseView.getByRole('status')).toHaveText('已复制');
+  await responseView.getByRole('button', { name: '原文', exact: true }).click();
+  await copy.click();
+  await expect.poll(copiedBody).toBe(body.body);
+  await page.evaluate(() => {
+    (window as unknown as { __rejectCopy?: boolean }).__rejectCopy = true;
+  });
+  await copy.click();
+  await expect(responseView.getByRole('status')).toHaveText('复制失败，请选中正文复制');
+  await expect.poll(copiedBody).toBe(body.body);
+  expect(
+    (await messages(page)).some((message) => (message as { action?: string }).action === 'history.update'),
+  ).toBe(false);
+});

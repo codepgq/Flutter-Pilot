@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { EngineManager } from './engine';
 import { RuntimeManager } from './runtime';
 import { RuleStore } from './store';
+import { isFlutterWorkspace } from './discovery';
 import {
   HistoryEntry,
   HistoryQuery,
@@ -102,9 +103,8 @@ export async function activate(context: vscode.ExtensionContext) {
     await Promise.all(
       folders.map(async (folder) => {
         try {
-          const pubspec = await readFile(join(folder.uri.fsPath, 'pubspec.yaml'), 'utf8');
           if (
-            !/\bflutter\s*:\s*(?:\r?\n)\s+sdk\s*:\s*flutter\b/.test(pubspec) ||
+            !(await isFlutterWorkspace(folder.uri.fsPath)) ||
             shuttingDown ||
             !vscode.workspace.workspaceFolders?.some(
               (current) => current.uri.toString() === folder.uri.toString(),

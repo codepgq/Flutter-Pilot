@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, rm, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, mkdir, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
@@ -345,6 +345,87 @@ describe('后台采集与独立API目录控制', () => {
 });
 
 describe('自动记录前提与退出保护', () => {
+  it('Dart workspace 根下多个Flutter成员仅启动一个根目录后台会话', async () => {
+    await deactivate();
+    fake.engines = [];
+    await writeFile(
+      join(fake.workspace, 'pubspec.yaml'),
+      'name: monorepo\nworkspace:\n  # Flutter apps\n  - packages/missing\n  - "apps/first" # app\n  - \'apps/second\'\n  - apps/first\ndev_dependencies:\n  melos: ^7.0.0\n',
+    );
+    for (const name of ['first', 'second']) {
+      const member = join(fake.workspace, 'apps', name);
+      await mkdir(member, { recursive: true });
+      await writeFile(
+        join(member, 'pubspec.yaml'),
+        `name: ${name}\nresolution: workspace\ndependencies:\n  flutter:\n    sdk: flutter\n`,
+      );
+    }
+    await activateCurrent();
+    expect(fake.engines).toHaveLength(1);
+    expect(fake.engines[0].state.proxyActive).toBe(true);
+    expect(fake.panels).toHaveLength(0);
+    const storage = fake.engines[0].starts[0].storagePath;
+    await deactivate();
+    fake.engines = [];
+    await activateCurrent();
+    expect(fake.engines).toHaveLength(1);
+    expect(fake.engines[0].starts[0].storagePath).toBe(storage);
+  });
+  it('支持Dart workspace内联列表和未缩进的成员列表', async () => {
+    const member = join(fake.workspace, 'apps', 'app');
+    await mkdir(member, { recursive: true });
+    await writeFile(
+      join(member, 'pubspec.yaml'),
+      'dependencies:\r\n  flutter: # SDK\r\n    sdk: flutter\r\n',
+    );
+    for (const content of ['workspace: ["apps/missing", \'apps/app\']\n', 'workspace:\n- apps/app\n']) {
+      await deactivate();
+      fake.engines = [];
+      await writeFile(join(fake.workspace, 'pubspec.yaml'), content);
+      await activateCurrent();
+      expect(fake.engines).toHaveLength(1);
+      expect(fake.engines[0].state.proxyActive).toBe(true);
+    }
+  });
+  it('纯Dart workspace不启动，也不会递归搜索未声明的Flutter应用', async () => {
+    await deactivate();
+    fake.engines = [];
+    await writeFile(
+      join(fake.workspace, 'pubspec.yaml'),
+      'name: dart_workspace\nworkspace:\n  - packages/plain\n',
+    );
+    const member = join(fake.workspace, 'packages', 'plain');
+    await mkdir(join(member, 'nested'), { recursive: true });
+    await writeFile(join(member, 'pubspec.yaml'), 'name: plain\nworkspace: [nested]\n');
+    await writeFile(join(member, 'nested', 'pubspec.yaml'), 'dependencies:\n  flutter:\n    sdk: flutter\n');
+    await activateCurrent();
+    expect(fake.engines).toHaveLength(0);
+  });
+  it('workspace成员路径越界或符号链接指向根外时不启动', async () => {
+    await deactivate();
+    fake.engines = [];
+    const outside = join(directory, 'outside');
+    await mkdir(outside);
+    await writeFile(join(outside, 'pubspec.yaml'), 'dependencies:\n  flutter:\n    sdk: flutter\n');
+    await symlink(outside, join(fake.workspace, 'linked'));
+    await writeFile(
+      join(fake.workspace, 'pubspec.yaml'),
+      `workspace:\n  - ../outside\n  - "${outside}"\n  - linked\n`,
+    );
+    await activateCurrent();
+    expect(fake.engines).toHaveLength(0);
+  });
+  it('workspace发现最多检查256个声明成员', async () => {
+    await deactivate();
+    fake.engines = [];
+    const member = join(fake.workspace, 'too-late');
+    await mkdir(member);
+    await writeFile(join(member, 'pubspec.yaml'), 'dependencies:\n  flutter:\n    sdk: flutter\n');
+    const missing = Array.from({ length: 256 }, (_, i) => `  - missing-${i}\n`).join('');
+    await writeFile(join(fake.workspace, 'pubspec.yaml'), `workspace:\n${missing}  - too-late\n`);
+    await activateCurrent();
+    expect(fake.engines).toHaveLength(0);
+  });
   it('多根Flutter工作区独立启动和存储，移除一个不影响另一个', async () => {
     await deactivate();
     fake.extraWorkspace = join(directory, 'second');

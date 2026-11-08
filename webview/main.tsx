@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   HistoryEntry,
@@ -12,14 +12,20 @@ import {
   headerChanges,
 } from '../src/model';
 import './style.css';
+import { inspectJson } from './body';
 
 declare global {
   interface Window {
-    acquireVsCodeApi?: () => { postMessage: (message: unknown) => void };
+    acquireVsCodeApi?: () => {
+      postMessage: (message: unknown) => void;
+      getState?: () => { catalogCollapsed?: boolean } | undefined;
+      setState?: (state: { catalogCollapsed?: boolean }) => void;
+    };
     __API_MOCK_TEST__?: boolean;
   }
 }
 const vscode = window.acquireVsCodeApi?.();
+let viewPreferences = vscode?.getState?.() ?? {};
 function send(action: string, payload: unknown = {}) {
   vscode?.postMessage({ action, payload });
 }
@@ -95,6 +101,13 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
       </>
     ),
     arrowRight: <path d="M4 12h16m-6-6 6 6-6 6" />,
+    sidebar: (
+      <>
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <path d="M9 4v16" />
+      </>
+    ),
+    expand: <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />,
   };
   return (
     <svg
@@ -213,13 +226,39 @@ function BodyEditor({
   );
 }
 function SnapshotView({ snapshot, label }: { snapshot?: Snapshot; label: string }) {
-  if (!snapshot) return <div className="snapshot empty-snapshot">{label}尚未收到，或请求已终止。</div>;
+  const [mode, setMode] = useState<'json' | 'raw'>('json');
+  const [copyState, setCopyState] = useState('');
+  const json = useMemo(
+    () => (snapshot?.bodyEncoding === 'text' ? inspectJson(snapshot.body) : {}),
+    [snapshot?.body, snapshot?.bodyEncoding],
+  );
+  useEffect(() => {
+    setMode('json');
+    setCopyState('');
+  }, [snapshot]);
+  if (!snapshot)
+    return (
+      <section aria-label={label} className="snapshot empty-snapshot">
+        <strong>{label} · 无响应数据</strong>
+        <p>未收到 HTTP 响应，或请求已终止。可查看上方错误信息与耗时。</p>
+      </section>
+    );
   const head = 'status' in snapshot ? `HTTP ${snapshot.status}` : `${snapshot.method} ${snapshot.url}`;
+  const formatted = mode === 'json' && json.formatted !== undefined;
+  const displayBody = formatted ? json.formatted! : snapshot.body;
+  async function copyBody() {
+    try {
+      await navigator.clipboard.writeText(displayBody);
+      setCopyState('已复制');
+    } catch {
+      setCopyState('复制失败，请选中正文复制');
+    }
+  }
   return (
-    <section className="snapshot">
+    <section className="snapshot" aria-label={label}>
       <div className="section-caption">{label}</div>
       <pre className="request-line">{head}</pre>
-      <details>
+      <details className="snapshot-headers">
         <summary>
           Headers <span className="count">{snapshot.headers.length}</span>
         </summary>
@@ -231,11 +270,46 @@ function SnapshotView({ snapshot, label }: { snapshot?: Snapshot; label: string 
             (snapshot.truncated ? '正文超出保存上限，已截断' : '该正文仅查看，不支持编辑')}
         </div>
       )}
-      <div className="body-caption">
-        {snapshot.bodyEncoding === 'base64' ? '二进制 · Base64' : 'Body'}{' '}
-        <span>{snapshot.bodyBytes?.toLocaleString() ?? 0} bytes</span>
+      <div className="body-toolbar">
+        <div className="body-caption">
+          <strong>{snapshot.bodyEncoding === 'base64' ? '二进制 · Base64' : 'Body'}</strong>
+          <span>{snapshot.bodyBytes?.toLocaleString() ?? 0} bytes</span>
+          {snapshot.truncated && <span className="tag warm">已截断</span>}
+        </div>
+        <div className="body-tools">
+          {snapshot.bodyEncoding === 'text' && snapshot.body.trim() && (
+            <div className="view-toggle" aria-label={`${label}正文格式`}>
+              <button
+                aria-pressed={formatted}
+                disabled={json.formatted === undefined}
+                title={json.hint ?? '尝试解析并格式化 JSON，保留原始数字精度'}
+                onClick={() => setMode('json')}
+              >
+                JSON
+              </button>
+              <button aria-pressed={!formatted} onClick={() => setMode('raw')}>
+                原文
+              </button>
+            </div>
+          )}
+          <button disabled={!snapshot.body} onClick={() => void copyBody()}>
+            复制正文
+          </button>
+        </div>
       </div>
-      <pre className="body-content">{snapshot.body || '（空正文）'}</pre>
+      {json.hint && <p className="field-hint">{json.hint}</p>}
+      {copyState && (
+        <span role="status" className="field-hint">
+          {copyState}
+        </span>
+      )}
+      <pre
+        className={`body-content ${formatted ? 'json-content' : ''}`}
+        tabIndex={0}
+        aria-label={`${label}正文`}
+      >
+        {displayBody || '（空正文）'}
+      </pre>
     </section>
   );
 }
@@ -586,6 +660,14 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
   const [offset, setOffset] = useState(0);
   const [note, setNote] = useState('');
   const [tags, setTags] = useState('');
+  const [catalogCollapsed, setCatalogCollapsed] = useState(viewPreferences.catalogCollapsed ?? false);
+  const [detailFocused, setDetailFocused] = useState(false);
+  const detailRef = useRef<HTMLElement>(null);
+  const [catalogSearch, setCatalogSearch] = useState('');
+  useEffect(() => {
+    setDetailTab('response');
+    if (selected && window.innerWidth <= 600) detailRef.current?.scrollIntoView({ block: 'start' });
+  }, [selected?.id]);
   useEffect(() => {
     setNote(selected?.note ?? '');
     setTags(selected?.tags.join(', ') ?? '');
@@ -595,7 +677,14 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
     const t = setTimeout(() => send('history.query', { ...query, offset }), 250);
     return () => clearTimeout(t);
   }, [query, offset, state.engine.status]);
-  const groups = state.apis ?? [];
+  const groups = useMemo(() => [...(state.apis ?? [])].sort((a, b) => b.lastAt - a.lastAt), [state.apis]);
+  const records = useMemo(
+    () => [...state.history.items].sort((a, b) => b.startedAt - a.startedAt),
+    [state.history.items],
+  );
+  const visibleGroups = groups.filter((g) =>
+    `${g.method} ${g.host}${g.path}`.toLowerCase().includes(catalogSearch.toLowerCase()),
+  );
   const catalogKeys = JSON.stringify(groups.map((g) => `${g.method} ${g.host}${g.path}`));
   useEffect(() => {
     if (group && !(JSON.parse(catalogKeys) as string[]).includes(group)) {
@@ -684,10 +773,52 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
           />
         </label>
       </details>
-      <div className="history-layout">
-        <aside className="api-sidebar">
+      <div className="history-viewbar">
+        <button
+          aria-expanded={!catalogCollapsed}
+          aria-controls="api-catalog"
+          aria-label={catalogCollapsed ? '展开 API 目录' : '收起 API 目录'}
+          onClick={() => {
+            const next = !catalogCollapsed;
+            setCatalogCollapsed(next);
+            viewPreferences = { ...viewPreferences, catalogCollapsed: next };
+            vscode?.setState?.(viewPreferences);
+            setDetailFocused(false);
+          }}
+        >
+          <Icon name="sidebar" size={15} />
+          {catalogCollapsed ? '展开目录' : '收起目录'}
+          <span className="count">{groups.length}</span>
+        </button>
+        {group && (
+          <button
+            className="active-api-filter"
+            title={`清除 API 筛选：${group}`}
+            onClick={() => {
+              setGroup('');
+              update({ host: undefined, path: undefined, method: undefined });
+            }}
+          >
+            <span>{group}</span>
+            <Icon name="close" size={12} />
+          </button>
+        )}
+        <span className="sort-indicator">最新在前 · 按请求时间倒序</span>
+      </div>
+      <div
+        className={`history-layout ${catalogCollapsed ? 'catalog-collapsed' : ''} ${detailFocused ? 'detail-focused' : ''}`}
+      >
+        <aside className="api-sidebar" id="api-catalog" aria-label="API 目录" hidden={catalogCollapsed}>
           <div className="pane-heading">
-            API 目录 <span>{groups.length}</span>
+            API 目录 <span>最近调用优先</span>
+          </div>
+          <div className="catalog-search">
+            <input
+              aria-label="搜索 API 目录"
+              placeholder="筛选 API 目录…"
+              value={catalogSearch}
+              onChange={(e) => setCatalogSearch(e.target.value)}
+            />
           </div>
           <button
             className={`api-all ${!group ? 'selected' : ''}`}
@@ -698,7 +829,7 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
           >
             全部 API <span>{groups.length} 个</span>
           </button>
-          {groups.map((g) => {
+          {visibleGroups.map((g) => {
             const id = `${g.method} ${g.host}${g.path}`;
             return (
               <div className={`api-entry ${group === id ? 'selected' : ''}`} key={id}>
@@ -741,6 +872,7 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
               </div>
             );
           })}
+          {groups.length > 0 && !visibleGroups.length && <p className="sidebar-hint">没有匹配的 API</p>}
           <p className="sidebar-hint">
             {groups.length
               ? '目录独立保存；清空或过期请求历史不会移除已发现的 API。'
@@ -751,17 +883,18 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
           <div className="pane-heading">
             请求记录 <span>{state.history.total} 条</span>
           </div>
-          {state.history.items.length ? (
-            state.history.items.map((h) => (
+          {records.length ? (
+            records.map((h) => (
               <button
                 className={`request-row ${selected?.id === h.id ? 'selected' : ''}`}
                 key={h.id}
+                aria-pressed={selected?.id === h.id}
                 onClick={() => send('history.select', { id: h.id })}
               >
                 <div>
                   <Method method={h.method} />
                   <span
-                    className={`http-status ${(h.response?.status ?? (h as unknown as { status?: number }).status ?? 0) >= 400 ? 'failed' : ''}`}
+                    className={`http-status ${h.error || (h.response?.status ?? (h as unknown as { status?: number }).status ?? 0) >= 400 ? 'failed' : ''}`}
                   >
                     {h.response?.status ??
                       (h as unknown as { status?: number }).status ??
@@ -772,7 +905,19 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
                 <strong title={h.url}>{h.path}</strong>
                 <small>{h.host}</small>
                 <div className="request-meta">
-                  <span>{new Date(h.startedAt).toLocaleTimeString('zh-CN', { hour12: false })}</span>
+                  <time
+                    dateTime={new Date(h.startedAt).toISOString()}
+                    title={new Date(h.startedAt).toLocaleString('zh-CN')}
+                  >
+                    {new Date(h.startedAt).toLocaleString('zh-CN', {
+                      month: '2-digit',
+                      day: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                      hour12: false,
+                    })}
+                  </time>
                   <span>{Math.round(h.duration)} ms</span>
                   {(h.requestRuleId || h.responseRuleId) && <span className="rule-hit">规则命中</span>}
                 </div>
@@ -793,21 +938,44 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
             <Button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 30))}>
               上一页
             </Button>
-            <span>{Math.floor(offset / 30) + 1}</span>
+            <span>
+              {state.history.total
+                ? `${offset + 1}–${Math.min(offset + 30, state.history.total)} / ${state.history.total}`
+                : '0 条'}
+            </span>
             <Button disabled={offset + 30 >= state.history.total} onClick={() => setOffset(offset + 30)}>
               下一页
             </Button>
           </div>
         </section>
-        <section className="request-detail">
+        <section className="request-detail" ref={detailRef} aria-label="请求详情">
           {selected ? (
             <>
               <div className="detail-heading">
                 <div>
                   <Method method={selected.method} />
-                  <strong>{selected.path}</strong>
+                  <strong title={selected.path}>{selected.path}</strong>
+                  <button
+                    className="detail-focus-button"
+                    aria-label={detailFocused ? '返回列表' : '放大详情'}
+                    title={detailFocused ? '返回列表' : '放大详情'}
+                    onClick={() => setDetailFocused(!detailFocused)}
+                  >
+                    <Icon name="expand" size={14} />
+                    {detailFocused ? '返回列表' : '放大'}
+                  </button>
                 </div>
                 <code>{selected.url}</code>
+                <div className="detail-summary">
+                  <span
+                    className={`status-summary ${selected.error || (selected.response?.status ?? 0) >= 400 ? 'failed' : ''}`}
+                  >
+                    {selected.response ? `HTTP ${selected.response.status}` : '未收到响应'}
+                  </span>
+                  <span>{Math.round(selected.duration).toLocaleString()} ms</span>
+                  <time>{new Date(selected.startedAt).toLocaleString('zh-CN', { hour12: false })}</time>
+                  {selected.mocked && <span className="mock-badge">MOCK</span>}
+                </div>
                 <div className="detail-actions">
                   <Button onClick={() => send('history.toRule', { id: selected.id, kind: 'mock' })} primary>
                     <Icon name="plus" size={14} />
@@ -832,15 +1000,41 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
               </div>
               <div className="detail-tabs">
                 {(['response', 'request', 'diff', 'info'] as const).map((t, i) => (
-                  <button className={t === detailTab ? 'active' : ''} key={t} onClick={() => setDetailTab(t)}>
+                  <button
+                    aria-pressed={t === detailTab}
+                    title={
+                      t === 'response'
+                        ? 'Response · 最终响应'
+                        : t === 'request'
+                          ? 'Request · 最终请求'
+                          : undefined
+                    }
+                    className={t === detailTab ? 'active' : ''}
+                    key={t}
+                    onClick={() => setDetailTab(t)}
+                  >
                     {['响应', '请求', '修改对比', '备注与信息'][i]}
                   </button>
                 ))}
               </div>
               <div className="detail-body">
-                {selected.error && <div className="notice">{selected.error}</div>}
-                {detailTab === 'request' && <SnapshotView snapshot={selected.request} label="最终请求" />}
-                {detailTab === 'response' && <SnapshotView snapshot={selected.response} label="最终响应" />}
+                {selected.error && (
+                  <div className="notice request-error">
+                    <strong>请求未正常完成</strong>
+                    <div>{selected.error}</div>
+                    {!selected.response && <p>没有收到 HTTP 响应；此记录不能视为服务端返回的业务错误。</p>}
+                  </div>
+                )}
+                {detailTab === 'request' && (
+                  <SnapshotView key={`${selected.id}-request`} snapshot={selected.request} label="最终请求" />
+                )}
+                {detailTab === 'response' && (
+                  <SnapshotView
+                    key={`${selected.id}-response`}
+                    snapshot={selected.response}
+                    label="最终响应"
+                  />
+                )}
                 {detailTab === 'diff' && (
                   <>
                     <div className="diff-label">请求 · 原始 → 自动规则 → 最终</div>

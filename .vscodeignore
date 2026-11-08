@@ -19,3 +19,6 @@ playwright.config.*
 
 .gitignore
 .prettierrc.json
+
+# Local project demonstration screenshots stay outside the distributable.
+docs/exio-cursor-guide/**
