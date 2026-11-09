@@ -13,6 +13,7 @@ import {
   type McpClientInfo,
 } from '../src/mcp/server';
 import { mcpTools, parseTool } from '../src/mcp/tools';
+import { agentInstructions, getUsageGuide, guideResources, guideTopics } from '../src/mcp/guide';
 
 const roots: string[] = [];
 const servers: McpSessionServer[] = [];
@@ -81,6 +82,61 @@ async function connect(registryRoot: string, workspace?: string, name = 'codex-t
 }
 
 describe('MCP local session transport', () => {
+  it.each(['missing', 'unsafe'] as const)(
+    'discovers and reads usage guides over stdio with a %s registry and no IDE',
+    async (registryState) => {
+      const root = await mkdtemp(join(tmpdir(), 'mcp-offline-guide-'));
+      roots.push(root);
+      const registry = join(root, 'sessions');
+      if (registryState === 'unsafe') await mkdir(registry, { mode: 0o755 });
+      const client = await connect(registry);
+      expect(client.getInstructions()).toBe(agentInstructions);
+      expect(client.getServerCapabilities()).toMatchObject({ tools: {}, resources: {} });
+      const tools = await client.listTools();
+      expect(tools.tools.find((tool) => tool.name === 'get_usage_guide')).toMatchObject({
+        annotations: { readOnlyHint: true, openWorldHint: false },
+        inputSchema: { properties: { topic: { enum: [...guideTopics] } } },
+      });
+      const overview = await client.callTool({ name: 'get_usage_guide', arguments: {} });
+      expect(overview.isError).not.toBe(true);
+      expect(overview.structuredContent).toEqual(getUsageGuide());
+      expect((await client.listResources()).resources).toEqual(guideResources);
+      for (const topic of guideTopics) {
+        const result = await client.callTool({ name: 'get_usage_guide', arguments: { topic } });
+        expect(result.isError).not.toBe(true);
+        expect(result.structuredContent).toEqual(getUsageGuide(topic));
+        const resource = await client.readResource({ uri: `flutter-api-mocks://guides/${topic}` });
+        expect(resource.contents).toHaveLength(1);
+        expect(resource.contents[0].mimeType).toBe('application/json');
+        const content = resource.contents[0];
+        if (!('text' in content)) throw new Error('指南必须以文本返回');
+        expect(JSON.parse(content.text)).toEqual(result.structuredContent);
+      }
+      const invalid = await client.callTool({ name: 'get_usage_guide', arguments: { topic: 'unknown' } });
+      expect(invalid.isError).toBe(true);
+      expect(invalid.structuredContent).toMatchObject({ error: { code: 'INVALID_ARGUMENTS' } });
+      await expect(client.readResource({ uri: 'file:///etc/passwd' })).rejects.toMatchObject({
+        code: -32602,
+      });
+    },
+  );
+
+  it('serves guides locally without forwarding a runtime tool call', async () => {
+    let calls = 0;
+    const f = await fixture('guide', async () => {
+      calls++;
+      return {};
+    });
+    const client = await connect(f.registryRoot, f.workspace);
+    await client.callTool({ name: 'get_usage_guide', arguments: { topic: 'http' } });
+    await client.readResource({ uri: 'flutter-api-mocks://guides/ui' });
+    expect(calls).toBe(0);
+    const list = await client.callTool({ name: 'list_sessions', arguments: {} });
+    expect(list.structuredContent).toMatchObject({
+      usageGuide: { tool: 'get_usage_guide', topics: [...guideTopics] },
+    });
+  });
+
   it('publishes private descriptors without VM credentials and removes them on stop', async () => {
     const f = await fixture();
     expect((await stat(f.registryRoot)).mode & 0o777).toBe(0o700);

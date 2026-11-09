@@ -1,5 +1,12 @@
 # 实现与验证结论
 
+## MCP 内置 Agent 指南（2026-11-09）
+
+- 新增 src/mcp/guide.ts，初始化 instructions、工具描述、get_usage_guide 工具和5份固定 URI 资源共用指南；17个工具可被发现。指南在桥接本地处理，不转发运行时调用，不依赖会话注册目录可用。
+- 包含两类文件字段与合法示例、增量维护与保留已有规则、重载状态判断、独立采集/Mock、快照发现真实 typed Key、父范围、诊断与闭环验证；MCP Tab 和 docs/mcp.md 同步说明。
+- 316项 Vitest、类型、格式和构建通过；新增 stdio SDK 测试覆盖离线/不安全registry仍能读取指南、工具和资源内容一致、未知主题/URI拒绝、不向运行时转发；示例通过真实规则和工具schema校验。MCP工作台3项Playwright通过，390px截图已目视检查。未启动Cursor/VSCode GUI验收，未访问钥匙串；没有重新计入真实Flutter/客户端模型验收。
+- 延续用户安装要求，Cursor CLI覆盖安装成功；VSIX、当前构建及安装目录8项文件SHA-256一致，manifest一致；解包桥接通过真实SDK stdio发现17工具、5资源、离线读取全部主题且工具/资源内容一致。报告 artifacts/mcp-guide-report.json；未强制重载窗口，需用户方便时重载插件并重连Agent MCP。本增量在main；用户随后明确要求完成后commit，随本轮提交，不推送。
+
 ## Flutter UI MCP 与 Agent 适配实现（2026-11-09）
 
 - 用户随后要求安装并归入 main：当前已在 main，无需合并。重新构建0.0.3 VSIX，Cursor CLI `--force` 覆盖安装成功；安装目录的扩展/bridge/Webview JS与CSS、3份Dart模板共7项 SHA-256 与VSIX及当前构建逐项一致，package.json除安装元数据外完全一致。报告 `artifacts/mcp-install-report.json`。未启动隔离IDE、未访问钥匙串、未强制Reload Window。

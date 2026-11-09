@@ -28,7 +28,8 @@ export class McpNetworkController {
       ...this.host.status(),
       files: { http: this.host.httpRulesPath, ws: this.host.wsRulesPath },
       loaded: this.loaded,
-      instructions: '编辑规则文件后调用 reload_rules；规则加载与采集/Mock 开关分别控制。',
+      instructions:
+        '规则格式和操作示例见 get_usage_guide(topic=http/ws)；编辑 files 指定的文件后调用 reload_rules，再显式开启相应采集/Mock 并验证新记录。',
     };
   }
 

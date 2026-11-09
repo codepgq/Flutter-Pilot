@@ -1,5 +1,10 @@
 # Flutter API Mocks 项目记忆
 
+## MCP Agent 使用指南确认（2026-11-09）
+
+- 用户要求把 rules.json、ws-rules.json 编辑方式、UI 查找等能力介绍放进 MCP，使 Agent 在相关任务中主动发现并使用。沿用既有文件编辑、MCP 重载与运行时操作分工，不新增规则 CRUD 或文本定位。
+- 初始化说明和工具描述提示使用场景；get_usage_guide 按 overview/http/ws/ui/workflow 读取指南，并提供同内容 MCP 资源。指南无需在线 IDE 或会话；具体主动调用仍取决于客户端 Agent，不以此绕过用户授权。
+
 ## 已完成头脑风暴并确认的需求
 
 - macOS 上的 VS Code/Cursor 桌面扩展，Android/iOS Dio 5 优先。

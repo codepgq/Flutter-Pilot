@@ -1,5 +1,11 @@
 # 验收记录
 
+## MCP Agent 指南增量（2026-11-09）
+
+- 316项 Vitest（26个文件）通过，含新增11项：指南HTTP/WS示例使用生产校验器验证，每条工具调用示例使用真实schema验证；真实MCP SDK stdio验证初始化说明、17工具发现、5份指南工具/资源内容一致，IDE离线或registry不可用仍能读取；无运行时转发，非法主题和任意文件URI拒绝。
+- TypeScript / Webview类型检查、Prettier、构建和diff检查通过；MCP工作台3项Playwright通过，390px合成截图目视无横向溢出，指南按主题可读。
+- 本轮不启动Cursor/VSCode GUI、不访问钥匙串、不重新操作Flutter fixture或用户App；测试验证能力介绍可被发现和读取，不声称所有模型都会自动调用。此前真实Flutter及客户端验收范围保持下文记录。
+
 ## Flutter UI MCP 与 Agent 适配（2026-11-09）
 
 - TypeScript：305项 Vitest 通过，包含16工具 schema/stdio/IPC、配置原子更新与覆盖优先级、网络重载、扩展生命周期和 UI 控制器。工作台34项 Playwright 通过，包含 MCP 项目默认、配置与连接分离、冲突修复、390px 窄面板。类型、格式和构建通过。

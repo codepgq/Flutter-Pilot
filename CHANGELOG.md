@@ -2,6 +2,7 @@
 
 ## 0.0.3 — 业务 WebSocket（2026-11-09）
 
+- MCP 新增按主题读取的 `get_usage_guide` 和指南资源：介绍 HTTP/WS 规则编辑、Key 发现与 UI 操作、Mock 与网络验证闭环；初始化及工具描述引导 Agent 按任务主动使用，离线也可读取。
 - 新增 MCP Tab：服务开关、Claude Code CLI / Codex CLI / App 项目或全局适配，默认项目；配置与实际握手状态分开，保留其他 MCP 配置并提示同名覆盖。
 - 新增 stdio → 本地 Unix socket → 现有 Dart VM 桥接；按稳定 ValueKey 查找、点击、输入、滚动、等待及缺 Key 诊断，无需修改应用源码，不使用文本定位回退。
 - Agent 继续编辑现有 HTTP/WS 规则文件，通过 MCP 重载、控制采集和 Mock、查询网络结果；规则加载与运行时实际应用分开报告。真实已验证范围见 `docs/mcp.md`、`docs/validation.md`。

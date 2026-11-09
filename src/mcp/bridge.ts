@@ -1,11 +1,19 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
+  McpError,
+  ErrorCode,
+} from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import { discoverSessions, requestSession, type SessionDescriptor } from './server';
 import { mcpTools, McpToolError, parseTool, toolError } from './tools';
+import { agentInstructions, getUsageGuide, guideResources, guideTopics, type GuideTopic } from './guide';
 
 export interface BridgeOptions {
   registryRoot: string;
@@ -19,9 +27,8 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
   const server = new Server(
     { name: 'flutter-api-mocks', version: '0.0.3' },
     {
-      capabilities: { tools: {} },
-      instructions:
-        '先 list_sessions，再为每次操作指定 sessionId。UI 仅使用 ValueKey<String/int>，无文本回退。Mock 规则由项目 .api-mocks/rules.json 和 ws-rules.json 维护，编辑后 reload_rules 并显式开启对应 Mock。UI 超时不应自动重试。',
+      capabilities: { tools: {}, resources: {} },
+      instructions: agentInstructions,
     },
   );
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -56,6 +63,7 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
       inputSchema: z.toJSONSchema(tool.schema) as { type: 'object'; properties?: Record<string, unknown> },
       annotations: {
         readOnlyHint: [
+          'get_usage_guide',
           'list_sessions',
           'get_ui_snapshot',
           'find_widget',
@@ -67,41 +75,60 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
           'get_ws_connections',
           'get_ws_messages',
         ].includes(name),
-        openWorldHint: true,
+        openWorldHint: name !== 'get_usage_guide',
       },
     })),
   }));
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: guideResources }));
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    const index = guideResources.findIndex((resource) => resource.uri === request.params.uri);
+    if (index < 0) throw new McpError(ErrorCode.InvalidParams, '未知使用指南资源；请先列出资源。');
+    return {
+      contents: [
+        {
+          uri: guideResources[index].uri,
+          mimeType: 'application/json',
+          text: JSON.stringify(getUsageGuide(guideTopics[index]), null, 2),
+        },
+      ],
+    };
+  });
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     try {
       const args = parseTool(request.params.name, request.params.arguments ?? {});
-      const descriptors = await discoverSessions(options.registryRoot, options.workspace);
       let data: unknown;
-      if (request.params.name === 'list_sessions') {
-        const results = await Promise.allSettled(
-          descriptors.map(async (descriptor) => {
-            await announce(descriptor, 'connected');
-            return requestSession(descriptor, { kind: 'describe' }, extra.signal);
-          }),
-        );
-        const sessions = results
-          .filter((r): r is PromiseFulfilledResult<unknown> => r.status === 'fulfilled')
-          .map((r) => r.value);
-        data = {
-          sessions,
-          ...(!sessions.length
-            ? { message: '没有可用的插件会话；请在 Cursor/VS Code 中打开项目并开启 MCP。' }
-            : {}),
-        };
+      if (request.params.name === 'get_usage_guide') {
+        data = getUsageGuide(args.topic as GuideTopic | undefined);
       } else {
-        const descriptor = descriptors.find((d) => d.sessionId === args.sessionId);
-        if (!descriptor)
-          throw new McpToolError('SESSION_UNAVAILABLE', '指定项目会话不可用或不在此 MCP 配置的范围内。');
-        await announce(descriptor, 'connected');
-        data = await requestSession(
-          descriptor,
-          { kind: 'call', tool: request.params.name, args },
-          extra.signal,
-        );
+        const descriptors = await discoverSessions(options.registryRoot, options.workspace);
+        if (request.params.name === 'list_sessions') {
+          const results = await Promise.allSettled(
+            descriptors.map(async (descriptor) => {
+              await announce(descriptor, 'connected');
+              return requestSession(descriptor, { kind: 'describe' }, extra.signal);
+            }),
+          );
+          const sessions = results
+            .filter((r): r is PromiseFulfilledResult<unknown> => r.status === 'fulfilled')
+            .map((r) => r.value);
+          data = {
+            sessions,
+            usageGuide: { tool: 'get_usage_guide', topics: guideTopics },
+            ...(!sessions.length
+              ? { message: '没有可用的插件会话；请在 Cursor/VS Code 中打开项目并开启 MCP。' }
+              : {}),
+          };
+        } else {
+          const descriptor = descriptors.find((d) => d.sessionId === args.sessionId);
+          if (!descriptor)
+            throw new McpToolError('SESSION_UNAVAILABLE', '指定项目会话不可用或不在此 MCP 配置的范围内。');
+          await announce(descriptor, 'connected');
+          data = await requestSession(
+            descriptor,
+            { kind: 'call', tool: request.params.name, args },
+            extra.signal,
+          );
+        }
       }
       const result =
         data !== null && typeof data === 'object' && !Array.isArray(data)

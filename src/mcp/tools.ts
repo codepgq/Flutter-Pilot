@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { guideTopics } from './guide';
 
 const session = { sessionId: z.string().min(1).max(256) };
 const key = z.union([z.string().min(1).max(512), z.number().int().safe()]);
@@ -10,12 +11,19 @@ const page = {
 };
 
 export const mcpTools = {
+  get_usage_guide: {
+    description:
+      '当需要编辑 rules.json/ws-rules.json、Mock API/WS、查找和操作Flutter UI或修复Key时，先读取本指南。包含字段说明、可复制示例和验证流程；topic为overview/http/ws/ui/workflow。无需sessionId或在线IDE。文件由Agent编辑，MCP负责重载和运行时操作。',
+    schema: z.object({ topic: z.enum(guideTopics).optional() }).strict(),
+  },
   list_sessions: {
-    description: '列出已开启 MCP 的 Flutter 项目及能力；后续调用必须明确指定 sessionId。',
+    description:
+      '需要Flutter Mock或UI操作时先get_usage_guide，再列出项目选择对应sessionId；不要操作无关项目。',
     schema: z.object({}).strict(),
   },
   get_ui_snapshot: {
-    description: '读取当前已挂载 UI 的有界快照，包含稳定 Key 和交互信息。',
+    description:
+      '不知道UI Key时先读取当前界面快照，从key/ancestorKeys发现目标，再find_widget确认唯一。详细流程见get_usage_guide(topic=ui)。',
     schema: z.object({ ...session, maxNodes: z.number().int().min(1).max(1000).optional() }).strict(),
   },
   find_widget: {
@@ -60,7 +68,8 @@ export const mcpTools = {
     schema: z.object({ ...session, maxNodes: z.number().int().min(1).max(1000).optional() }).strict(),
   },
   get_network_status: {
-    description: '查询采集、Mock 和规则加载状态及规则文件路径。规则由 Agent 编辑文件维护。',
+    description:
+      '编辑Mock前获取files.http/files.ws准确路径及开关状态；Agent读取并增量编辑文件，格式见get_usage_guide(topic=http/ws)，保存后reload_rules。',
     schema: z.object(session).strict(),
   },
   get_requests: {
@@ -98,7 +107,8 @@ export const mcpTools = {
       .strict(),
   },
   reload_rules: {
-    description: '校验并重新加载项目 HTTP/WS 规则文件，返回各域加载和运行时同步结果；不自动开启 Mock。',
+    description:
+      'Agent编辑rules.json/ws-rules.json后必须调用，检查loaded/synchronized/runtimeApplied/pending；不自动开启Mock，仍需显式开关并触发请求验证。字段及示例见get_usage_guide。',
     schema: z.object({ ...session, domain: z.enum(['http', 'ws', 'all']).optional() }).strict(),
   },
   set_capture_enabled: {

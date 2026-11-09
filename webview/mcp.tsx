@@ -163,6 +163,28 @@ export function McpPanel({
       <section className="card" aria-label="MCP 使用说明">
         <h3>Agent 工作流程</h3>
         <p>
+          Agent 连接后会收到能力与使用场景说明；需要 Mock、排查网络或操作 Flutter UI 时，先调用{' '}
+          <code>get_usage_guide</code> 读取对应指南。
+        </p>
+        <ul>
+          <li>
+            <code>topic: http</code>：rules.json 字段、JSON 正文及请求／响应修改示例。
+          </li>
+          <li>
+            <code>topic: ws</code>：ws-rules.json 的 URL、方向、文本替换／丢弃与消息验证。
+          </li>
+          <li>
+            <code>topic: ui</code>：快照发现 Key、父范围定位、点击、输入、滚动及 Key 问题处理。
+          </li>
+          <li>
+            <code>topic: workflow</code>：规则编辑、重载、开关、UI 操作与结果验证的完整流程。
+          </li>
+        </ul>
+        <p className="muted">
+          不传 topic 默认读取 overview。指南也通过 MCP 资源提供，无需在线 IDE 或会话；运行时操作仍需项目已开启
+          MCP 并连接 VM。
+        </p>
+        <p>
           编辑 <code>.api-mocks/rules.json</code> 或 <code>.api-mocks/ws-rules.json</code> → 调用{' '}
           <code>reload_rules</code> → 显式开启 Mock → 按 Key 操作 UI → 查询网络记录。
         </p>

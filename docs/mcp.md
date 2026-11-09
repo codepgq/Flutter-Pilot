@@ -28,6 +28,30 @@ Codex CLI 与 App 可能共用配置；卡片会显示共享来源，配置不�
 
 VM 认证地址不写入 Agent 配置。桥接进程通过私有 Unix socket 访问插件，每次请求校验本地会话凭证与工作区；注册文件、凭证和 socket 不进入项目仓库。
 
+## Agent 能力发现与使用指南
+
+MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉及 HTTP／WS Mock、网络排查、Flutter Widget 查找与交互、Key 缺陷时，说明会引导 Agent 主动读取指南并使用工具。`tools/list` 中也有简短说明，无需把整份手册始终塞进上下文。
+
+新增只读工具 `get_usage_guide`，无需 `sessionId`，插件未运行时也能读取：
+
+```json
+{ "topic": "http" }
+```
+
+| topic | 内容 |
+| --- | --- |
+| `overview`（默认） | 能力场景、首次调用、规则文件和运行前提 |
+| `http` | `rules.json` 的字段、完整合法示例、请求／响应修改、转发及验证流程 |
+| `ws` | `ws-rules.json` 的 URL、方向、文本匹配、替换／丢弃及双向消息验证 |
+| `ui` | 快照发现真实 Key、父范围查找、点击／输入／滚动／等待、Key 诊断与修复 |
+| `workflow` | 编辑规则 → 重载 → 显式开启采集／Mock → 操作 UI → 查询网络及页面结果 |
+
+同一份指南还可通过 `resources/list` 发现，URI 为 `flutter-api-mocks://guides/<topic>`，使用 `resources/read` 读取。工具入口兼容只使用 MCP tools 的 Agent，资源入口方便支持参考资料的客户端；两者返回相同内容。
+
+指南明确由 Agent 文件工具增量编辑规则，先通过 `get_network_status` 获取准确路径并保留已有规则。HTTP JSON 正文必须序列化为字符串；WS 规则针对业务连接，连接临时规则不能写入持久文件。保存后调用 `reload_rules`，检查各域加载与同步结果，再显式控制开关并验证本次新记录。UI 先用快照发现 Key，再确认唯一目标；没有 Key 时诊断并补业务源码，不回退文本定位。
+
+例如用户要求“模拟订单列表空数据并验证页面”，Agent 应先读取 `http`／`workflow` 指南，选择对应项目会话，读取并编辑规则，再完成重载、Mock、Key 操作和结果验证。具体是否主动调用仍由客户端 Agent 根据任务和上下文决定；MCP 说明提供发现与操作指引，不替代用户授权和客户端审批。
+
 ## Widget 定位与 Key 诊断
 
 正式定位支持精确的 `ValueKey<String>` 与 `ValueKey<int>`，工具参数 `key` 使用字符串或整数。可用 `ancestorKey` 限定父节点范围；Key 在局部树中可重复，范围内多个匹配会报告 `AMBIGUOUS_KEY`。
@@ -48,6 +72,7 @@ VM 认证地址不写入 Agent 配置。桥接进程通过私有 Unix socket 访
 
 | 工具                                       | 用途                                            |
 | ------------------------------------------ | ----------------------------------------------- |
+| `get_usage_guide`                          | 按主题读取规则编辑、UI 定位和验证指南，无需在线 IDE |
 | `list_sessions`                            | 获取已开启 MCP 的项目和能力                     |
 | `get_ui_snapshot`                          | 获取有界的已挂载 UI 结构                        |
 | `find_widget`                              | 按 Key 查询目标                                 |
@@ -60,13 +85,13 @@ VM 认证地址不写入 Agent 配置。桥接进程通过私有 Unix socket 访
 | `reload_rules`                             | 重新读取、校验并同步 `http`、`ws` 或 `all` 规则 |
 | `set_capture_enabled` / `set_mock_enabled` | 显式控制指定 `http`／`ws` 域的开关              |
 
-除 `list_sessions` 外，工具均需 `sessionId`。正式参数及边界以客户端发现的工具 schema 为准。MCP 不提供任意 Dart 求值、规则增删改或 WS 手动推送工具。
+除 `get_usage_guide`、`list_sessions` 外，工具均需 `sessionId`。正式参数及边界以客户端发现的工具 schema 为准。MCP 不提供任意 Dart 求值、规则增删改或 WS 手动推送工具。
 
 ## Agent 操作示例
 
 可以向编码 Agent 下达以下任务：
 
-> 调用 Flutter API Mocks 的 `list_sessions`，选择当前项目。查看 `get_network_status` 返回的规则路径，保留已有规则，只修改产品详情 Mock 正文。保存 `.api-mocks/rules.json` 后调用 `reload_rules`，确认加载和同步成功，显式开启 HTTP Mock。使用 Key `products.item.123` 点击产品，等待 Key `product.detail` 出现，查询对应 HTTP 请求并验证响应字段。出现 Key 诊断问题时修改业务源码补稳定 Key，重新验证；不要用文本点击绕过问题。
+> 读取 Flutter API Mocks 的 `get_usage_guide`（http／ui／workflow），调用 `list_sessions` 选择当前项目。查看 `get_network_status` 返回的规则路径，保留已有规则，只修改产品详情 Mock 正文。保存 `.api-mocks/rules.json` 后调用 `reload_rules`，确认加载和同步成功，显式开启 HTTP Mock。通过 `get_ui_snapshot` 找到实际产品及详情 Key，确认目标唯一后点击产品，等待详情出现，查询对应 HTTP 请求并验证响应字段。出现 Key 诊断问题时修改业务源码补稳定 Key，重新验证；不要用文本点击绕过问题。
 
 HTTP 规则保存在 `.api-mocks/rules.json`，WS 持久规则保存在 `.api-mocks/ws-rules.json`。Agent 直接维护文件；配置非法时保留文件及上一份有效规则。重载并不自动开启 Mock，WS 重载保留仍有效的连接临时规则。HTTP 与 WS 开关彼此独立，VM 断线后按原有规则关闭，重新连接后须显式开启。
 
