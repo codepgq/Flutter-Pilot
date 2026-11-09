@@ -163,4 +163,12 @@ describe('project-private storage migration', () => {
     await expect(prepareProjectStorage(root, uri, firstId)).rejects.toThrow('无法准备');
     expect(await readFile(join(outside, 'key.pem'), 'utf8')).toBe('synthetic external CA');
   });
+  it('rejects a symlink at the new WS private database before opening it', async () => {
+    const destination = await prepareProjectStorage(root, uri, firstId);
+    const outside = join(temporary, 'outside-ws.sqlite3');
+    await writeFile(outside, 'external-data');
+    await symlink(outside, join(destination, 'ws-history.sqlite3'));
+    await expect(prepareProjectStorage(root, uri, firstId)).rejects.toThrow('无法准备');
+    expect(await readFile(outside, 'utf8')).toBe('external-data');
+  });
 });

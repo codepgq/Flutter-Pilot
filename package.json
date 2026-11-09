@@ -2,7 +2,7 @@
   "name": "flutter-api-mocks",
   "displayName": "Flutter API Mocks",
   "description": "Flutter Dio API 调试工作台：VM 零源码采集、实验性运行时 Mock、HTTPS 代理与请求历史。",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "api-mocks",
   "license": "MIT",
   "engines": {
@@ -109,12 +109,14 @@
     "test:proxy": "python3 -m unittest discover -s tests/proxy -v",
     "test:ui": "playwright test",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-api-mocks-0.0.2.vsix",
+    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-api-mocks-0.0.3.vsix",
     "test:ide": "node scripts/ide-test.mjs",
     "format:check": "prettier --check \"src/**/*.ts\" \"webview/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/*.{mjs,cjs}\" \"*.{json,ts,mts}\"",
     "test:vm": "node scripts/vm-injection-smoke.mjs",
     "test:vm:flutter": "node scripts/vm-flutter-smoke.mjs",
-    "test:ide:vm": "node scripts/ide-vm-test.mjs"
+    "test:ide:vm": "node scripts/ide-vm-test.mjs",
+    "test:ws": "node scripts/ws-vm-smoke.mjs",
+    "test:ws:flutter": "node scripts/ws-flutter-smoke.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

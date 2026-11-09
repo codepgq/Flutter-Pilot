@@ -2045,3 +2045,445 @@ footer {
   width: 14px;
   height: 14px;
 }
+
+/* Business WebSocket workspace. */
+.ws-page {
+  padding: 28px 30px;
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.ws-page > *,
+.ws-workspace > *,
+.ws-lower-grid > * {
+  min-width: 0;
+}
+.ws-title {
+  margin-bottom: 0;
+}
+.ws-title > div {
+  min-width: 0;
+}
+.ws-controls {
+  padding: 18px 20px;
+  display: grid;
+  gap: 10px;
+}
+.ws-controls p {
+  font-size: 12px;
+}
+.ws-controls small,
+.ws-page small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.ws-control-actions,
+.ws-inline-actions,
+.ws-rule-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ws-switch-track {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  width: 30px;
+  height: 18px;
+  padding: 2px;
+  border: 1px solid var(--muted);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+}
+.ws-switch-track > span {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.15s;
+}
+.on .ws-switch-track {
+  background: var(--accent);
+  border-color: var(--focus);
+}
+.on .ws-switch-track > span {
+  background: var(--accent-fg);
+  transform: translateX(12px);
+}
+.ws-section-tabs {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.ws-section-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  border-radius: 0;
+  padding: 10px 16px;
+  color: var(--muted);
+}
+.ws-section-tabs button.active {
+  border-bottom-color: var(--focus);
+  color: var(--fg);
+}
+.ws-workspace {
+  display: grid;
+  grid-template-columns: minmax(190px, 26%) minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 340px;
+}
+.ws-connections {
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  max-height: 580px;
+  overflow: auto;
+}
+.ws-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.ws-connections > .ws-section-heading {
+  padding: 15px;
+}
+.ws-connection {
+  display: flex;
+  width: 100%;
+  align-items: stretch;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 12px 15px;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  white-space: normal;
+  background: transparent;
+}
+.ws-connection.selected,
+.ws-message-row.selected {
+  border-left-color: var(--focus);
+  background: color-mix(in srgb, var(--focus) 8%, transparent);
+}
+.ws-connection-top {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+.ws-connection-top strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.ws-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.ws-dot.online {
+  background: var(--focus);
+}
+.ws-message-pane {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+}
+.ws-message-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.ws-message-filter input {
+  flex: 1 1 120px;
+  width: 120px;
+}
+.ws-message-filter select {
+  flex: 0 1 auto;
+}
+.ws-message-filter button {
+  font-size: 11px;
+}
+.ws-connection-summary {
+  padding: 12px 15px;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.ws-connection-summary strong {
+  font-size: 12px;
+}
+.ws-connection-summary summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--muted);
+}
+.ws-connection-summary pre {
+  max-height: 180px;
+  overflow: auto;
+}
+.ws-message-list {
+  flex: 1 1 auto;
+  max-height: 500px;
+  overflow: auto;
+}
+.ws-message-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  padding: 12px 15px;
+  gap: 7px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  text-align: left;
+  white-space: normal;
+}
+.ws-message-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.ws-message-row code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.ws-direction.outbound {
+  color: color-mix(in srgb, var(--focus) 65%, var(--fg));
+}
+.ws-direction.inbound {
+  color: var(--fg);
+}
+.ws-outcome {
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  background: var(--subtle);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ws-outcome.replaced,
+.ws-outcome.synthetic {
+  background: color-mix(in srgb, var(--focus) 13%, transparent);
+  color: var(--focus);
+}
+.ws-outcome.dropped,
+.ws-dropped-hint {
+  color: var(--danger);
+}
+.ws-pagination {
+  padding: 10px 12px;
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+}
+.ws-pagination > span {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.ws-pagination button {
+  font-size: 11px;
+  padding: 5px 8px;
+}
+.ws-empty {
+  padding: 28px 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.ws-empty h3 {
+  margin-bottom: 6px;
+  color: var(--fg);
+}
+.ws-lower-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 16px;
+}
+.ws-detail,
+.ws-push,
+.ws-rule-editor,
+.ws-rule {
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+}
+.ws-detail > p,
+.ws-push > p,
+.ws-rules p {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.ws-id {
+  word-break: break-all;
+}
+.ws-body {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.ws-body-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--subtle);
+}
+.ws-body-toolbar strong {
+  font-size: 11px;
+}
+.ws-body-toolbar .ws-inline-actions {
+  margin-left: auto;
+}
+.ws-body-toolbar button {
+  font-size: 10px;
+  padding: 3px 6px;
+}
+.ws-body pre {
+  padding: 12px;
+  max-height: 420px;
+  overflow: auto;
+}
+.ws-body > small {
+  display: block;
+  padding: 6px 12px 0;
+}
+.ws-push textarea,
+.ws-rule-editor textarea {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  font-family: var(--vscode-editor-font-family, 'SFMono-Regular', Consolas, monospace);
+  font-size: 12px;
+}
+.ws-rules {
+  display: grid;
+  gap: 14px;
+}
+.ws-rules > .ws-section-heading {
+  align-items: flex-start;
+}
+.ws-rule-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ws-rule-switch {
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+}
+.ws-rule-header h3 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ws-priority {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+.ws-rule > code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.ws-rule-actions {
+  justify-content: flex-end;
+}
+.ws-rule-actions button {
+  font-size: 11px;
+  padding: 5px 9px;
+}
+.ws-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+.ws-rule-editor label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  font-size: 12px;
+}
+@media (max-width: 1000px) {
+  .ws-lower-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 760px) {
+  .nav-tabs {
+    gap: 10px;
+    max-width: 100%;
+  }
+  .nav-tabs > button {
+    flex-shrink: 0;
+  }
+  .ws-page {
+    padding: 22px 18px;
+    gap: 14px;
+  }
+  .ws-title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .ws-title h2 {
+    font-size: 21px;
+  }
+  .ws-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-connections {
+    max-height: 260px;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .ws-connection {
+    padding: 10px 14px;
+  }
+  .ws-controls,
+  .ws-detail,
+  .ws-push,
+  .ws-rule-editor,
+  .ws-rule {
+    padding: 14px;
+  }
+}
+@media (max-width: 480px) {
+  .ws-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-page .ws-rule-actions {
+    justify-content: flex-start;
+  }
+}

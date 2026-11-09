@@ -7,6 +7,9 @@ import { RuntimeManager } from './runtime';
 import { RuleStore } from './store';
 import { isFlutterWorkspace } from './discovery';
 import { VmSession } from './vm/session';
+import { isWebSocketHandshake } from './vm/profiler';
+import { WsRuleStore, validateWsRuleDocument } from './ws/rules';
+import type { WsRule, WsMessageQuery } from './ws/model';
 import { openProjectBinding, type ProjectBinding, type ProjectSettings } from './project';
 import { prepareProjectStorage } from './projectStorage';
 import {
@@ -201,6 +204,8 @@ class Workbench {
   private readonly engine = new EngineManager();
   private readonly runtime: RuntimeManager;
   private readonly store: RuleStore;
+  private readonly wsRules: WsRuleStore;
+  private wsPersistentRules: WsRule[] = [];
   private panel?: vscode.WebviewPanel;
   private initialization?: Promise<void>;
   private connectionDevices: string[] = [];
@@ -243,6 +248,7 @@ class Workbench {
     this.projectSettings = { ...project.config.settings };
     this.configuredPort = project.config.connection.configuredPort;
     this.store = new RuleStore(project.rulesDirectory);
+    this.wsRules = new WsRuleStore(project.rulesDirectory);
     this.vm = new VmSession(
       this.storage,
       {
@@ -382,6 +388,7 @@ class Workbench {
     const state: WorkbenchState = {
       mode: this.mode,
       vm: { ...this.vm.state },
+      ws: { ...this.vm.websocket.state },
       rules: this.rules,
       history: this.history,
       apis: this.apis,
@@ -434,6 +441,17 @@ class Workbench {
   private async initializeSession() {
     await mkdir(this.storage, { recursive: true, mode: 0o700 });
     this.rules = (await this.store.load()).rules;
+    this.wsPersistentRules = (await this.wsRules.load()).rules;
+    await this.vm.websocket.updateRules(this.wsPersistentRules);
+    await this.vm.websocket.init();
+    // Existing HTTP facts stay intact; only positively identified upgrade records are projected.
+    for (let offset = 0; offset < 100000; offset += 100) {
+      const old = await this.vm.store.list({ status: 101, limit: 100, offset }, false);
+      for (const entry of old.items) {
+        if (entry && isWebSocketHandshake(entry)) await this.vm.websocket.addHandshake(entry);
+      }
+      if (offset + old.items.length >= old.total) break;
+    }
     const connection = this.project.config.connection;
     this.mode = connection.mode;
     this.lan = connection.lan === true;
@@ -722,6 +740,25 @@ class Workbench {
     this.rules = document.rules;
     await this.syncSavedRules();
   }
+  private async saveWsRules(rules: unknown) {
+    const document = validateWsRuleDocument({ version: 1, rules });
+    for (const rule of document.rules) {
+      if (
+        rule.match.connectionId &&
+        !this.vm.websocket.state.connections.some(
+          (connection) =>
+            connection.id === rule.match.connectionId &&
+            connection.status === 'open' &&
+            connection.capture === 'attached',
+        )
+      )
+        throw new Error('临时 WS 规则只能绑定当前已接入的在线连接');
+    }
+    const persistent = document.rules.filter((rule) => !rule.match.connectionId);
+    await this.wsRules.save(persistent, this.wsPersistentRules);
+    this.wsPersistentRules = persistent;
+    await this.vm.websocket.updateRules(document.rules);
+  }
   private async syncSavedRules() {
     if (this.mode === 'vm') {
       try {
@@ -768,6 +805,92 @@ class Workbench {
     }
     await this.operation(async () => {
       switch (action) {
+        case 'ws.capture':
+          if (this.mode !== 'vm') throw new Error('WS 采集仅支持 VM 模式');
+          await this.vm.websocket.setCaptureEnabled(payload.enabled === true);
+          break;
+        case 'ws.mock':
+          await this.vm.websocket.setMockEnabled(payload.enabled === true);
+          break;
+        case 'ws.rescan':
+          await this.vm.websocket.rescan();
+          break;
+        case 'ws.query': {
+          const query: WsMessageQuery = { limit: 30, offset: Number(payload.offset) || 0 };
+          if (typeof payload.connectionId === 'string' && payload.connectionId)
+            query.connectionId = payload.connectionId;
+          if (payload.direction === 'inbound' || payload.direction === 'outbound')
+            query.direction = payload.direction;
+          if (typeof payload.search === 'string') query.search = payload.search.slice(0, 1000);
+          await this.vm.websocket.refresh(query);
+          break;
+        }
+        case 'ws.select': {
+          const selected = await this.vm.websocket.store.get(String(payload.id));
+          void this.panel?.webview.postMessage({ type: 'ws.detail', message: selected ?? null });
+          break;
+        }
+        case 'ws.push':
+          if (typeof payload.text !== 'string') throw new Error('推送正文必须为文本');
+          await this.vm.websocket.push(String(payload.connectionId), payload.text);
+          break;
+        case 'ws.clear': {
+          const confirmed = await vscode.window.showWarningMessage(
+            '清空 WS 消息历史？此操作不关闭连接或删除规则。',
+            { modal: true },
+            '清空',
+          );
+          if (confirmed === '清空') {
+            await this.vm.websocket.store.clear(
+              typeof payload.connectionId === 'string' ? payload.connectionId : undefined,
+            );
+            await this.vm.websocket.refresh();
+            void this.panel?.webview.postMessage({ type: 'ws.detail', message: null });
+          }
+          break;
+        }
+        case 'ws.rules.open':
+          await vscode.window.showTextDocument(vscode.Uri.file(this.wsRules.file), { preview: false });
+          break;
+        case 'ws.rules.save': {
+          const rule = payload.rule as WsRule;
+          const current = this.vm.websocket.state.rules;
+          await this.saveWsRules(
+            current.some((r) => r.id === rule?.id)
+              ? current.map((r) => (r.id === rule?.id ? rule : r))
+              : [...current, rule],
+          );
+          break;
+        }
+        case 'ws.rules.toggle':
+          await this.saveWsRules(
+            this.vm.websocket.state.rules.map((r) =>
+              r.id === payload.id ? { ...r, enabled: !r.enabled } : r,
+            ),
+          );
+          break;
+        case 'ws.rules.delete':
+          await this.saveWsRules(this.vm.websocket.state.rules.filter((r) => r.id !== payload.id));
+          break;
+        case 'ws.rules.duplicate': {
+          const rule = this.vm.websocket.state.rules.find((r) => r.id === payload.id);
+          if (!rule) throw new Error('WS 规则不存在');
+          await this.saveWsRules([
+            ...this.vm.websocket.state.rules,
+            { ...structuredClone(rule), id: randomUUID(), name: `${rule.name}（副本）`, enabled: false },
+          ]);
+          break;
+        }
+        case 'ws.rules.move': {
+          const rules = [...this.vm.websocket.state.rules].sort((a, b) => b.priority - a.priority);
+          const i = rules.findIndex((r) => r.id === payload.id);
+          const target = i + (payload.delta === -1 ? -1 : 1);
+          if (i >= 0 && target >= 0 && target < rules.length) {
+            [rules[i], rules[target]] = [rules[target], rules[i]];
+            await this.saveWsRules(rules.map((r, index) => ({ ...r, priority: rules.length - index })));
+          }
+          break;
+        }
         case 'project.open': {
           await this.project.reload();
           const file = payload.kind === 'rules' ? this.store.file : this.project.file;
@@ -777,6 +900,12 @@ class Workbench {
         case 'project.reload': {
           await this.project.reload();
           const document = await this.store.load();
+          const wsDocument = await this.wsRules.load();
+          this.wsPersistentRules = wsDocument.rules;
+          await this.vm.websocket.updateRules([
+            ...wsDocument.rules,
+            ...this.vm.websocket.state.rules.filter((r) => !!r.match.connectionId),
+          ]);
           this.rules = document.rules;
           await this.syncSavedRules();
           this.projectNotice = '项目文件已读取，规则已同步；接入方式和采集参数的变更在重新加载窗口后生效。';

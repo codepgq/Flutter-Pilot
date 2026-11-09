@@ -120,3 +120,19 @@
 - VmSession 在初始化提交前检查真实 socket / 状态 / generation，意外断开立即失效本次初始化，清旧 endpoint 和计数；成功状态使用实际 DDS 端点。
 - 174 项 Vitest、24 项 Playwright、类型 / 格式 / 构建通过；真实 Flutter 从原始 WS 经过 DDS 跳转后 getVM 只读验证通过。未改 EXIO 源码、未发业务请求、未保存认证地址；完整验证见 docs/validation.md。
 - 最新 VSIX 解包后的 Cursor VM 隔离宿主退出 0；已强制覆盖安装，安装的扩展和 Webview JS/CSS 与构建 SHA-256 一致。未自动重载用户窗口，需重载后输入本次有效 WS；未提交或推送。
+
+
+## 0.0.3 WebSocket 实现与验收（2026-11-09）
+
+- `src/vm/websocket.ts` 与独立 Dart 模板包装已有 dart:io WS 的入站订阅及协议编码前稳定出站订阅，覆盖 add/addStream/addUtf8Text；不修改应用源码、adapter/TLS。运行时结构探测，handler 身份保护，15 秒租约；外部工具改 handler 后插件旧 wrapper 也立即旁路。
+- `src/ws/` 提供独立状态机、规则及私有 SQLite。WS Mock 与 Dio 分开；RPC/同步失败停止续租旧规则；同步 invalidate 和 epoch/revision 防旧异步结果复活在线状态。存储/事件队列有界，过载只丢记录并计数，业务流不等待 IDE。
+- 握手仅成功101能用于关联，以Isolate/本地端口/远端地址端口唯一匹配；握手绑定socket serviceId不可转移，URL未知不命中URL规则。控制连接排除、临时规则随准确连接关闭过期。新VM握手不入HTTP目录，旧VM握手只投影不改事实或旧累计数，代理握手沿旧行为。
+- WebSocket Tab：连接/消息、原始与生效对比、JSON/原文、复制、分页搜索、独立采集与Mock、手动入站推送，以及WS规则CRUD/排序。规则外部编辑需读取项目文件，不覆盖磁盘，失败保留编辑草稿。
+- 233项Vitest、28项UI、TypeScript/Webview类型检查、格式检查、构建通过；Cursor与VS Code隔离VM宿主新WS规则/查询/详情/冲突保护链路均退出0。Python代理规则/存储17项通过，19项引擎集成因未指定MITMDUMP跳过；本轮未宣称全部代理实测。
+- Dart3.13.7真实隔离WS/WSS：双向replace/drop/push、UTF8/流、二进制、pingpong、pause/resume、租约旁路、未发送close、SDK握手→URL规则、外部handler所有权、500burst全部业务送达且400遗漏计数。每种保存115消息。
+- Flutter3.47.8/Dart3.13.7，iPhone18 Pro/iOS27.2模拟器一次性fixture四连接：dart:io WS/WSS及web_socket_channel3.0.3 WS/WSS，双向规则/推送不串线、addUtf8Text/addStream、卸载恢复、Hot Restart新isolate/新ID/旧推送拒绝和采集恢复均通过，25消息，无warning，fixture源码SHA不变。未连接或修改用户EXIO App。
+- SDK HTTP profiling会缓存HTTP正文，App内无本插件强制容量上限；本机历史上限不能替代该边界。Android/iOS真机、其他SDK、Socket.IO/原生插件/WebView未验收。具体见docs/v0.0.3-websocket.md、docs/validation.md。代码未自动提交，未覆盖用户当前安装。
+
+- 最终0.0.3 VSIX已生成，解包逐项核对extension.js、webview.js/css及两份Dart模板与构建一致；使用解包产物在Cursor隔离宿主执行新增WS消息链路验收退出0。SHA-256记录于忽略目录artifacts/v0.0.3-package-report.json。未覆盖当前安装。
+
+- 用户随后要求覆盖安装到 Cursor，CLI `--force` 安装 0.0.3 成功；活动扩展登记为 api-mocks.flutter-api-mocks@0.0.3，安装后扩展/Webview JS/CSS 与两份 Dart 模板均与 VSIX SHA-256 一致。未自动重载用户窗口。用户已明确要求提交本轮实现。

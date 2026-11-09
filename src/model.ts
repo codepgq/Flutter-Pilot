@@ -107,6 +107,7 @@ export interface ApiCatalogEntry {
   lastAt: number;
 }
 export interface WorkbenchState {
+  ws?: import('./ws/model').WsState;
   project?: {
     id: string;
     name: string;

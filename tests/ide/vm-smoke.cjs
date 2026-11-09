@@ -46,6 +46,58 @@ exports.run = async () => {
   const rulesFile = path.join(workspace.fsPath, '.api-mocks', 'rules.json');
   assert.deepEqual(JSON.parse(await fs.readFile(rulesFile, 'utf8')), { version: 1, rules: [] });
   await fs.access(path.join(storage, 'vm-history.sqlite3'));
+  const wsRulesFile = path.join(workspace.fsPath, '.api-mocks', 'ws-rules.json');
+  await fs.access(path.join(storage, 'ws-history.sqlite3'));
+  assert.deepEqual(JSON.parse(await fs.readFile(wsRulesFile, 'utf8')), { version: 1, rules: [] });
+  const wsRule = {
+    id: 'ide-ws-rule',
+    name: 'WS IDE fixture',
+    enabled: true,
+    priority: 0,
+    match: { url: 'wss://business.example.test/*', direction: 'inbound', contains: 'original' },
+    action: { type: 'replace', text: 'mocked' },
+  };
+  await workbench.handle({ action: 'ws.rules.save', payload: { rule: wsRule } });
+  assert.deepEqual(JSON.parse(await fs.readFile(wsRulesFile, 'utf8')).rules, [wsRule]);
+  await fs.writeFile(wsRulesFile, JSON.stringify({ version: 1, rules: [] }));
+  await assert.rejects(
+    workbench.handle({ action: 'ws.rules.toggle', payload: { id: wsRule.id } }),
+    /已被修改/,
+  );
+  await workbench.handle({ action: 'project.reload', payload: {} });
+  await workbench.handle({ action: 'ws.rules.save', payload: { rule: wsRule } });
+  await workbench.vm.websocket.store.putConnection({
+    id: 'ide-ws',
+    isolateId: 'fixture',
+    endpoint: 'business.example.test:443',
+    status: 'closed',
+    capture: 'unsupported',
+    openedAt: Date.now(),
+    sent: 1,
+    received: 0,
+  });
+  await workbench.vm.websocket.store.putMessage({
+    id: 'ide-ws-message',
+    connectionId: 'ide-ws',
+    timestamp: Date.now(),
+    direction: 'inbound',
+    kind: 'text',
+    original: 'original',
+    effective: 'mocked',
+    encoding: 'text',
+    bytes: 8,
+    truncated: false,
+    outcome: 'replaced',
+    ruleId: wsRule.id,
+  });
+  await workbench.handle({ action: 'ws.query', payload: { connectionId: 'ide-ws' } });
+  assert.equal(workbench.vm.websocket.state.messages.total, 1);
+  assert.equal(workbench.vm.websocket.state.messages.items[0].original, undefined, 'summary excludes body');
+  await workbench.handle({ action: 'ws.select', payload: { id: 'ide-ws-message' } });
+  await assert.rejects(
+    workbench.handle({ action: 'ws.push', payload: { connectionId: 'ide-ws', text: 'manual' } }),
+    /开启 WS Mock/,
+  );
   await missing(path.join(storage, 'ca'));
   await missing(path.join(storage, 'history.sqlite3'));
   await missing(path.join(globalStorage, 'engines'));
@@ -142,6 +194,8 @@ exports.run = async () => {
       payload: { url: `ws://127.0.0.1:${server.address().port}/synthetic-auth-token=/ws` },
     });
     assert.equal(workbench.vm.state.status, 'connected');
+    assert.equal(workbench.vm.websocket.state.captureEnabled, false);
+    assert.equal(workbench.vm.websocket.state.mockEnabled, false);
     assert.ok(rpcCalls.includes('getVM'));
     assert.equal(workbench.vm.state.endpoint, `127.0.0.1:${server.address().port}`);
     assert.equal(workbench.engine.state.status, 'stopped');
@@ -161,7 +215,7 @@ exports.run = async () => {
     await workbench.dispose();
     await waitFor(() => server.clients.size === 0);
     console.log(
-      'IDE_VM_ONLY_PASS: project UUID/name/config/rules and isolated storage, rule save/reload/conflict protection, default VM mode, no engine or CA, offline SQLite/catalog, history route, synthetic VM WS, close/reopen, URL not persisted, disposal disconnects',
+      'IDE_VM_ONLY_PASS: HTTP and WS private SQLite/query/detail, WS project rules save/reload/conflict protection, independent WS capture/Mock default off and offline push rejection, project binding, synthetic VM transport and disposal',
     );
   } finally {
     await workbench.dispose();

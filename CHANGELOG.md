@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.3 — 业务 WebSocket（2026-11-09）
+
+- 新增独立 WebSocket Tab：连接列表、双向消息、正文与生效内容对比、JSON 格式化和摘要分页。
+- 新增手动开启的实验性 VM WS 采集和独立 Mock 开关，支持文本整条替换、丢弃与向 App 手动模拟推送；不修改应用源码或 TLS。
+- 项目 WS 规则独立保存到 `.api-mocks/ws-rules.json`；URL 未知时可创建当前连接临时规则，临时规则不落盘。
+- WS 历史使用工作区隔离的私有 SQLite；正文和队列有界，断线及租约到期自动旁路，关闭工作台后继续记录。
+- 新握手从 HTTP API 目录分离，旧 HTTP 历史保留；详细验证和支持边界见 `docs/v0.0.3-websocket.md` 与 `docs/validation.md`。
+
 ## 0.0.2 — VM Service（2026-11-08）
 
 本版本沿用用户指定版本号；低于之前的 0.1.0，已有安装需使用 `--force` 覆盖 VSIX。

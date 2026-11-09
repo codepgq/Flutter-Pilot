@@ -2,8 +2,44 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import type { BodySnapshot, HistoryEntry } from '../model';
 import { type VmRpc, VmServiceClient } from './client';
+import type { WsHandshake } from '../ws/model';
 
 type ObjectMap = Record<string, any>;
+export function isWebSocketHandshake(entry: HistoryEntry): boolean {
+  return (
+    /^wss?:/i.test(entry.url) ||
+    [...entry.request.headers, ...(entry.response?.headers ?? [])].some(
+      ([key, value]) => key.toLowerCase() === 'upgrade' && value.toLowerCase().trim() === 'websocket',
+    )
+  );
+}
+
+export function websocketHandshake(
+  profile: ObjectMap,
+  entry: HistoryEntry,
+  isolateId: string,
+): WsHandshake | undefined {
+  if (!isWebSocketHandshake(entry) || entry.response?.status !== 101) return;
+  const info = profile.response?.connectionInfo ?? profile.request?.connectionInfo;
+  if (
+    !info ||
+    !Number.isInteger(info.localPort) ||
+    !Number.isInteger(info.remotePort) ||
+    typeof info.remoteAddress !== 'string'
+  )
+    return;
+  const url = new URL(entry.url);
+  url.protocol = url.protocol === 'https:' || url.protocol === 'wss:' ? 'wss:' : 'ws:';
+  return {
+    isolateId,
+    url: url.toString(),
+    localPort: info.localPort,
+    remotePort: info.remotePort,
+    remoteAddress: info.remoteAddress,
+    timestamp: entry.startedAt,
+    entry,
+  };
+}
 interface IsolateState {
   id: string;
   enabledByUs: boolean;
@@ -76,7 +112,7 @@ export function normalizeHttpProfile(
   } catch {
     return;
   }
-  if (!['http:', 'https:'].includes(url.protocol)) return;
+  if (!['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)) return;
   const method = String(profile.method ?? profile.request?.method ?? 'GET').toUpperCase();
   const request = {
     ...body(profile.requestBody, headers(profile.request?.headers), maxBodyBytes),
@@ -133,6 +169,8 @@ export class VmNetworkProfiler extends EventEmitter {
   private lastDiscovery = 0;
   private recorded = 0;
   private captureEnabled = true;
+  private handshakeCaptureEnabled = false;
+  private flagWork: Promise<void> = Promise.resolve();
   private subscribed: string[] = [];
   private readonly intervalMs: number;
   private readonly maxBodyBytes: number;
@@ -214,12 +252,13 @@ export class VmNetworkProfiler extends EventEmitter {
         });
         const restoreOwned =
           vmIdentity !== undefined && this.pendingRestores.get(vmIdentity)?.has(id) === true;
-        if (this.captureEnabled && old.enabled !== true)
+        if ((this.captureEnabled || this.handshakeCaptureEnabled) && old.enabled !== true)
           await this.rpc.call('ext.dart.io.httpEnableTimelineLogging', { isolateId: id, enabled: true });
         this.states.set(id, {
           id,
           vmIdentity,
-          enabledByUs: restoreOwned || (this.captureEnabled && old.enabled !== true),
+          enabledByUs:
+            restoreOwned || ((this.captureEnabled || this.handshakeCaptureEnabled) && old.enabled !== true),
         });
         if (restoreOwned) this.forgetPendingRestore(vmIdentity!, id);
       } catch {
@@ -256,7 +295,24 @@ export class VmNetworkProfiler extends EventEmitter {
   async setCaptureEnabled(enabled: boolean): Promise<void> {
     if (enabled === this.captureEnabled) return;
     this.captureEnabled = enabled;
+    await this.updateCaptureFlags();
+  }
+
+  async setHandshakeCaptureEnabled(enabled: boolean): Promise<void> {
+    if (enabled === this.handshakeCaptureEnabled) return;
+    this.handshakeCaptureEnabled = enabled;
+    await this.updateCaptureFlags();
+  }
+
+  private updateCaptureFlags(): Promise<void> {
+    const work = this.flagWork.then(() => this.applyCaptureFlags());
+    this.flagWork = work.catch(() => undefined);
+    return work;
+  }
+
+  private async applyCaptureFlags(): Promise<void> {
     await this.work?.catch(() => {});
+    const enabled = this.captureEnabled || this.handshakeCaptureEnabled;
     for (const state of this.states.values()) {
       try {
         if (!enabled && state.enabledByUs) {
@@ -290,7 +346,7 @@ export class VmNetworkProfiler extends EventEmitter {
     let remaining = this.maxDetailsPerPoll;
     for (const state of this.states.values()) {
       if (!this.running) break;
-      if (!this.captureEnabled) continue;
+      if (!this.captureEnabled && !this.handshakeCaptureEnabled) continue;
       try {
         const profile = await this.rpc.call<ObjectMap>('ext.dart.io.getHttpProfile', {
           isolateId: state.id,
@@ -320,8 +376,12 @@ export class VmNetworkProfiler extends EventEmitter {
           // updatedSince cursor means old completed requests need not be retained.
           if (this.completed.size > 20000) this.completed.delete(this.completed.values().next().value!);
           if (entry) {
-            this.recorded++;
-            this.emit('history', entry);
+            if (isWebSocketHandshake(entry)) {
+              this.emit('websocket', entry, websocketHandshake(details, entry, state.id));
+            } else if (this.captureEnabled) {
+              this.recorded++;
+              this.emit('history', entry);
+            }
           }
         }
         if (!exhausted && Number.isFinite(profile.timestamp))
@@ -352,6 +412,7 @@ export class VmNetworkProfiler extends EventEmitter {
     if (this.timer) clearTimeout(this.timer);
     if (this.rpc instanceof VmServiceClient) this.rpc.off('notification', this.notification);
     await this.work?.catch(() => {});
+    await this.flagWork.catch(() => undefined);
     for (const state of this.states.values()) {
       if (!state.enabledByUs) continue;
       try {
@@ -378,5 +439,6 @@ export class VmNetworkProfiler extends EventEmitter {
     }
     this.subscribed = [];
     this.states.clear();
+    this.handshakeCaptureEnabled = false;
   }
 }

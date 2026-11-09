@@ -159,3 +159,23 @@ VM 连接默认仅采集，用户主动开启运行时 Mock 后才安装拦截�
 - 真实 EXIO worktree 的当前 Flutter VM：原始 WS 返回 HTTP 302 到本机 DDS，修复后的 VmServiceClient 从原始地址连接并完成只读 getVM，返回 VM 与 1 个 Isolate；实际端点更新为 DDS。未修改应用源码、profiling 或业务请求，完整认证地址未保存。此项仅验收传输和只读 RPC，不代表重新完成业务 Mock 或登录验收。
 - 已查看 `artifacts/workbench-vm-connected.png` 合成截图：680px 下显示“已连接 · 当前端点”，地址输入禁用，仅保留断开；连接中、失败与断开的端点和按钮状态由 Playwright 验证。
 - 原用户日志仅记录统一错误，截图端点可能残留自旧会话，不能反推出当次输入；本轮将可复现 DDS 缺陷与旧端点/状态缺陷分别修复。
+
+
+## 0.0.3 WebSocket（2026-11-09）
+
+| 层级 | 本轮实际结果 |
+| --- | --- |
+| 类型/格式/构建 | TypeScript、Webview、Prettier、构建与diff检查通过 |
+| 单元及存储 | 233项Vitest通过；包含真实SQLite、规则外部编辑保护、生命周期串行及断线竞态回归 |
+| 工作台 | 28项Playwright通过，其中4项WS UI；680px深浅色截图已目视，截图使用合成数据 |
+| IDE消息链路 | Cursor及VS Code隔离宿主退出0；WS规则保存/读取/冲突保护、私有历史摘要/详情、默认采集Mock关、离线推送拒绝 |
+| Dart真实VM | Dart3.13.7，WS/WSS各保存115条消息，500条burst业务均送达、400条遗漏计数；双向替换/丢弃、手动推送、addStream/addUtf8Text、binary、ping/pong、暂停恢复、租约过期、卸载、未发送即close、SDK握手→URL规则与外部handler保护通过 |
+| Flutter真实模拟器 | Flutter3.47.8/Dart3.13.7，iPhone18 Pro/iOS27.2；四个并行dart:io WS/WSS、web_socket_channel3.0.3 WS/WSS；双向替换/丢弃/推送不串线、UTF8/流、卸载恢复、Hot Restart重新发现及拒绝旧推送通过，共25消息，无warning |
+| 源码与TLS | 一次性测试fixture源码SHA-256在运行时安装前后相同；不连接或改用户EXIO App。WSS使用测试CA加入fixture可信根，未跳过证书校验；生产注入不改TLS或CA |
+| 代理回归 | 17项Python规则/存储通过；19项需MITMDUMP的引擎集成跳过，本轮未重新验收代理设备链路 |
+
+复现命令：`npm run test:ws`；`VM_FLUTTER_DEVICE=<booted-simulator-id> npm run test:ws:flutter`；`API_MOCK_TEST_IDE=cursor npm run test:ide:vm`（vscode同理）。
+
+本轮未验收Android、iOS真机、其他Dart SDK、Socket.IO专用协议、原生插件或WebView；不把测试fixture成功当作EXIO业务WS或登录链路验收。URL关联会开启SDK HTTP profiling，App内缓存无插件强制容量上限；本地历史有界不替代该边界。代理WS不在首版范围。
+
+安装产物为`artifacts/flutter-api-mocks-0.0.3.vsix`，包含独立WS Dart模板；未覆盖用户当前安装，未自动提交或推送。

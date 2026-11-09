@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { VmNetworkProfiler, normalizeHttpProfile } from '../src/vm/profiler';
+import {
+  VmNetworkProfiler,
+  normalizeHttpProfile,
+  websocketHandshake,
+  isWebSocketHandshake,
+} from '../src/vm/profiler';
 import type { VmRpc } from '../src/vm/client';
 
 const now = Date.now() * 1000;
@@ -99,6 +104,52 @@ describe('VM network profile normalization', () => {
 });
 
 describe('VM profiling lifecycle', () => {
+  it('routes upgrade handshakes to WS and keeps collecting them while Dio owns HTTP capture', async () => {
+    const vm = new FakeVm();
+    const upgraded = profile('ws', {
+      uri: 'https://example.test/socket?channel=prices',
+      response: {
+        statusCode: 101,
+        headers: { upgrade: ['websocket'] },
+        endTime: now + 20000,
+        connectionInfo: { localPort: 40001, remotePort: 443, remoteAddress: '127.0.0.1' },
+      },
+    });
+    vm.requests = [upgraded];
+    const profiler = new VmNetworkProfiler(vm, { intervalMs: 60000 });
+    const http: unknown[] = [];
+    const ws: unknown[][] = [];
+    profiler.on('history', (entry) => http.push(entry));
+    profiler.on('websocket', (...args) => ws.push(args));
+    await profiler.start();
+    expect(http).toHaveLength(0);
+    expect(ws[0][1]).toMatchObject({
+      url: 'wss://example.test/socket?channel=prices',
+      localPort: 40001,
+      remotePort: 443,
+    });
+    await profiler.setHandshakeCaptureEnabled(true);
+    await profiler.setCaptureEnabled(false);
+    vm.requests.push(profile('ws2', { ...upgraded, id: 'ws2' }));
+    await profiler.pollNow();
+    expect(ws).toHaveLength(2);
+    await profiler.stop();
+  });
+  it('requires actual upgrade evidence and a complete socket tuple before URL association', () => {
+    const ordinary = normalizeHttpProfile(profile(), 's', 'i')!;
+    expect(isWebSocketHandshake(ordinary)).toBe(false);
+    expect(websocketHandshake({}, ordinary, 'i')).toBeUndefined();
+    const upgraded = {
+      ...ordinary,
+      response: {
+        ...ordinary.response!,
+        status: 101,
+        headers: [['Upgrade', 'websocket']] as [string, string][],
+      },
+    };
+    expect(isWebSocketHandshake(upgraded)).toBe(true);
+    expect(websocketHandshake({}, upgraded, 'i')).toBeUndefined();
+  });
   it('retains failed ownership across an immediate reconnect to the same VM and warns about App-side collection', async () => {
     const vm = new FakeVm();
     const profiler = new VmNetworkProfiler(vm, { intervalMs: 60000 });

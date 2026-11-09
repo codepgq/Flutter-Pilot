@@ -79,6 +79,9 @@ const report = {
     'project rule save/reload and external-edit overwrite protection',
     'mode persistence without authentication URL',
     'session disposal disconnects',
+    'WS independent SQLite query/detail routes and summary-only state',
+    'WS project rules save/reload and external-edit conflict protection',
+    'WS capture/Mock default off and disconnected push rejected',
   ],
   limits: [
     'Synthetic JSON-RPC server; this does not prove Flutter runtime injection.',

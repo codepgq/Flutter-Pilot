@@ -13,6 +13,7 @@ import {
 } from '../src/model';
 import './style.css';
 import { inspectJson } from './body';
+import { WebSocketPanel } from './websocket';
 
 declare global {
   interface Window {
@@ -44,7 +45,7 @@ const initial: WorkbenchState = {
   logs: [],
   busy: false,
 };
-type Tab = 'history' | 'rules' | 'breakpoints' | 'connection';
+type Tab = 'history' | 'rules' | 'breakpoints' | 'connection' | 'websocket';
 type Snapshot = RequestSnapshot | ResponseSnapshot;
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
@@ -344,6 +345,7 @@ function App() {
   const nav: { id: Tab; label: string; icon: string; count?: number }[] = [
     { id: 'connection', label: '连接与诊断', icon: 'plug' },
     { id: 'history', label: 'API 与历史', icon: 'history', count: state.history.total },
+    { id: 'websocket', label: 'WebSocket', icon: 'radar', count: state.ws?.messages.total ?? 0 },
     { id: 'rules', label: 'Mock 规则', icon: 'rules', count: state.rules.length },
     { id: 'breakpoints', label: '断点队列', icon: 'pause', count: state.pending.length },
   ];
@@ -475,6 +477,15 @@ function App() {
           </>
         )}
         {tab === 'history' && <History key={state.mode ?? 'vm'} state={state} selected={selected} />}
+        {tab === 'websocket' && (
+          <WebSocketPanel
+            state={state.ws}
+            connected={state.vm?.status === 'connected'}
+            vmMode={vmMode}
+            busy={state.busy}
+            send={send}
+          />
+        )}
         {tab === 'rules' && <Rules state={state} edit={edit} setEdit={setEdit} />}
         {tab === 'breakpoints' && (
           <>
@@ -489,7 +500,7 @@ function App() {
       </main>
       <footer>
         <span className="footer-brand">
-          FLUTTER API MOCKS <span>v0.0.2</span>
+          FLUTTER API MOCKS <span>v0.0.3</span>
         </span>
         <span>
           {running
@@ -684,7 +695,7 @@ function Connection({
       <div className="connection-page">
         <div className="page-title">
           <div>
-            <div className="eyebrow">VM SERVICE · 0.0.2</div>
+            <div className="eyebrow">VM SERVICE · 0.0.3</div>
             <h2>连接 Flutter VM，零源码记录 API</h2>
             <p>推荐通过 VM WS 接入，无需改源码或证书；连接后先记录，按需开启运行时 Dio Mock。</p>
           </div>

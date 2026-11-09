@@ -38,7 +38,7 @@ async function validateDirectory(path: string): Promise<void> {
 }
 
 async function validateDestination(path: string): Promise<void> {
-  for (const name of ['history.sqlite3', 'vm-history.sqlite3', 'connection.json'])
+  for (const name of ['history.sqlite3', 'vm-history.sqlite3', 'ws-history.sqlite3', 'connection.json'])
     await regularFile(join(path, name));
   const ca = join(path, 'ca');
   if (await exists(ca)) await validateDirectory(ca);

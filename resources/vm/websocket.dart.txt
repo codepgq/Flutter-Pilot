@@ -1,0 +1,148 @@
+(() {
+  final dynamic api = tools;
+  final state = <String, dynamic>{
+    'session': __SESSION__, 'isolate': __ISOLATE__, 'enabled': true,
+    'mock': false, 'rules': <dynamic>[], 'expiresAt': DateTime.now().millisecondsSinceEpoch + 15000,
+    'records': <int, dynamic>{}, 'queue': <dynamic>[], 'queuedBytes': 0, 'omitted': 0,
+    'sequence': 0, 'limit': __LIMIT__, 'config': <String, dynamic>{}, 'timer': null,
+  };
+  bool active() => state['enabled'] == true && DateTime.now().millisecondsSinceEpoch < state['expiresAt'];
+  void flush() {
+    if (state['queue'].isEmpty && state['omitted'] == 0) return;
+    final messages = List<dynamic>.from(state['queue']);
+    final omitted = state['omitted'];
+    state['queue'].clear(); state['queuedBytes'] = 0; state['omitted'] = 0;
+    try { emitEvent('api_mocks.vm.ws', {'session': state['session'], 'messages': messages, 'omitted': omitted}); } catch (_) {}
+  }
+  void enqueue(dynamic message) {
+    final size = (message['original'] as String).length * 3 + ((message['effective'] ?? '') as String).length * 3 + 512;
+    if (state['queue'].length >= 100 || state['queuedBytes'] + size > 2 * 1024 * 1024) { state['omitted']++; return; }
+    state['queue'].add(message); state['queuedBytes'] += size;
+  }
+  Map<String, dynamic> snapshot(dynamic data) {
+    if (data is List<int>) {
+      return {'kind': 'binary', 'original': base64Encode(data.take(state['limit']).toList()), 'encoding': 'base64', 'bytes': data.length, 'truncated': data.length > state['limit']};
+    }
+    if (data is _EncodedString) {
+      final bytes = data.bytes;
+      return {'kind': 'text', 'original': utf8.decode(bytes.take(state['limit']).toList(), allowMalformed: true), 'encoding': 'text', 'bytes': bytes.length, 'truncated': bytes.length > state['limit']};
+    }
+    final text = data as String;
+    var count = 0; var end = 0;
+    for (var i = 0; i < text.length; i++) {
+      final c = text.codeUnitAt(i);
+      var length = c < 0x80 ? 1 : c < 0x800 ? 2 : 3;
+      if (c >= 0xd800 && c <= 0xdbff && i + 1 < text.length) {
+        final next = text.codeUnitAt(i + 1);
+        if (next >= 0xdc00 && next <= 0xdfff) { length = 4; i++; }
+      }
+      count += length;
+      if (count <= state['limit']) end = i + 1;
+    }
+    return {'kind': 'text', 'original': text.substring(0, end), 'encoding': 'text', 'bytes': count, 'truncated': count > state['limit']};
+  }
+  dynamic ruleFor(dynamic record, String direction, String text) {
+    for (final rule in state['rules']) {
+      if (rule['enabled'] != true) continue;
+      final match = rule['match'];
+      if (match['direction'] != null && match['direction'] != direction) continue;
+      if (match['connectionId'] != null && match['connectionId'] != record['id']) continue;
+      if (match['url'] != null && (record['url'] == null || !RegExp(rule['_urlRegex']).hasMatch(record['url']))) continue;
+      if (match['contains'] != null && !text.contains(match['contains'])) continue;
+      return rule;
+    }
+    return null;
+  }
+  void receive(dynamic record, String direction, dynamic data, dynamic originalHandler) {
+    if (!active() || record['enabled'] != true) { originalHandler(data); return; }
+    if (data is! String && data is! List<int> && data is! _EncodedString) { originalHandler(data); return; }
+    dynamic forwarded = data; var dropped = false;
+    try {
+      record[direction == 'outbound' ? 'sent' : 'received']++;
+      final value = snapshot(data);
+      String outcome = 'original'; String? ruleId; String? effective;
+      if (state['mock'] == true && value['kind'] == 'text' && value['truncated'] != true) {
+        final rule = ruleFor(record, direction, value['original']);
+        if (rule != null) {
+          ruleId = rule['id'];
+          if (rule['action']['type'] == 'drop') { dropped = true; outcome = 'dropped'; }
+          else { forwarded = rule['action']['text']; effective = forwarded; outcome = 'replaced'; }
+        }
+      }
+      enqueue({'id': '${record['id']}:${++state['sequence']}', 'connectionId': record['id'], 'timestamp': DateTime.now().microsecondsSinceEpoch / 1000,
+        'direction': direction, ...value, 'outcome': outcome, if (effective != null) 'effective': effective, if (ruleId != null) 'ruleId': ruleId});
+    } catch (_) { forwarded = data; dropped = false; }
+    if (!dropped) originalHandler(forwarded);
+  }
+  void restore(dynamic record) {
+    record['enabled'] = false;
+    for (final hook in record['hooks']) { try { api['restore'](hook['subscription'], hook['wrapper'], hook['old']); } catch (_) {} }
+    record['hooks'].clear();
+  }
+  state['detach'] = () {
+    state['enabled'] = false; state['mock'] = false; state['expiresAt'] = 0;
+    for (final record in state['records'].values) { restore(record); }
+    flush(); state['timer']?.cancel(); state['timer'] = null;
+  };
+  state['scan'] = () {
+    final results = <dynamic>[];
+    for (final record in state['records'].values) {
+      final socket = record['socket'];
+      if (socket.readyState != WebSocket.open) {
+        restore(record);
+        results.add({'id': record['id'], 'isolateId': state['isolate'], 'endpoint': record['endpoint'], if (record['url'] != null) 'url': record['url'], 'status': 'closed', 'capture': record['capture'], 'openedAt': record['openedAt'], 'closedAt': DateTime.now().millisecondsSinceEpoch, 'sent': record['sent'], 'received': record['received']});
+      }
+    }
+    state['records'].removeWhere((dynamic key, dynamic record) => record['socket'].readyState != WebSocket.open);
+    final candidates = _WebSocketImpl._webSockets.values.where((s) => !s._serverSide && s.readyState == WebSocket.open).take(129).toList();
+    for (final socket in candidates.take(128)) {
+      final serviceId = socket._serviceId;
+      final info = state['config'][serviceId.toString()] ?? <String, dynamic>{};
+      if (info['excluded'] == true) continue;
+      var record = state['records'][serviceId];
+      if (record == null) {
+        record = <String, dynamic>{'id': '${state['session']}:${state['isolate']}:$serviceId', 'socket': socket, 'endpoint': '${socket._socket.remoteAddress.address}:${socket._socket.remotePort}', 'openedAt': DateTime.now().millisecondsSinceEpoch, 'sent': 0, 'received': 0, 'hooks': <dynamic>[], 'capture': 'unsupported', 'enabled': true};
+        try {
+          final inbound = socket._subscription;
+          final outbound = api['subscription'](socket._consumer._ensureController());
+          if (inbound == null || outbound == null) throw StateError('unsupported');
+          final oldIn = api['get'](inbound); final oldOut = api['get'](outbound);
+          void wrapIn(dynamic data) => receive(record, 'inbound', data, oldIn);
+          void wrapOut(dynamic data) => receive(record, 'outbound', data, oldOut);
+          final inInstalled = api['set'](inbound, wrapIn);
+          record['hooks'].add({'subscription': inbound, 'wrapper': inInstalled, 'old': oldIn});
+          final outInstalled = api['set'](outbound, wrapOut);
+          record['hooks'].add({'subscription': outbound, 'wrapper': outInstalled, 'old': oldOut});
+          record['capture'] = 'attached';
+        } catch (_) { restore(record); record['warning'] = '当前 Dart SDK 的 WS 订阅结构不兼容，连接保持原样'; }
+        state['records'][serviceId] = record;
+      } else if (record['capture'] == 'attached') {
+        for (final hook in record['hooks']) {
+          if (!api['owns'](hook['subscription'], hook['wrapper'])) {
+            restore(record); record['capture'] = 'unsupported'; record['warning'] = '订阅处理器已被其他代码修改，停止接管此连接'; break;
+          }
+        }
+      }
+      record['url'] = info['url'];
+      results.add({'id': record['id'], 'isolateId': state['isolate'], 'endpoint': record['endpoint'], if (record['url'] != null) 'url': record['url'], 'status': 'open', 'capture': record['capture'], 'openedAt': record['openedAt'], 'sent': record['sent'], 'received': record['received'], if (record['warning'] != null) 'warning': record['warning']});
+    }
+    return jsonEncode({'connections': results, 'limited': candidates.length > 128});
+  };
+  state['push'] = (String id, String text) {
+    if (!active() || state['mock'] != true) throw StateError('disabled');
+    final record = state['records'].values.firstWhere((dynamic item) => item['id'] == id);
+    if (record['capture'] != 'attached' || record['socket'].readyState != WebSocket.open || !record['socket']._controller.hasListener) throw StateError('closed');
+    for (final hook in record['hooks']) { if (!api['owns'](hook['subscription'], hook['wrapper'])) throw StateError('changed'); }
+    final value = snapshot(text);
+    if (value['truncated'] == true) throw StateError('too large');
+    record['socket']._controller.add(text);
+    record['received']++;
+    enqueue({'id': '${record['id']}:${++state['sequence']}', 'connectionId': id, 'timestamp': DateTime.now().microsecondsSinceEpoch / 1000, 'direction': 'inbound', ...value, 'effective': text, 'outcome': 'synthetic'});
+    return true;
+  };
+  state['timer'] = Timer.periodic(const Duration(milliseconds: 100), (dynamic timer) {
+    if (!active()) { state['detach'](); return; }
+    flush();
+  });
+  return state;
+})()

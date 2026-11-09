@@ -4,11 +4,14 @@ import { VmNetworkProfiler } from './profiler';
 import { DioVmInjector } from './injection';
 import { VmHistoryStore, type VmHistorySettings } from './storage';
 import type { HistoryEntry, Rule, WorkbenchState } from '../model';
+import { WsSession } from '../ws/session';
+import type { WsHandshake } from '../ws/model';
 
 /** Keeps VM connections independent of the panel and the proxy engine. */
 export class VmSession extends EventEmitter {
   readonly store: VmHistoryStore;
   readonly client = new VmServiceClient();
+  readonly websocket: WsSession;
   private readonly profiler: VmNetworkProfiler;
   private readonly injector: DioVmInjector;
   private isolateIds: string[] = [];
@@ -39,6 +42,19 @@ export class VmSession extends EventEmitter {
       maxBodyBytes: settings.maxBodyBytes,
       pollIntervalMs: 1000,
     });
+    this.websocket = new WsSession(
+      this.client,
+      folder,
+      settings,
+      templatePath?.replace(/interceptor\.dart\.txt$/, 'websocket.dart.txt'),
+      (enabled) => this.profiler.setHandshakeCaptureEnabled(enabled),
+    );
+    this.websocket.on('change', () => this.changed());
+    this.profiler.on('websocket', (entry: HistoryEntry, handshake?: WsHandshake) => {
+      void this.websocket
+        .addHandshake(entry, handshake)
+        .catch(() => this.warn('WS 握手历史保存失败，请检查本机存储。'));
+    });
     this.injector = new DioVmInjector(this.client, { templatePath });
     this.profiler.on('history', (entry: HistoryEntry) => {
       if (!this.state.mockEnabled || !this.state.instances) this.record(entry, 'vm');
@@ -58,6 +74,7 @@ export class VmSession extends EventEmitter {
       if (this.intentionalDisconnect || this.closed) return;
       if (this.state.status === 'disconnected') return;
       ++this.generation;
+      this.websocket.invalidate();
       const wasMockEnabled = this.state.mockEnabled;
       this.state.status = 'disconnected';
       this.state.endpoint = undefined;
@@ -157,6 +174,7 @@ export class VmSession extends EventEmitter {
       const endpoint = new URL(validated);
       this.state.endpoint = this.client.endpoint ?? endpoint.host;
       this.state.status = 'connected';
+      this.websocket.connected();
       this.timer = setInterval(() => void this.tick(), 4000);
       this.changed();
     } catch (error) {
@@ -280,6 +298,9 @@ export class VmSession extends EventEmitter {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     this.intentionalDisconnect = true;
+    await this.websocket
+      .disconnect(this.client.connected)
+      .catch(() => this.warn('WS 会话清理失败，旧处理器将在租约到期后旁路。'));
     await this.injector.detach().catch(() => {
       if (this.state.mockEnabled) {
         this.mockResumeAfter = Date.now() + 16000;
@@ -306,6 +327,7 @@ export class VmSession extends EventEmitter {
     ++this.generation;
     await this.disconnect();
     await this.injector.dispose();
+    await this.websocket.dispose();
     await this.store.close();
     this.removeAllListeners();
   }
