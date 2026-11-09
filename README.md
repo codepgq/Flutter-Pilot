@@ -6,6 +6,8 @@
 
 **0.0.3 新增业务 WebSocket Tab**：通过现有 VM 手动开启 WS 采集，查看双向消息；独立开启实验性 WS Mock 后，可按规则整条替换或丢弃文本消息，向 App 手动注入模拟推送。运行时结构须探测通过；接入前消息不可补抓。详见 [WebSocket 使用说明](docs/v0.0.3-websocket.md)。
 
+**MCP 与编码 Agent 接入**：工作台新增 MCP Tab，默认按项目适配 Claude Code CLI、Codex CLI／App。Agent 可复用现有 VM 按 Key 操作 UI，编辑项目 HTTP／WS 规则文件后重载、开启 Mock 并查询记录验证结果。配置写入与客户端实际加载分别展示，UI 能力以运行时探测和真实验收范围为准。详见 [MCP 使用说明](docs/mcp.md)。
+
 项目首次初始化会生成 `.api-mocks/project.json` 保存 UUID 和项目配置，Mock 规则保存在 `.api-mocks/rules.json`。复制项目或创建 worktree 后，各目录读取自己的规则、分别记录本机历史。API 与历史按新到旧展示，目录可折叠，响应自动尝试 JSON 格式化；规则启停使用简洁 switch。
 
 > 当前通过 VSIX 安装，尚未发布到扩展商店。0.0.2 VM 路线已在 iPhone 18 Pro / iOS 27.2 模拟器实际验证，应用入口 SHA-256 保持不变。代理路线的旧版设备验收与 VM 新版验收分别记录，完整证据和限制见 [VM 使用与可行性验证](docs/v0.0.2-vm-service.md) 和 [验收记录](docs/validation.md)。
@@ -66,6 +68,7 @@
 | VM 模式 | 可访问的 Flutter VM Service WS，运行时注入限 Debug / JIT；无需引擎或 CA |
 | 首次引擎安装 | 仅代理模式需要；能访问 mitmproxy 官方下载站，也可指定本地兼容 mitmdump |
 | 插件运行 | 不要求安装 Node.js 或 Python；独立引擎缺少 sqlite3 模块时使用 macOS 自带 SQLite |
+| MCP Agent 接入 | 需要本机 Node.js 20+，以及已加载 MCP 配置的目标客户端；默认项目范围 |
 | 源码开发 | Node.js 22.12+、npm；Python 测试需要 Python 3.9+；Flutter 示例要求 Dart `>=3.5.0 <4.0.0` |
 
 首版不覆盖 Windows / Linux、Flutter Web、Remote SSH、Dev Containers、浏览器版 IDE，或所有自定义网络适配器。VS Code 与 Cursor 可读取同一项目目录中的配置和规则，各自的请求历史、API 目录与 CA 仍保存在各 IDE 私有目录。

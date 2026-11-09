@@ -1,5 +1,16 @@
 # 实现与验证结论
 
+## Flutter UI MCP 与 Agent 适配实现（2026-11-09）
+
+- 用户随后要求安装并归入 main：当前已在 main，无需合并。重新构建0.0.3 VSIX，Cursor CLI `--force` 覆盖安装成功；安装目录的扩展/bridge/Webview JS与CSS、3份Dart模板共7项 SHA-256 与VSIX及当前构建逐项一致，package.json除安装元数据外完全一致。报告 `artifacts/mcp-install-report.json`。未启动隔离IDE、未访问钥匙串、未强制Reload Window。
+
+- `src/mcp` 提供官方 SDK stdio bridge、认证 Unix socket registry、严格16工具 schema、项目/全局隔离、取消与代次保护、客户端真实握手状态；稳定桥接脚本在用户私有目录，Node20+绝对路径，不输出 VM 凭证。
+- `src/vm/ui.ts` 与固定 `resources/vm/ui.dart.txt` 通过已有 VM 访问 Element 树，支持 typed ValueKey、祖先范围、真实 pointer 命中/点击/滚动、EditableText 输入、postEvent 异步完成、IsolateExit 及 HotRestart 失效；文本仅诊断。多个交互/滚动目标拒绝操作，缺 Key 判定复用真实目标解析，快照有界且保留祖先 Key。
+- MCP Tab 提供服务开关、项目默认适配、Claude/Codex 卡片、配置差异/覆盖来源、桥接自检和 UI 探测。配置文件 JSON/TOML 定点编辑、原子保存及外部变化检查，保留其他 MCP；仅显式 repair 替换冲突，remove 只删除插件管理项。
+- 提取文件规则重载/网络服务供 Webview 和 MCP 共用；加载、同步接收与实际运行时应用分开报告，HTTP 采集可独立暂停，WS 重载保留有效临时规则。
+- 已通过305项 Vitest、34项 Playwright、类型/格式/构建；真实 Flutter3.47.8/iPhone18Pro/iOS27.2 UI41项、真实 stdio/IPC/UI/Dio Mock/HTTP 闭环16项，源码 SHA 不变；Claude2.1.292/Codex0.162.1项目和全局协议4场景通过。桌面 Codex App 界面、Android/真机未验收。
+- VSCode1.116.0 与 Cursor3.29.9 隔离扩展宿主两阶段各12断言通过；Cursor 测试引发用户钥匙串提示后立即停止 GUI 测试，确认测试进程退出，脚本默认 skip 并显式门控。未访问钥匙串、不重启用户 IDE、不安装或提交。包含 HotRestart 的 Flutter fixture 停止时偶发 SDK 临时 dill 清理噪音，断言和 exit0 均通过，MCP 闭环无此噪音。
+
 2026-11-08 已实现首版。入口 src/extension.ts；React webview；proxy/addon.py；Dio 接入 src/setup.ts。
 
 - mitmproxy 固定 12.3.1，arm64/x64 SHA 来自真实下载及官方交叉核对，manifest 位于 resources/engine-manifest.json。
@@ -146,3 +157,9 @@
 - 本轮269项Vitest、31项Playwright、类型/格式/构建/diff检查通过；Cursor与VSCode合成隔离消息链路退出0。真实Cursor3.29.9（宿主API1.128.0）及VSCode1.116.0，Dart扩展3.146.0，Flutter3.47.8/Dart3.13.7，iPhone18Pro/iOS27.2各9项断言通过：IDE launch/attach、真实HTTP记录、已有会话DTD补查、HotRestart、手动断开抑制与显式恢复、stop/start及源码SHA不变。未修改或控制用户EXIO会话。
 - 自动连接可能早于应用HTTP profiling服务就绪，测试需等待vm.state.isolates>0后发请求；不承诺补抓采集就绪前流量。真实测试使用/tmp独立fixture与IDE profile，只控制自身调试会话；Android/真机/其他SDK未验收。报告在忽略目录artifacts/vm-discovery-{cursor,vscode}-report.json。
 - 用户随后要求安装并提交：重新构建0.0.3 VSIX，解包后Cursor隔离VM消息链路退出0；Cursor CLI --force覆盖安装成功，活动登记0.0.3。安装后的extension.js、webview.js/css及两份Dart模板SHA-256与包一致；package.json除Cursor新增__metadata外内容一致。校验报告artifacts/vm-discovery-package-report.json。未自动重载当前窗口，需用户在调试方便时Reload Window加载新版。
+
+## Dio Mock 控件简化（2026-11-09）
+
+- 按用户确认保留连接页位置，复用规则列表button[role=switch]的滑块样式，去掉多段技术说明和重复标题；保留实验性标记、一句说明，重新发现按钮仅开启时显示。vm.mock消息和禁用条件不变。
+- 类型检查、构建、格式/diff检查及27项工作台UI回归通过；扩展现有用例验证鼠标/Space切换、繁忙/断线禁用、390px布局及卡片高度，合成窄屏截图artifacts/dio-mock-switch-narrow.png已目视检查。
+- 用户随后要求安装到Cursor：0.0.3 VSIX重新构建并CLI --force覆盖安装成功；扩展、Webview JS/CSS与两份Dart模板均与VSIX及构建SHA-256一致，清单除安装元数据外一致。报告artifacts/dio-mock-ui-install-report.json。未强制Reload Window，未提交本次UI改动。

@@ -159,6 +159,23 @@ afterEach(async () => {
 });
 
 describe('VM session without a proxy engine', () => {
+  it('HTTP capture can stop independently of Mock and stays stopped after rule resync', async () => {
+    const { session, profiler, injector, store } = fixture();
+    await session.connect('ws://127.0.0.1:1234/auth/ws', []);
+    expect(session.state.captureEnabled).toBe(true);
+    await session.setCaptureEnabled(false);
+    injector.emit('history', entry);
+    profiler.emit('history', entry);
+    await Promise.resolve();
+    expect(store.put).not.toHaveBeenCalled();
+    await session.setMockEnabled(true);
+    await session.setMockEnabled(false);
+    expect(session.state.captureEnabled).toBe(false);
+    expect(profiler.setCaptureEnabled).toHaveBeenLastCalledWith(false);
+    await session.setCaptureEnabled(true);
+    profiler.emit('history', entry);
+    await vi.waitFor(() => expect(store.put).toHaveBeenCalledOnce());
+  });
   it('connects using only VM modules, exposes only the endpoint host and defaults to observing', async () => {
     const { session, client, profiler, injector, store } = fixture();
     await session.connect('ws://127.0.0.1:1234/private-auth-token=/ws', [originalRule]);

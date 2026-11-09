@@ -1,0 +1,256 @@
+(() {
+  final state = <String, dynamic>{'active': true, 'pointer': 734000};
+  final locationFor = __LOCATION__;
+  final binding = WidgetsBinding.instance;
+  Map<String, dynamic> fail(String code, String message) => {'ok': false, 'code': code, 'message': message};
+  bool stable(dynamic key) => key != null && (key.runtimeType == const ValueKey<String>('').runtimeType || key.runtimeType == const ValueKey<int>(0).runtimeType);
+  dynamic keyData(dynamic key) => stable(key) ? {'type': key.value is String ? 'string' : 'int', 'value': key.value} : null;
+  bool matches(dynamic key, dynamic expected) => stable(key) && expected != null && ((expected['type'] == 'string' && key.value is String) || (expected['type'] == 'int' && key.value is int)) && key.value == expected['value'];
+  List<Element> tree([Element? root]) {
+    final found = <Element>[];
+    void visit(Element e) {
+      if (found.length >= 10000 || !e.mounted) return;
+      found.add(e);
+      e.debugVisitOnstageChildren(visit);
+    }
+    final start = root ?? binding.rootElement;
+    if (start != null) visit(start);
+    return found;
+  }
+  List<Element> select(dynamic args) {
+    final all = tree();
+    if (all.length >= 10000) throw 'TREE_LIMIT';
+    if (args['ancestor'] != null) {
+      final parents = all.where((e) => matches(e.widget.key, args['ancestor'])).toList();
+      if (parents.length != 1) throw parents.isEmpty ? 'ANCESTOR_NOT_FOUND' : 'AMBIGUOUS_ANCESTOR';
+      return tree(parents.single).where((e) => matches(e.widget.key, args['key'])).toList();
+    }
+    return all.where((e) => matches(e.widget.key, args['key'])).toList();
+  }
+  bool interactive(Element e) {
+    if (e.widget is EditableText || e.widget is Scrollable) return true;
+    try { final dynamic w = e.widget; w.onPressed; return true; } catch (_) {}
+    try { final dynamic w = e.widget; if (w.onTap != null || w.onLongPress != null || w.onPanUpdate != null) return true; } catch (_) {}
+    return false;
+  }
+  bool enabled(Element e) {
+    try { final dynamic w = e.widget; if (w.onPressed == null) return false; } catch (_) {}
+    if (e.widget is EditableText) return !(e.widget as EditableText).readOnly;
+    try { final dynamic w = e.widget; if (w.enabled == false) return false; } catch (_) {}
+    return true;
+  }
+  Element? actionTarget(Element e) {
+    if (interactive(e)) return e;
+    final descendants = tree(e).where(interactive).toList();
+    if (descendants.isEmpty) return null;
+    final candidates = <Element>[];
+    for (final child in descendants) {
+      var nested = false;
+      child.visitAncestorElements((parent) {
+        if (identical(parent, e)) return false;
+        if (interactive(parent)) { nested = true; return false; }
+        return true;
+      });
+      if (!nested) candidates.add(child);
+    }
+    return candidates.length == 1 ? candidates.single : null;
+  }
+  dynamic boxFor(Element e) {
+    try { final render = e.findRenderObject(); return render is RenderBox && render.attached && render.hasSize && !render.size.isEmpty ? render : null; } catch (_) { return null; }
+  }
+  int viewFor(dynamic box) {
+    dynamic current = box;
+    while (current != null) {
+      if (current is RenderView) return current.flutterView.viewId;
+      current = current.parent;
+    }
+    throw 'NO_VIEW';
+  }
+  bool hit(Element e, dynamic box, dynamic point) {
+    if (box == null) return false;
+    final result = HitTestResult();
+    GestureBinding.instance.hitTestInView(result, point, viewFor(box));
+    return result.path.any((entry) => identical(entry.target, box));
+  }
+  Map<String, dynamic> describe(Element e) {
+    final box = boxFor(e);
+    final point = box == null ? null : box.localToGlobal(box.size.center(Offset.zero));
+    dynamic location;
+    try { location = locationFor(e); } catch (_) {}
+    String? text;
+    if (e.widget is Text) text = (e.widget as Text).data;
+    if (e.widget is EditableText && !(e.widget as EditableText).obscureText) text = (e.widget as EditableText).controller.text;
+    final path = <dynamic>[];
+    e.visitAncestorElements((parent) {
+      if (stable(parent.widget.key)) path.insert(0, keyData(parent.widget.key));
+      return path.length < 24;
+    });
+    final target = actionTarget(e);
+    final isEnabled = enabled(e) && (target == null || enabled(target));
+    return {'type': e.widget.runtimeType.toString(), 'key': keyData(e.widget.key), 'ancestorKeys': path, 'enabled': isEnabled, 'actionable': target != null && isEnabled && point != null && hit(e, box, point), 'visible': point != null && hit(e, box, point), if (location != null) 'source': location, if (text != null) 'text': text.length > 1024 ? text.substring(0, 1024) : text, if (box != null) 'bounds': {'x': box.localToGlobal(Offset.zero).dx, 'y': box.localToGlobal(Offset.zero).dy, 'width': box.size.width, 'height': box.size.height}};
+  }
+  Future<void> frame() async {
+    await binding.endOfFrame.timeout(const Duration(milliseconds: 800), onTimeout: () {});
+  }
+  Future<Map<String, dynamic>> pointer(Element e, [dynamic scrollArgs]) async {
+    final box = boxFor(e);
+    if (!enabled(e)) return fail('NOT_ENABLED', '目标当前不可操作。');
+    if (box == null) return fail('NOT_VISIBLE', '目标尚未布局或不可见。');
+    final center = box.localToGlobal(box.size.center(Offset.zero));
+    if (!hit(e, box, center)) return fail('NOT_HIT_TESTABLE', '目标被遮挡或不接收输入事件。');
+    final id = ++state['pointer'];
+    final viewId = viewFor(box);
+    var start = center;
+    var delta = Offset.zero;
+    if (scrollArgs != null) {
+      final direction = scrollArgs['direction'] ?? 'down';
+      final vertical = direction == 'up' || direction == 'down';
+      final requested = (scrollArgs['distance'] ?? 300).toDouble();
+      final extent = vertical ? box.size.height : box.size.width;
+      final distance = requested < extent * .65 ? requested : extent * .65;
+      final signed = direction == 'down' || direction == 'right' ? -distance : distance;
+      delta = vertical ? Offset(0, signed) : Offset(signed, 0);
+      start = center - delta / 2;
+      if (!hit(e, box, start)) return fail('NOT_HIT_TESTABLE', '滚动起点被遮挡。');
+    }
+    var down = false;
+    try {
+      if (state['active'] != true) return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
+      GestureBinding.instance.handlePointerEvent(PointerDownEvent(pointer: id, position: start, viewId: viewId));
+      down = true;
+      if (scrollArgs != null) {
+        for (var step = 1; step <= 12; step++) {
+          await Future<void>.delayed(const Duration(milliseconds: 16));
+          if (state['active'] != true) return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
+          GestureBinding.instance.handlePointerEvent(PointerMoveEvent(pointer: id, position: start + delta * (step / 12), delta: delta / 12, viewId: viewId));
+        }
+      } else {
+        await Future<void>.delayed(const Duration(milliseconds: 35));
+      }
+      if (state['active'] != true) return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
+      GestureBinding.instance.handlePointerEvent(PointerUpEvent(pointer: id, position: start + delta, viewId: viewId));
+      down = false;
+      await frame();
+      return {'ok': true};
+    } finally {
+      if (down) GestureBinding.instance.handlePointerEvent(PointerCancelEvent(pointer: id, position: start, viewId: viewId));
+    }
+  }
+  bool addressable(Element e) {
+    if (stable(e.widget.key)) return true;
+    var yes = false;
+    e.visitAncestorElements((parent) {
+      if (stable(parent.widget.key)) {
+        if (identical(actionTarget(parent), e)) yes = true;
+        if (e.widget is EditableText) {
+          final inputs = tree(parent).where((child) => child.widget is EditableText).toList();
+          if (inputs.length == 1 && identical(inputs.single, e)) yes = true;
+        }
+        if (e.widget is Scrollable) {
+          final scrollables = tree(parent).where((child) => child.widget is Scrollable).toList();
+          if (scrollables.length == 1 && identical(scrollables.single, e)) yes = true;
+        }
+        return false;
+      }
+      return true;
+    });
+    return yes;
+  }
+  Future<Map<String, dynamic>> perform(String tool, dynamic args) async {
+    if (state['active'] != true) return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
+    if (binding.rootElement == null) return fail('APP_NOT_READY', 'Flutter 尚未挂载根 Widget。');
+    if (tool == 'probe') return {'ok': true, 'experimental': true, 'keyTypes': ['string', 'int']};
+    if (tool == 'get_ui_snapshot' || tool == 'inspect_key_issues') {
+      final all = tree();
+      final limit = args['limit'] ?? args['maxNodes'] ?? 200;
+      if (tool == 'get_ui_snapshot') {
+        final selected = all.where((e) => e.widget.key != null || interactive(e)).toList();
+        return {'ok': true, 'widgets': selected.take(limit).map(describe).toList(), 'truncated': selected.length > limit || all.length >= 10000, 'scope': 'mounted_onstage_tree'};
+      }
+      final issues = <Map<String, dynamic>>[];
+      for (final e in all) {
+        if (!interactive(e) || addressable(e)) continue;
+        final info = describe(e);
+        final source = info['source'];
+        if (source != null && (source['file'] as String).contains('/packages/flutter/lib/')) continue;
+        issues.add({...info, 'code': e.widget.key == null ? 'MISSING_KEY' : 'UNSTABLE_KEY'});
+        if (issues.length >= limit) break;
+      }
+      return {'ok': true, 'issues': issues, 'truncated': issues.length >= limit || all.length >= 10000, 'scope': 'mounted_onstage_tree'};
+    }
+    if (tool == 'wait_for_widget') {
+      final deadline = DateTime.now().add(Duration(milliseconds: args['timeoutMs'] ?? 5000));
+      final condition = args['condition'] ?? args['state'] ?? 'present';
+      while (state['active'] == true) {
+        final found = select(args);
+        if (found.length > 1) return fail('AMBIGUOUS_KEY', '范围内存在多个匹配 Key。');
+        if ((condition == 'absent' && found.isEmpty) || (found.length == 1 && (condition == 'present' || (condition == 'visible' && describe(found.single)['visible'] == true) || (condition == 'enabled' && describe(found.single)['enabled'] == true) || (condition == 'actionable' && describe(found.single)['actionable'] == true)))) return {'ok': true, 'condition': condition, if (found.isNotEmpty) 'widget': describe(found.single)};
+        if (DateTime.now().isAfter(deadline)) return fail('WAIT_TIMEOUT', '等待 Widget 状态超时。');
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
+    }
+    final found = select(args);
+    if (found.isEmpty) return fail('NOT_FOUND', '当前已挂载界面没有匹配的 Key。');
+    if (found.length > 1) return fail('AMBIGUOUS_KEY', '范围内存在多个匹配 Key。');
+    final element = found.single;
+    if (tool == 'find_widget') return {'ok': true, 'count': 1, 'widget': describe(element)};
+    if (tool == 'tap') {
+      if (!enabled(element)) return fail('NOT_ENABLED', '目标当前不可操作。');
+      final target = actionTarget(element);
+      if (target == null) return fail('AMBIGUOUS_ACTION_TARGET', '指定 Key 必须对应唯一交互目标。');
+      return pointer(target);
+    }
+    if (tool == 'scroll') {
+      final scrollables = tree(element).where((e) => e.widget is Scrollable).toList();
+      if (scrollables.isEmpty) return fail('NOT_SCROLLABLE', '指定 Key 下没有滚动区域。');
+      if (scrollables.length != 1) return fail('AMBIGUOUS_SCROLL_TARGET', '指定 Key 下必须只有一个滚动区域。');
+      if (args['targetKey'] == null) return pointer(scrollables.single, args);
+      final steps = args['maxSteps'] ?? 10;
+      for (var step = 0; step <= steps; step++) {
+        final current = select(args);
+        if (current.length != 1) return fail('NOT_FOUND', '滚动区域已发生变化。');
+        final currentScrollables = tree(current.single).where((e) => e.widget is Scrollable).toList();
+        if (currentScrollables.length != 1) return fail('AMBIGUOUS_SCROLL_TARGET', '指定 Key 下必须只有一个滚动区域。');
+        final targets = tree(current.single).where((child) => matches(child.widget.key, args['targetKey'])).toList();
+        if (targets.length > 1) return fail('AMBIGUOUS_KEY', '滚动区域内存在多个目标 Key。');
+        if (targets.length == 1 && describe(targets.single)['visible'] == true) return {'ok': true, 'steps': step, 'widget': describe(targets.single)};
+        if (step == steps) return fail('SCROLL_LIMIT', '达到滚动步数上限，目标尚未可见。');
+        final moved = await pointer(currentScrollables.single, args);
+        if (moved['ok'] != true) return moved;
+      }
+    }
+    if (tool == 'enter_text') {
+      final editable = tree(element).where((e) => e.widget is EditableText).toList();
+      if (editable.length != 1) return fail('AMBIGUOUS_INPUT', '指定 Key 下必须只有一个文本输入框。');
+      final input = editable.single;
+      final widget = input.widget as EditableText;
+      if (widget.readOnly || !enabled(element)) return fail('NOT_ENABLED', '输入框为只读或已禁用。');
+      final tapped = await pointer(input);
+      if (tapped['ok'] != true) return tapped;
+      if (state['active'] != true) return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
+      if (!input.mounted || !widget.focusNode.hasFocus) return fail('NO_FOCUS', '输入框未能获得焦点。');
+      final inputState = (input as StatefulElement).state as EditableTextState;
+      final text = args['text'] as String;
+      inputState.updateEditingValue(TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length)));
+      await frame();
+      return {'ok': true, 'length': widget.controller.text.length, 'formatted': widget.controller.text != text};
+    }
+    return fail('UNKNOWN_TOOL', '不支持此 UI 工具。');
+  }
+  state['launch'] = (String operationId, String tool, String encoded) {
+    Future<void>(() async {
+      Map<String, dynamic> result;
+      try {
+        final args = decodeArgs(encoded);
+        result = await perform(tool, args);
+      } catch (error) {
+        final code = error is String && (error == 'ANCESTOR_NOT_FOUND' || error == 'AMBIGUOUS_ANCESTOR' || error == 'TREE_LIMIT') ? error : 'UI_OPERATION_FAILED';
+        result = fail(code, 'Flutter UI 操作未能完成。');
+      }
+      emitEvent('api_mocks.vm.ui', {'session': __SESSION__, 'operationId': operationId, 'result': result});
+    });
+    return true;
+  };
+  return state;
+})()

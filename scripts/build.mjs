@@ -3,6 +3,14 @@ import { mkdir } from 'node:fs/promises';
 await mkdir('dist', { recursive: true });
 const options = [
   {
+    entryPoints: ['src/mcp/bridge.ts'],
+    outfile: 'dist/mcp-bridge.cjs',
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'cjs',
+  },
+  {
     entryPoints: ['src/extension.ts'],
     outfile: 'dist/extension.js',
     bundle: true,

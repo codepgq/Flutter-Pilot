@@ -27,6 +27,7 @@ export class VmSession extends EventEmitter {
   private intentionalDisconnect = false;
   private readonly stored = new Set<string>();
   state: NonNullable<WorkbenchState['vm']> = {
+    captureEnabled: false,
     status: 'disconnected',
     isolates: 0,
     recorded: 0,
@@ -77,6 +78,7 @@ export class VmSession extends EventEmitter {
       this.websocket.invalidate();
       const wasMockEnabled = this.state.mockEnabled;
       this.state.status = 'disconnected';
+      this.state.captureEnabled = false;
       this.state.endpoint = undefined;
       this.state.instances = 0;
       this.state.isolates = 0;
@@ -113,7 +115,7 @@ export class VmSession extends EventEmitter {
     this.changed();
   }
   private record(entry: HistoryEntry, source: 'vm' | 'vm-dio') {
-    if (this.closed || this.state.status !== 'connected') return;
+    if (this.closed || this.state.status !== 'connected' || this.state.captureEnabled === false) return;
     // Prefix source IDs so observation and injection sessions never overwrite facts.
     const item = { ...entry, id: `${source}:${entry.id}`, source };
     void this.store
@@ -174,6 +176,7 @@ export class VmSession extends EventEmitter {
       const endpoint = new URL(validated);
       this.state.endpoint = this.client.endpoint ?? endpoint.host;
       this.state.status = 'connected';
+      this.state.captureEnabled = true;
       this.websocket.connected();
       this.timer = setInterval(() => void this.tick(), 4000);
       this.changed();
@@ -201,6 +204,14 @@ export class VmSession extends EventEmitter {
   setMockEnabled(enabled: boolean): Promise<void> {
     return this.enqueue(() => this.setMockInternal(enabled));
   }
+  setCaptureEnabled(enabled: boolean): Promise<void> {
+    return this.enqueue(async () => {
+      if (this.state.status !== 'connected') throw new Error('请先连接 Flutter Debug VM');
+      await this.profiler.setCaptureEnabled(enabled && (!this.state.mockEnabled || !this.state.instances));
+      this.state.captureEnabled = enabled;
+      this.changed();
+    });
+  }
   private async setMockInternal(enabled: boolean) {
     if (enabled && this.state.status !== 'connected') throw new Error('请先连接运行中的 Flutter Debug VM');
     if (enabled && Date.now() < this.mockResumeAfter) {
@@ -220,7 +231,7 @@ export class VmSession extends EventEmitter {
       }
       this.state.mockEnabled = false;
       this.state.instances = 0;
-      await this.profiler.setCaptureEnabled(true);
+      await this.profiler.setCaptureEnabled(this.state.captureEnabled !== false);
       this.changed();
       if (failure) throw failure;
     } else {
@@ -234,7 +245,7 @@ export class VmSession extends EventEmitter {
         });
         this.state.mockEnabled = false;
         this.state.instances = 0;
-        await this.profiler.setCaptureEnabled(true);
+        await this.profiler.setCaptureEnabled(this.state.captureEnabled !== false);
         this.changed();
         throw error;
       }
@@ -259,7 +270,7 @@ export class VmSession extends EventEmitter {
         warnings.push(...result.warnings);
       }
       this.state.instances = instances;
-      await this.profiler.setCaptureEnabled(instances === 0);
+      await this.profiler.setCaptureEnabled(this.state.captureEnabled !== false && instances === 0);
       for (const warning of warnings) this.warn(warning);
       this.lastDiscovery = Date.now();
       if (!instances) this.warn('尚未找到可接入的 Dio 实例；请先让应用创建 Dio，再点击“重新发现并同步”。');
@@ -314,6 +325,7 @@ export class VmSession extends EventEmitter {
     this.state = {
       ...this.state,
       status: 'disconnected',
+      captureEnabled: false,
       endpoint: undefined,
       error: clearError ? undefined : this.state.error,
       mockEnabled: false,

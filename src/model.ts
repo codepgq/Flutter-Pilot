@@ -107,6 +107,7 @@ export interface ApiCatalogEntry {
   lastAt: number;
 }
 export interface WorkbenchState {
+  mcp?: import('./mcp/model').McpWorkbenchState;
   vmDiscovery?: {
     enabled: boolean;
     status: 'waiting' | 'ready' | 'unavailable';
@@ -132,6 +133,7 @@ export interface WorkbenchState {
   };
   mode?: 'proxy' | 'vm';
   vm?: {
+    captureEnabled?: boolean;
     status: 'disconnected' | 'connecting' | 'connected';
     endpoint?: string;
     isolates: number;

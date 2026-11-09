@@ -14,6 +14,7 @@ import {
 import './style.css';
 import { inspectJson } from './body';
 import { WebSocketPanel } from './websocket';
+import { McpPanel } from './mcp';
 
 declare global {
   interface Window {
@@ -45,7 +46,7 @@ const initial: WorkbenchState = {
   logs: [],
   busy: false,
 };
-type Tab = 'history' | 'rules' | 'breakpoints' | 'connection' | 'websocket';
+type Tab = 'history' | 'rules' | 'breakpoints' | 'connection' | 'websocket' | 'mcp';
 type Snapshot = RequestSnapshot | ResponseSnapshot;
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
@@ -348,6 +349,7 @@ function App() {
     { id: 'websocket', label: 'WebSocket', icon: 'radar', count: state.ws?.messages.total ?? 0 },
     { id: 'rules', label: 'Mock 规则', icon: 'rules', count: state.rules.length },
     { id: 'breakpoints', label: '断点队列', icon: 'pause', count: state.pending.length },
+    { id: 'mcp', label: 'MCP', icon: 'plug' },
   ];
   const enabled = state.rules.filter((r) => r.enabled).length;
   const vmMode = state.mode !== 'proxy';
@@ -476,6 +478,7 @@ function App() {
             <Connection state={state} preview={preview} />
           </>
         )}
+        {tab === 'mcp' && <McpPanel state={state} send={send} />}
         {tab === 'history' && <History key={state.mode ?? 'vm'} state={state} selected={selected} />}
         {tab === 'websocket' && (
           <WebSocketPanel
@@ -694,43 +697,35 @@ function VmConnection({ state }: { state: WorkbenchState }) {
           </div>
         )}
       </section>
-      <section className="card vm-card">
+      <section className="card vm-card vm-mock-card" aria-labelledby="dio-mock-title">
         <div className="card-heading">
-          <span className="step">02</span>
-          <h3>实验性 Dio Mock</h3>
-          <span className="tag warm">Debug · Dio 5</span>
-        </div>
-        <p>
-          通过 VM 动态安装拦截器，执行已启用的
-          Mock、请求修改、响应修改和目标转发，不保存项目源码改动。关闭后移除本插件的拦截器。
-        </p>
-        <label className="switch-row">
-          <span>
-            <strong>开启运行时 Dio Mock</strong>
-            <small>开启后仅记录已接入 Dio 的语义快照，避免与 VM 网络分析重复；手动断点暂不支持。</small>
-          </span>
-          <input
-            type="checkbox"
+          <h3 id="dio-mock-title">
+            Dio Mock <span className="tag warm">实验性</span>
+          </h3>
+          <button
+            type="button"
+            className="rule-switch"
             role="switch"
             aria-label="开启运行时 Dio Mock"
+            aria-checked={vm?.mockEnabled ?? false}
+            aria-describedby="dio-mock-description"
+            title={!connected ? '请先连接 VM' : vm?.mockEnabled ? '关闭 Dio Mock' : '开启 Dio Mock'}
             disabled={state.busy || !connected}
-            checked={vm?.mockEnabled ?? false}
-            onChange={(event) => send('vm.mock', { enabled: event.target.checked })}
-          />
-        </label>
-        <div className="card-actions">
-          <Button action="vm.rescan" disabled={state.busy || !connected || !vm?.mockEnabled}>
-            重新发现并同步
-          </Button>
+            onClick={() => send('vm.mock', { enabled: !vm?.mockEnabled })}
+          >
+            <span className="rule-switch-track" aria-hidden="true">
+              <span className="rule-switch-thumb" />
+            </span>
+          </button>
         </div>
-        <p className="field-hint">
-          新创建的 Dio 周期性发现，首次创建后立即请求可能早于接入。普通断开会卸载；连接异常时规则租约最长约 15
-          秒到期后旁路，Hot Restart 可清除注入。
-        </p>
-        <p className="field-hint">
-          仅采集模式使用 SDK HTTP profiling，采集期间 App
-          会保存网络分析数据并有内存开销。插件限制本地历史容量，退出恢复本插件开启的采集开关，不清除其他调试工具的数据。
-        </p>
+        <p id="dio-mock-description">开启后执行已启用的 Mock 规则，关闭后恢复仅采集。需先连接 VM。</p>
+        {vm?.mockEnabled && (
+          <div className="card-actions">
+            <Button action="vm.rescan" disabled={state.busy || !connected}>
+              重新发现并同步
+            </Button>
+          </div>
+        )}
       </section>
       {state.proxyActive && (
         <div className="notice">

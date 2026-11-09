@@ -1,5 +1,16 @@
 # 验收记录
 
+## Flutter UI MCP 与 Agent 适配（2026-11-09）
+
+- TypeScript：305项 Vitest 通过，包含16工具 schema/stdio/IPC、配置原子更新与覆盖优先级、网络重载、扩展生命周期和 UI 控制器。工作台34项 Playwright 通过，包含 MCP 项目默认、配置与连接分离、冲突修复、390px 窄面板。类型、格式和构建通过。
+- 真实 Flutter：Flutter3.47.8/Dart3.13.7，iPhone18Pro/iOS27.2 独立 fixture。41项 UI 断言覆盖 typed Key、父范围、歧义、缺 Key、遮挡禁用、中文输入/formatter/onChanged、唯一滚动区域、懒加载、并发、HotReload/Restart 与失效。报告 `artifacts/ui-flutter-smoke-report.json`。
+- 真实 MCP 闭环：stdio SDK → bridge → Unix IPC → VM UI/VmSession，编辑规则文件、reload、显式开启 Dio Mock、按 Key 真实点击、UI 回显、HTTP 历史详情、二次修改规则和关闭 Mock，16项通过。报告 `artifacts/mcp-flutter-smoke-report.json`。两套 fixture 均确认业务源码哈希不变，未连接或修改用户 EXIO 应用。
+- 客户端：ClaudeCode2.1.292 项目/全局使用真实 CLI 与本地模型协议 fixture；CodexCLI0.162.1 项目/全局使用公开 app-server 工具接口，均完成 initialize/tools/list/tools/call（4场景）。无生产模型调用、无复制真实凭证。报告 `artifacts/mcp-agent-smoke.json`。Codex 桌面 App 自身界面加载未验收，不能用 app-server 代替声明通过。
+- IDE：VSCode1.116.0 与 Cursor3.29.9 源码独立 bundle，各两次隔离进程共12断言，覆盖适配、SDK 工具调用、配置文件重载、非法规则保留、关闭面板保持、停用/恢复/退出清理。报告 `artifacts/mcp-vscode-ide-report.json`、`artifacts/mcp-cursor-ide-report.json`。使用宿主内部消息路由，不声称 Webview 鼠标或最终 VSIX 安装验收。
+- Cursor 隔离启动触发钥匙串提示。用户反馈后已停止 GUI 验收并确认测试进程退出；脚本默认 skip，需显式门控才会启动。MCP 配置本身无需钥匙串，不访问或修改钥匙串。
+- 边界：Android/真机未验证；文本输入模拟 Flutter 编辑协议，不覆盖真实 IME 组合；Key 诊断只覆盖当前挂载树。HotRestart fixture 停止时偶发 FlutterSDK 临时 dill 清理噪音，UI 断言及 exit0 已通过；无 HotRestart 的 MCP 闭环退出干净。
+- 可复现：`npm run test:ui:flutter`、`npm run test:mcp:flutter` 需显式提供测试模拟器 ID；`npm run test:mcp:agents` 只用隔离配置；`npm run test:ide:mcp` 默认跳过 GUI，不应自动开启 Cursor。
+
 日期：2026-11-08（Asia/Shanghai）。本报告区分实际运行与未验证项目。
 
 ## 环境

@@ -25,6 +25,70 @@
   color: var(--fg);
   background: var(--bg);
 }
+.mcp-page,
+.mcp-agents {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.mcp-page h2,
+.mcp-page h3 {
+  margin: 0;
+}
+.mcp-page p {
+  margin: 8px 0;
+}
+.mcp-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.mcp-heading > div {
+  flex: 1;
+  min-width: 180px;
+}
+.mcp-heading > .rule-switch {
+  flex: none;
+}
+.mcp-facts {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+}
+.mcp-facts > div {
+  display: grid;
+  grid-template-columns: 85px minmax(0, 1fr);
+  gap: 12px;
+}
+.mcp-facts dt {
+  color: var(--muted);
+}
+.mcp-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.mcp-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.mcp-path {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 8px;
+}
+.mcp-error {
+  color: var(--danger);
+}
+.mcp-page .card {
+  min-width: 0;
+}
+.mcp-page code {
+  overflow-wrap: anywhere;
+}
 * {
   box-sizing: border-box;
 }
@@ -2534,4 +2598,22 @@ footer {
   .ws-page .ws-rule-actions {
     justify-content: flex-start;
   }
+}
+
+.vm-mock-card .card-heading {
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.vm-mock-card .card-heading h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.vm-mock-card > p {
+  margin: 0;
+  color: var(--muted);
+}
+.vm-mock-card .card-actions {
+  margin: 12px 0 0;
 }

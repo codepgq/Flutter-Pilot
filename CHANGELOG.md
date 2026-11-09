@@ -2,6 +2,10 @@
 
 ## 0.0.3 — 业务 WebSocket（2026-11-09）
 
+- 新增 MCP Tab：服务开关、Claude Code CLI / Codex CLI / App 项目或全局适配，默认项目；配置与实际握手状态分开，保留其他 MCP 配置并提示同名覆盖。
+- 新增 stdio → 本地 Unix socket → 现有 Dart VM 桥接；按稳定 ValueKey 查找、点击、输入、滚动、等待及缺 Key 诊断，无需修改应用源码，不使用文本定位回退。
+- Agent 继续编辑现有 HTTP/WS 规则文件，通过 MCP 重载、控制采集和 Mock、查询网络结果；规则加载与运行时实际应用分开报告。真实已验证范围见 `docs/mcp.md`、`docs/validation.md`。
+
 - 新增独立 WebSocket Tab：连接列表、双向消息、正文与生效内容对比、JSON 格式化和摘要分页。
 - 新增手动开启的实验性 VM WS 采集和独立 Mock 开关，支持文本整条替换、丢弃与向 App 手动模拟推送；不修改应用源码或 TLS。
 - 项目 WS 规则独立保存到 `.api-mocks/ws-rules.json`；URL 未知时可创建当前连接临时规则，临时规则不落盘。

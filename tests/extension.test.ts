@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { discoverSessions, requestSession } from '../src/mcp/server';
 const fake = vi.hoisted(() => ({
   commands: new Map<string, () => Promise<unknown>>(),
   panels: [] as any[],
@@ -255,6 +256,7 @@ beforeEach(async () => {
   fake.workspace = join(directory, 'project');
   fake.extraWorkspace = '';
   fake.storage = join(directory, 'storage');
+  process.env.API_MOCKS_MCP_ROOT = join(directory, 'bridge');
   fake.commands.clear();
   fake.panels = [];
   fake.engines = [];
@@ -284,8 +286,32 @@ beforeEach(async () => {
 afterEach(async () => {
   await deactivate();
   await rm(directory, { recursive: true, force: true });
+  delete process.env.API_MOCKS_MCP_ROOT;
 });
 describe('扩展与工作台整合', () => {
+  it('MCP defaults off, survives panel close, isolates sessions and cleans up on disable', async () => {
+    await open();
+    expect(latest().state.mcp).toMatchObject({ enabled: false, running: false });
+    await message('mcp.enable', { enabled: true });
+    await vi.waitFor(() => expect(latest().state.mcp.running).toBe(true));
+    const registry = join(directory, 'bridge', 'sessions');
+    const descriptors = await discoverSessions(registry, fake.workspace);
+    expect(descriptors).toHaveLength(1);
+    const descriptor = descriptors[0];
+    const result = (await requestSession(descriptor, {
+      kind: 'call',
+      tool: 'get_network_status',
+      args: { sessionId: descriptor.sessionId },
+    })) as any;
+    expect(result.files.http).toMatch(/\/project\/\.api-mocks\/rules\.json$/);
+    expect(result.http.mockEnabled).toBe(false);
+    const panel = fake.panels.at(-1);
+    panel.dispose();
+    expect(await discoverSessions(registry, fake.workspace)).toHaveLength(1);
+    await open();
+    await message('mcp.enable', { enabled: false });
+    await vi.waitFor(async () => expect(await discoverSessions(registry, fake.workspace)).toHaveLength(0));
+  });
   it('打开Flutter项目后无面板自动启动，手动停止后重开面板不恢复监听', async () => {
     const engine = fake.engines[0];
     expect(fake.panels).toHaveLength(0);

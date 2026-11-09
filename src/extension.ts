@@ -1,12 +1,21 @@
 import * as vscode from 'vscode';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, mkdir, writeFile, rename, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { EngineManager } from './engine';
 import { RuntimeManager } from './runtime';
 import { RuleStore } from './store';
 import { isFlutterWorkspace } from './discovery';
 import { VmSession } from './vm/session';
+import { VmUiController } from './vm/ui';
+import { McpSessionServer } from './mcp/server';
+import { AgentAdapterManager, detectNodeRuntime } from './mcp/adapters';
+import { McpNetworkController } from './mcp/network';
+import type { McpAgentId, McpScope, McpWorkbenchState } from './mcp/model';
+import { homedir } from 'node:os';
+import { copyFile, chmod } from 'node:fs/promises';
+import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { VmDiscovery, createVscodeDiscoveryHost } from './vm/discovery';
 import { VmAutoConnector } from './vm/autoConnect';
 import { isWebSocketHandshake } from './vm/profiler';
@@ -219,6 +228,25 @@ function messageOf(error: unknown) {
 class Workbench {
   private mode: 'proxy' | 'vm' = 'vm';
   private readonly vm: VmSession;
+  private readonly ui: VmUiController;
+  private readonly mcpNetwork: McpNetworkController;
+  private mcpServer?: McpSessionServer;
+  private readonly mcpSessionId = randomUUID();
+  private readonly bridgeRoot =
+    process.env.API_MOCKS_MCP_ROOT ?? join(homedir(), '.flutter-api-mocks', 'mcp');
+  private mcpGeneration = 0;
+  private readonly mcpClients = new Map<
+    string,
+    { name: string; version?: string; lastSeen: number; scope?: McpScope }
+  >();
+  private mcpState: McpWorkbenchState = {
+    enabled: false,
+    running: false,
+    scope: 'project',
+    agents: [],
+    clients: [],
+    ui: { supported: false, reason: '尚未探测' },
+  };
   private readonly vmAuto: VmAutoConnector;
   private initialized = false;
   private readonly engine = new EngineManager();
@@ -278,6 +306,75 @@ class Workbench {
       },
       join(this.context.extensionPath, 'resources', 'vm', 'interceptor.dart.txt'),
     );
+    this.ui = new VmUiController(this.vm.client, {
+      templatePath: join(context.extensionPath, 'resources', 'vm', 'ui.dart.txt'),
+    });
+    this.mcpNetwork = new McpNetworkController({
+      httpRulesPath: this.store.file,
+      wsRulesPath: this.wsRules.file,
+      readHttpRules: async () => (await this.store.load()).rules,
+      readWsRules: async () => (await this.wsRules.load()).rules,
+      applyHttpRules: async (rules) => {
+        this.rules = rules;
+        await this.syncSavedRules();
+      },
+      applyWsRules: async (rules) => {
+        this.wsPersistentRules = rules;
+        await this.vm.websocket.updateRules([
+          ...rules,
+          ...this.vm.websocket.state.rules.filter(
+            (r) =>
+              !!r.match.connectionId &&
+              this.vm.websocket.state.connections.some(
+                (c) => c.id === r.match.connectionId && c.status === 'open',
+              ),
+          ),
+        ]);
+      },
+      status: () => ({
+        vmConnected: this.vm.state.status === 'connected',
+        http: {
+          captureEnabled: !!this.vm.state.captureEnabled,
+          mockEnabled: this.vm.state.mockEnabled,
+          runtimeApplied: this.vm.state.mockEnabled && this.vm.state.instances > 0,
+          rules: this.rules.length,
+          syncError: this.ruleSyncError,
+        },
+        ws: {
+          captureEnabled: this.vm.websocket.state.captureEnabled,
+          mockEnabled: this.vm.websocket.state.mockEnabled,
+          runtimeApplied: this.vm.websocket.state.mockEnabled && this.vm.websocket.state.status === 'active',
+          rules: this.vm.websocket.state.rules.length,
+          syncError: this.vm.websocket.state.ruleSyncError,
+        },
+      }),
+      listHttp: (query) => this.vm.store.list(query),
+      getHttp: (id) => this.vm.store.get(id),
+      connections: () => this.vm.websocket.store.connections(),
+      messages: async (query) => {
+        const { includeBodies, ...filters } = query as typeof query & { includeBodies?: boolean };
+        const result = await this.vm.websocket.store.list(filters);
+        return includeBodies
+          ? {
+              ...result,
+              items: await Promise.all(
+                result.items.map(async (item) => ({
+                  ...item,
+                  ...(await this.vm.websocket.store.get(item.id)),
+                })),
+              ),
+            }
+          : result;
+      },
+      setCapture: (domain, enabled) =>
+        domain === 'http' ? this.vm.setCaptureEnabled(enabled) : this.vm.websocket.setCaptureEnabled(enabled),
+      setMock: (domain, enabled) =>
+        domain === 'http' ? this.vm.setMockEnabled(enabled) : this.vm.websocket.setMockEnabled(enabled),
+    });
+    this.vm.client.on('disconnected', () => {
+      this.ui.invalidate();
+      this.mcpState.ui = { supported: false, reason: 'VM 已断开，请连接后重新探测' };
+    });
     this.vmAuto = new VmAutoConnector({
       status: () => this.vm.state.status,
       connect: async (url) => {
@@ -362,6 +459,12 @@ class Workbench {
     });
     panel.webview.onDidReceiveMessage((message: unknown) => {
       if (this.panel !== panel || !message || typeof message !== 'object') return;
+      const input = message as { action?: string; payload?: { enabled?: boolean } };
+      if (input.action === 'mcp.enable' && input.payload?.enabled === false) {
+        ++this.mcpGeneration;
+        this.ui.invalidate();
+        this.mcpState.enabled = false;
+      }
       void this.enqueue(() => this.handle(message as Record<string, unknown>)).catch((error) =>
         this.report(error),
       );
@@ -442,6 +545,7 @@ class Workbench {
       vm: { ...this.vm.state },
       vmDiscovery: this.vmAuto.snapshot,
       ws: { ...this.vm.websocket.state },
+      mcp: this.mcpState,
       rules: this.rules,
       history: this.history,
       apis: this.apis,
@@ -512,6 +616,13 @@ class Workbench {
     if (connection.connectionHost && this.addresses.some((a) => a.host === connection.connectionHost))
       this.connectionHost = this.lan ? connection.connectionHost : '127.0.0.1';
     this.preferredPort = connection.port;
+    try {
+      const savedMcp = JSON.parse(await readFile(join(this.storage, 'mcp.json'), 'utf8'));
+      if (savedMcp.enabled === true) await this.setMcpEnabled(true, false);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+        this.log('MCP 设置或服务恢复失败，请在 MCP 页面重新开启。');
+    }
     try {
       const saved = JSON.parse(await readFile(join(this.storage, 'connection.json'), 'utf8'));
       if (Array.isArray(saved.androidDevices))
@@ -837,6 +948,193 @@ class Workbench {
     else this.ruleSyncError = '已保存；初始化引擎后生效。';
     this.push();
   }
+  private adapters() {
+    return new AgentAdapterManager({
+      workspace: this.folder.uri.fsPath,
+      bridgeRoot: this.bridgeRoot,
+      nodePath: this.mcpState.nodePath,
+    });
+  }
+  private async inspectMcp(scope: McpScope = 'project') {
+    this.mcpState.nodePath = await detectNodeRuntime(this.mcpState.nodePath);
+    const manager = this.adapters();
+    const states = await manager.all(scope);
+    this.mcpState.scope = scope;
+    this.mcpState.agents = states.map((item) => ({
+      ...item,
+      configPath: item.path,
+      connected:
+        item.configured &&
+        !item.shadowed &&
+        this.mcpState.clients.some(
+          (client) => client.scope === scope && this.clientMatches(item.agent, client.name),
+        ),
+    }));
+    this.push();
+  }
+  private clientMatches(agent: McpAgentId, name: string) {
+    if (agent === 'claude') return /claude/i.test(name);
+    if (agent === 'codex-app') return /^codex[-_ ](?:app|desktop|vscode)$/i.test(name);
+    return /^codex[-_ ]cli$/i.test(name);
+  }
+  private async publishBridge() {
+    await mkdir(this.bridgeRoot, { recursive: true, mode: 0o700 });
+    const info = await lstat(this.bridgeRoot);
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('MCP 私有目录必须为普通目录');
+    await chmod(this.bridgeRoot, 0o700);
+    const temp = join(this.bridgeRoot, `bridge-${randomUUID()}.tmp`);
+    await copyFile(join(this.context.extensionPath, 'dist', 'mcp-bridge.cjs'), temp);
+    await chmod(temp, 0o600);
+    await rename(temp, join(this.bridgeRoot, 'bridge.cjs'));
+  }
+  private async verifyBridge() {
+    const node = await detectNodeRuntime(this.mcpState.nodePath);
+    if (!node) throw new Error('未找到 Node.js 20+，请安装后重新适配');
+    this.mcpState.nodePath = node;
+    const client = new McpClient({ name: 'flutter-api-mocks-selftest', version: '1.0.0' });
+    const transport = new StdioClientTransport({
+      command: node,
+      args: [
+        join(this.bridgeRoot, 'bridge.cjs'),
+        '--registry',
+        join(this.bridgeRoot, 'sessions'),
+        '--workspace',
+        this.folder.uri.fsPath,
+      ],
+      stderr: 'pipe',
+    });
+    try {
+      await client.connect(transport, { timeout: 10000 });
+      const result = await client.callTool({ name: 'list_sessions', arguments: {} }, undefined, {
+        timeout: 10000,
+      });
+      const sessions = (result.structuredContent as { sessions?: { sessionId?: string }[] } | undefined)
+        ?.sessions;
+      if (result.isError || !sessions?.some((item) => item.sessionId === this.mcpSessionId))
+        throw new Error('MCP 桥接自检失败');
+    } finally {
+      await client.close();
+    }
+  }
+  private async setMcpEnabled(enabled: boolean, persist = true) {
+    ++this.mcpGeneration;
+    this.ui.invalidate();
+    this.mcpState.error = undefined;
+    this.mcpState.enabled = enabled;
+    if (this.mcpServer) await this.mcpServer.stop();
+    this.mcpServer = undefined;
+    this.mcpState.running = false;
+    this.mcpClients.clear();
+    this.mcpState.clients = [];
+    if (enabled) {
+      try {
+        await this.publishBridge();
+        const epoch = this.mcpGeneration;
+        this.mcpServer = new McpSessionServer({
+          registryRoot: join(this.bridgeRoot, 'sessions'),
+          workspace: this.folder.uri.fsPath,
+          sessionId: this.mcpSessionId,
+          name: this.project.config.name,
+          describe: () => ({
+            vmConnected: this.vm.state.status === 'connected',
+            capabilities: { ui: this.mcpState.ui, network: true },
+          }),
+          call: async (tool, args, context) => {
+            const run = this.messageQueue.then(async () => {
+              if (
+                this.disposed ||
+                context.signal.aborted ||
+                epoch !== this.mcpGeneration ||
+                !this.mcpState.enabled
+              )
+                return { ok: false, code: 'SESSION_INVALIDATED', message: 'MCP 会话已关闭，操作未执行。' };
+              if (
+                [
+                  'get_ui_snapshot',
+                  'find_widget',
+                  'tap',
+                  'enter_text',
+                  'scroll',
+                  'wait_for_widget',
+                  'inspect_key_issues',
+                ].includes(tool)
+              ) {
+                const typed = (value: unknown) => ({
+                  type: typeof value === 'number' ? 'int' : 'string',
+                  value,
+                });
+                const input = {
+                  ...args,
+                  ...(args.key !== undefined ? { key: typed(args.key) } : {}),
+                  ...(args.ancestorKey !== undefined ? { ancestor: typed(args.ancestorKey) } : {}),
+                  ...(args.targetKey !== undefined ? { targetKey: typed(args.targetKey) } : {}),
+                };
+                const cancel = () => this.ui.invalidate();
+                context.signal.addEventListener('abort', cancel, { once: true });
+                let result;
+                try {
+                  result = await this.ui.execute(tool, input);
+                } finally {
+                  context.signal.removeEventListener('abort', cancel);
+                }
+                if (result.ok) this.mcpState.ui = { supported: true };
+                this.push();
+                return result;
+              }
+              try {
+                return await this.mcpNetwork.execute(tool, args);
+              } finally {
+                this.push();
+              }
+            });
+            this.messageQueue = run.then(
+              () => undefined,
+              () => undefined,
+            );
+            return run;
+          },
+          onClient: (client) => {
+            if (epoch !== this.mcpGeneration || /selftest/i.test(client.name)) return;
+            if (client.event === 'disconnected') this.mcpClients.delete(client.connectionId);
+            else
+              this.mcpClients.set(client.connectionId, {
+                name: client.name,
+                version: client.version,
+                scope: client.scope,
+                lastSeen: Date.now(),
+              });
+            this.mcpState.clients = [...this.mcpClients.values()];
+            this.mcpState.agents = this.mcpState.agents.map((agent) => ({
+              ...agent,
+              connected:
+                agent.configured &&
+                !agent.shadowed &&
+                this.mcpState.clients.some(
+                  (item) => item.scope === agent.scope && this.clientMatches(agent.agent, item.name),
+                ),
+            }));
+            this.push();
+          },
+        });
+        await this.mcpServer.start();
+        this.mcpState.running = true;
+      } catch (error) {
+        this.mcpState.error = messageOf(error);
+        this.mcpState.enabled = false;
+        await this.mcpServer?.stop();
+        this.mcpServer = undefined;
+        throw error;
+      } finally {
+        this.push();
+      }
+    }
+    if (persist) {
+      const temp = join(this.storage, `mcp-${randomUUID()}.tmp`);
+      await writeFile(temp, JSON.stringify({ enabled: this.mcpState.enabled }), { mode: 0o600 });
+      await rename(temp, join(this.storage, 'mcp.json'));
+    }
+    this.push();
+  }
   private async handle(message: Record<string, unknown>) {
     if (this.disposed) return;
     const action = String(message.action ?? '');
@@ -863,6 +1161,49 @@ class Workbench {
     }
     await this.operation(async () => {
       switch (action) {
+        case 'mcp.enable':
+          await this.setMcpEnabled(payload.enabled === true);
+          break;
+        case 'mcp.inspect':
+          await this.inspectMcp(payload.scope === 'global' ? 'global' : 'project');
+          break;
+        case 'mcp.probe':
+          this.mcpState.ui = await this.ui.probe();
+          break;
+        case 'mcp.adapt': {
+          const agent = String(payload.agent) as McpAgentId;
+          if (!['claude', 'codex-cli', 'codex-app'].includes(agent)) throw new Error('未知 Agent');
+          const scope = payload.scope === 'global' ? 'global' : 'project';
+          if (!this.mcpState.enabled) await this.setMcpEnabled(true);
+          const current = await this.adapters().inspect(agent, scope);
+          if (current.status === 'conflict' && payload.repair !== true) {
+            this.mcpState.notice = current.message;
+            await this.inspectMcp(scope);
+            break;
+          }
+          const result = await this.adapters().adapt(agent, scope, payload.repair === true);
+          if (result.configured) await this.verifyBridge();
+          this.mcpState.notice =
+            result.message + (result.configured ? ' 桥接握手自检通过；等待目标客户端实际加载。' : '');
+          await this.inspectMcp(scope);
+          break;
+        }
+        case 'mcp.remove': {
+          const agent = String(payload.agent) as McpAgentId;
+          if (!['claude', 'codex-cli', 'codex-app'].includes(agent)) throw new Error('未知 Agent');
+          const scope = payload.scope === 'global' ? 'global' : 'project';
+          const result = await this.adapters().remove(agent, scope);
+          this.mcpState.notice = result.message;
+          await this.inspectMcp(scope);
+          break;
+        }
+        case 'mcp.config.open': {
+          const agent = String(payload.agent) as McpAgentId;
+          if (!['claude', 'codex-cli', 'codex-app'].includes(agent)) throw new Error('未知 Agent');
+          const path = this.adapters().configPath(agent, payload.scope === 'global' ? 'global' : 'project');
+          await vscode.window.showTextDocument(vscode.Uri.file(path), { preview: false });
+          break;
+        }
         case 'ws.capture':
           if (this.mode !== 'vm') throw new Error('WS 采集仅支持 VM 模式');
           await this.vm.websocket.setCaptureEnabled(payload.enabled === true);
@@ -960,15 +1301,8 @@ class Workbench {
           this.projectSettings.autoConnectVm = this.project.config.settings?.autoConnectVm;
           if (this.projectSettings.autoConnectVm === undefined) delete this.projectSettings.autoConnectVm;
           this.updateVmAutoConnect();
-          const document = await this.store.load();
-          const wsDocument = await this.wsRules.load();
-          this.wsPersistentRules = wsDocument.rules;
-          await this.vm.websocket.updateRules([
-            ...wsDocument.rules,
-            ...this.vm.websocket.state.rules.filter((r) => !!r.match.connectionId),
-          ]);
-          this.rules = document.rules;
-          await this.syncSavedRules();
+          const reload = await this.mcpNetwork.reload();
+          if (!reload.ok) throw new Error('部分规则读取或同步失败，请检查项目规则文件');
           this.projectNotice =
             '项目文件已读取，规则和 VM 自动连接设置已同步；接入方式和采集参数的变更在重新加载窗口后生效。';
           break;
@@ -1307,6 +1641,10 @@ class Workbench {
   async dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    ++this.mcpGeneration;
+    this.ui.invalidate();
+    await this.mcpServer?.stop().catch(() => undefined);
+    await this.ui.dispose();
     this.vmAuto.dispose();
     if (this.historyTimer) clearTimeout(this.historyTimer);
     if (this.eventTimer) clearTimeout(this.eventTimer);

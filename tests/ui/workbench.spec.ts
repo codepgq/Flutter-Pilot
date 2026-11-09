@@ -657,15 +657,26 @@ test('VM 运行时 Mock 开关、重新发现、断开和旧代理恢复入口',
   const mock = page.getByRole('switch', { name: '开启运行时 Dio Mock', exact: true });
   const rescan = page.getByRole('button', { name: '重新发现并同步', exact: true });
   await expect(mock).not.toBeChecked();
-  await expect(rescan).toBeDisabled();
+  await expect(rescan).not.toBeVisible();
   await mock.click();
   expect(await messages(page)).toContainEqual({ action: 'vm.mock', payload: { enabled: true } });
   await state(page, { ...overrides, vm: { ...connected, mockEnabled: true } });
   await expect(mock).toBeChecked();
   await rescan.click();
   expect(await messages(page)).toContainEqual({ action: 'vm.rescan', payload: {} });
-  await mock.click();
+  await mock.focus();
+  await page.keyboard.press('Space');
   expect(await messages(page)).toContainEqual({ action: 'vm.mock', payload: { enabled: false } });
+  await state(page, { ...overrides, busy: true });
+  await expect(mock).toBeDisabled();
+  await page.setViewportSize({ width: 390, height: 900 });
+  await state(page, overrides);
+  const card = page.getByRole('region', { name: 'Dio Mock 实验性' });
+  await expect(card).toBeVisible();
+  await expect(card.locator('input[type=checkbox]')).toHaveCount(0);
+  expect(await card.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThan(180);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await card.screenshot({ path: 'artifacts/dio-mock-switch-narrow.png' });
   await state(page, { ...overrides, proxyActive: true });
   await expect(page.getByText(/旧代理仍在运行/)).toBeVisible();
   await page.getByRole('button', { name: '停止旧代理', exact: true }).click();
@@ -674,7 +685,7 @@ test('VM 运行时 Mock 开关、重新发现、断开和旧代理恢复入口',
   expect(await messages(page)).toContainEqual({ action: 'vm.disconnect', payload: {} });
   await state(page, { ...overrides, vm: { ...connected, status: 'disconnected' } });
   await expect(mock).toBeDisabled();
-  await expect(rescan).toBeDisabled();
+  await expect(rescan).not.toBeVisible();
   await expect(page.getByRole('button', { name: '断开连接', exact: true })).not.toBeVisible();
 });
 
