@@ -5,6 +5,7 @@ const path = require('node:path');
 const http = require('node:http');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
+const { createHash } = require('node:crypto');
 const exec = promisify(execFile);
 exports.run = async () => {
   const extension = vscode.extensions.getExtension('api-mocks.flutter-api-mocks');
@@ -12,7 +13,19 @@ exports.run = async () => {
   await extension.activate();
   const commands = await vscode.commands.getCommands();
   for (const command of ['open', 'start', 'stop']) assert.ok(commands.includes(`flutterApiMocks.${command}`));
-  const storage = process.env.API_MOCK_TEST_STORAGE;
+  const workspace = vscode.workspace.workspaceFolders[0].uri;
+  const projectDirectory = path.join(workspace.fsPath, '.api-mocks');
+  const project = JSON.parse(await fs.readFile(path.join(projectDirectory, 'project.json'), 'utf8'));
+  assert.match(project.projectId, /^[0-9a-f-]{36}$/i);
+  assert.equal(project.name, path.basename(workspace.fsPath));
+  assert.equal(project.connection.mode, 'proxy');
+  const legacyStorage = process.env.API_MOCK_TEST_LEGACY_STORAGE;
+  const storage = path.join(
+    path.dirname(path.dirname(legacyStorage)),
+    'projects',
+    project.projectId,
+    createHash('sha256').update(workspace.toString()).digest('hex').slice(0, 24),
+  );
   const certificate = path.join(storage, 'ca', 'mitmproxy-ca-cert.pem');
   const database = path.join(storage, 'history.sqlite3');
   const origin = http.createServer((_request, response) => {
@@ -90,11 +103,16 @@ exports.run = async () => {
       ]),
     );
     assert.equal(
-      JSON.parse(await fs.readFile(path.join(storage, 'rules.json'), 'utf8')).rules[0].id,
+      JSON.parse(await fs.readFile(path.join(projectDirectory, 'rules.json'), 'utf8')).rules[0].id,
       'ide-smoke',
     );
+    assert.equal(
+      JSON.parse(await fs.readFile(path.join(legacyStorage, 'rules.json'), 'utf8')).rules[0].id,
+      'ide-smoke',
+      'Migration preserves the legacy source',
+    );
     console.log(
-      'IDE_AUTO_RECORD_PASS: activation without UI, HTTPS mock, closing UI continues, background skips breakpoints, unconfigured API discovery, persistent SQLite catalog, manual stop preserved after reopen',
+      'IDE_AUTO_RECORD_PASS: project UUID/config/rules migration, activation without UI, HTTPS mock, closing UI continues, background skips breakpoints, unconfigured API discovery, persistent SQLite catalog, manual stop preserved after reopen',
     );
   } finally {
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');

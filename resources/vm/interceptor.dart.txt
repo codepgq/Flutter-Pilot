@@ -1,0 +1,250 @@
+(() {
+  final state = <String, dynamic>{
+    'rules': jsonDecode(__RULES__),
+    'expiresAt': DateTime.now().millisecondsSinceEpoch + 15000,
+    'tag': __TAG__,
+    'clients': Expando<Object>('api-mocks-clients'),
+    'requests': Expando<Object>('api-mocks-requests'),
+    'sequence': 0,
+    'enabled': true,
+    'installed': 0,
+  };
+  const bodyLimit = 262144;
+  bool active() => state['enabled'] == true && DateTime.now().millisecondsSinceEpoch < state['expiresAt'];
+  List<List<String>> headers(dynamic source) {
+    final result = <List<String>>[];
+    source.forEach((dynamic key, dynamic value) {
+      for (final item in value is List ? value : [value]) {
+        if (item != null) result.add([key.toString(), item.toString()]);
+      }
+    });
+    return result;
+  }
+  Map<String, dynamic> body(dynamic data, [dynamic contentType]) {
+    final mime = (contentType ?? '').toString().toLowerCase().split(';').first.trim();
+    final json = mime == 'application/json' || mime.endsWith('+json');
+    final textual = mime.isEmpty || mime.startsWith('text/') || json || mime == 'application/xml' || mime.endsWith('+xml') || mime == 'application/x-www-form-urlencoded' || mime == 'application/javascript';
+    if (data is Stream || data is FormData || data is ResponseBody) {
+      return {'body': '', 'bodyEncoding': 'text', 'bodyBytes': 0, 'editable': false, 'truncated': false, 'limitation': 'Dio 流式或上传正文保持直通，未读取内容'};
+    }
+    String text;
+    var binary = false;
+    try {
+      if (data == null) text = '';
+      else if (data is String) text = data;
+      else if (data is Uint8List || (data is List<int> && !json)) { text = base64Encode((data as List<int>).take(bodyLimit).toList()); binary = true; }
+      else text = jsonEncode(data);
+    } catch (_) {
+      return {'body': '', 'bodyEncoding': 'text', 'bodyBytes': 0, 'editable': false, 'truncated': false, 'limitation': 'Dio 自定义正文类型保持直通，未序列化内容'};
+    }
+    final bytes = binary ? (data as List<int>).length : utf8.encode(text).length;
+    final truncated = bytes > bodyLimit;
+    if (truncated && !binary) text = utf8.decode(utf8.encode(text).take(bodyLimit).toList(), allowMalformed: true);
+    return {'body': text, 'bodyEncoding': binary ? 'base64' : 'text', 'bodyBytes': bytes, 'editable': textual && !binary && !truncated, 'truncated': truncated,
+      if (binary || !textual) 'limitation': 'Dio 二进制或非文本 Content-Type 正文保持直通',
+      if (truncated) 'limitation': 'VM 注入模式正文超过 256 KiB 保存上限，已截断；转发内容保持完整'};
+  }
+  Map<String, dynamic> request(dynamic options) => <String, dynamic>{'method': options.method, 'url': options.uri.toString(), 'headers': headers(options.headers), ...body(options.data, options.contentType)};
+  Map<String, dynamic> response(dynamic value) => <String, dynamic>{'status': value.statusCode ?? 0, 'headers': headers(value.headers.map), ...body(value.data, value.headers.value('content-type'))};
+  bool matches(dynamic rule, dynamic original) {
+    final match = rule['match'] ?? {};
+    final uri = Uri.parse(original['url']);
+    final method = match['method'];
+    if (method != null && method != '' && method != '*' && method.toString().toUpperCase() != original['method'].toString().toUpperCase()) return false;
+    final host = match['host'];
+    if (host != null && host != '' && host != '*' && host.toString().toLowerCase() != uri.host.toLowerCase()) return false;
+    if (rule['_pathRegex'] != null && !RegExp(rule['_pathRegex']).hasMatch(uri.path.isEmpty ? '/' : uri.path)) return false;
+    final query = match['query'] ?? {};
+    for (final key in query.keys) { if (!(uri.queryParametersAll[key] ?? []).contains(query[key])) return false; }
+    final wantedHeaders = match['headers'] ?? {};
+    for (final key in wantedHeaders.keys) {
+      if (!(original['headers'] as List).any((dynamic item) => item[0].toString().toLowerCase() == key.toString().toLowerCase() && item[1] == wantedHeaders[key])) return false;
+    }
+    return true;
+  }
+  dynamic select(dynamic original, String stage) {
+    for (final rule in state['rules']) {
+      if (rule['enabled'] != true || !matches(rule, original)) continue;
+      if (stage == 'request' && (rule.containsKey('request') || rule.containsKey('redirect') || rule.containsKey('mock'))) return rule;
+      if (stage == 'response' && rule.containsKey('response')) return rule;
+    }
+    return null;
+  }
+  void patchHeaders(dynamic target, dynamic patch) {
+    for (final key in patch.keys) {
+      final removed = <String>[];
+      for (final existing in target.keys) { if (existing.toString().toLowerCase() == key.toString().toLowerCase()) removed.add(existing.toString()); }
+      for (final existing in removed) { target.remove(existing); }
+      if (patch[key] != null) target[key] = patch[key];
+    }
+  }
+  void removeEntityHeaders(dynamic target) => target.removeWhere((dynamic key, dynamic value) => ['content-length', 'content-encoding', 'transfer-encoding', 'etag', 'content-md5'].contains(key.toString().toLowerCase()));
+  bool jsonType(dynamic value) => value != null && (value.toString().toLowerCase().split(';').first.trim() == 'application/json' || value.toString().toLowerCase().split(';').first.trim().endsWith('+json'));
+  dynamic responseData(String text, dynamic options, dynamic head, [int status = 200]) {
+    if (options.responseType == ResponseType.bytes) return Uint8List.fromList(utf8.encode(text));
+    if (options.responseType == ResponseType.stream) return ResponseBody.fromString(text, status, headers: head.map);
+    if (options.responseType == ResponseType.json && jsonType(head.value('content-type'))) {
+      if (text.isEmpty) return null;
+      return jsonDecode(text);
+    }
+    return text;
+  }
+  void patchRequest(dynamic options, dynamic patch) {
+    final editable = body(options.data, options.contentType)['editable'] == true;
+    if (patch.containsKey('url')) {
+      final before = options.uri;
+      final after = Uri.parse(patch['url']);
+      if (before.scheme != after.scheme || before.host != after.host || before.port != after.port) {
+        options.headers.removeWhere((dynamic key, dynamic value) => ['authorization', 'cookie', 'proxy-authorization', 'host'].contains(key.toString().toLowerCase()));
+      }
+      options.baseUrl = '';
+      options.path = after.toString();
+      options.queryParameters = <String,dynamic>{};
+    }
+    if (patch.containsKey('method')) options.method = patch['method'].toString().toUpperCase();
+    final queryPatch = patch['query'] ?? {};
+    if (queryPatch.isNotEmpty) {
+      final uri = options.uri;
+      final query = Map<String,dynamic>.from(uri.queryParametersAll);
+      for (final key in queryPatch.keys) {
+        if (queryPatch[key] == null) query.remove(key);
+        else query[key] = queryPatch[key];
+      }
+      options.baseUrl = '';
+      options.path = Uri(scheme: uri.scheme, userInfo: uri.userInfo, host: uri.host, port: uri.hasPort ? uri.port : null, path: uri.path, queryParameters: query.isEmpty ? null : query, fragment: uri.hasFragment ? uri.fragment : null).toString();
+      options.queryParameters = <String,dynamic>{};
+    }
+    patchHeaders(options.headers, patch['headers'] ?? {});
+    if (patch.containsKey('body') && editable && utf8.encode(patch['body']).length <= bodyLimit) {
+      options.data = patch['body'];
+      removeEntityHeaders(options.headers);
+    }
+  }
+  void patchResponse(dynamic value, dynamic patch) {
+    final editable = body(value.data, value.headers.value('content-type'))['editable'] == true;
+    if (patch.containsKey('status')) value.statusCode = patch['status'];
+    final head = Map<String, dynamic>.from(value.headers.map);
+    patchHeaders(head, patch['headers'] ?? {});
+    value.headers = Headers.fromMap(head.map((dynamic key, dynamic v) => MapEntry(key.toString(), v is List ? v.map((dynamic x) => x.toString()).toList() : [v.toString()])));
+    if (patch.containsKey('body') && editable && utf8.encode(patch['body']).length <= bodyLimit) {
+      value.data = responseData(patch['body'], value.requestOptions, value.headers, value.statusCode ?? 200);
+      value.headers.map.removeWhere((String key, List<String> _) => ['content-length', 'content-encoding', 'transfer-encoding', 'etag', 'content-md5'].contains(key.toLowerCase()));
+    }
+    if (value.data is ResponseBody) {
+      value.data.statusCode = value.statusCode ?? 200;
+      value.data.headers.clear(); value.data.headers.addAll(value.headers.map);
+    }
+  }
+  void finish(dynamic flow, dynamic value, dynamic error) {
+    if (flow == null || flow['finished'] == true) return;
+    flow['finished'] = true;
+    Object? failure;
+    if (value != null) {
+      flow['originalResponse'] ??= response(value);
+      try {
+      final rule = flow['ruleSnapshot'];
+      if (rule != null) {
+        flow['responseRuleId'] = rule['id'];
+        flow['statusChanged'] = rule['response'].containsKey('status') && rule['response']['status'] != value.statusCode;
+        patchResponse(value, rule['response']);
+      }
+      } catch (error) { failure = error; flow['error'] = 'vmRuleApplicationFailed'; }
+      flow['automaticResponse'] = response(value);
+      flow['response'] = response(value);
+    }
+    if (error != null && value == null) flow['error'] = error.type.toString().split('.').last;
+    flow['duration'] = DateTime.now().millisecondsSinceEpoch - flow['startedAt'];
+    final result = Map<String, dynamic>.from(flow);
+    result.remove('finished'); result.remove('ruleSnapshot'); result.remove('statusChanged');
+    try { emitEvent('api_mocks.vm.flow', {'session': state['tag'], 'entry': result}); } catch (_) {}
+    if (failure != null) throw failure;
+  }
+  bool accepted(dynamic value) => value.requestOptions.validateStatus == null || value.requestOptions.validateStatus(value.statusCode) == true;
+  bool install(dynamic client) {
+    if (state['clients'][client] != null) return true;
+    final wrapper = InterceptorsWrapper(
+      onRequest: (options, handler) {
+        if (!active()) { handler.next(options); return; }
+        final original = request(options);
+        final uri = options.uri;
+        final flow = <String, dynamic>{
+          'id': 'vm-injected-${state['tag']}-${DateTime.now().microsecondsSinceEpoch}-${state['sequence']++}',
+          'startedAt': DateTime.now().millisecondsSinceEpoch, 'duration': 0,
+          'method': options.method, 'host': uri.host, 'path': uri.path.isEmpty ? '/' : uri.path,
+          'url': uri.toString(), 'targetUrl': uri.toString(), 'originalRequest': original,
+          'mocked': false, 'note': '', 'tags': <String>[],
+        };
+        state['requests'][options] = flow;
+        try {
+          final rule = select(original, 'request');
+          final responseRule = select(original, 'response');
+          // Snapshot response rule now: updates affect future requests only.
+          flow['ruleSnapshot'] = responseRule ?? <String,dynamic>{};
+          if (responseRule == null) flow['ruleSnapshot'] = null;
+          if (rule != null) {
+            flow['requestRuleId'] = rule['id'];
+            final patch = Map<String, dynamic>.from(rule['request'] ?? {});
+            if (rule.containsKey('redirect')) patch['url'] = rule['redirect']['url'];
+            patchRequest(options, patch);
+          }
+          flow['automaticRequest'] = request(options); flow['request'] = request(options); flow['targetUrl'] = options.uri.toString();
+          if (rule != null && rule.containsKey('mock')) {
+            final mock = rule['mock'];
+            final map = <String,List<String>>{};
+            final mh = mock['headers'] ?? {};
+            for (final key in mh.keys) { map[key.toString()] = [mh[key].toString()]; }
+            if (!map.keys.any((key) => key.toLowerCase() == 'content-type')) map['content-type'] = ['application/json; charset=utf-8'];
+            map.removeWhere((key, value) => ['content-length', 'content-encoding', 'transfer-encoding'].contains(key.toLowerCase()));
+            final head = Headers.fromMap(map);
+            final value = Response<dynamic>(requestOptions: options, statusCode: mock['status'], headers: head,
+              data: responseData(mock['body'], options, head, mock['status']));
+            flow['mocked'] = true;
+            // Apply response stage here as this interceptor's onResponse is not
+            // guaranteed to run after another interceptor resolves the request.
+            finish(flow, value, null);
+            if (accepted(value)) handler.resolve(value, true);
+            else handler.reject(DioException.badResponse(statusCode: value.statusCode!, requestOptions: options, response: value), true);
+            return;
+          }
+          handler.next(options);
+        } catch (error) {
+          flow['request'] ??= original; flow['automaticRequest'] ??= original;
+          final failure = DioException(requestOptions: options, error: 'API Mocks VM rule application failed', type: DioExceptionType.unknown);
+          finish(flow, null, failure); handler.reject(failure, true);
+        }
+      },
+      onResponse: (value, handler) {
+        final flow = state['requests'][value.requestOptions];
+        if (flow == null) { handler.next(value); return; }
+        if (!active()) flow['ruleSnapshot'] = null;
+        try {
+          finish(flow, value, null);
+          if (flow['statusChanged'] != true || accepted(value)) handler.next(value);
+          else handler.reject(DioException.badResponse(statusCode: value.statusCode!, requestOptions: value.requestOptions, response: value), true);
+        } catch (_) { handler.reject(DioException(requestOptions: value.requestOptions, error: 'API Mocks VM response rule failed'), true); }
+      },
+      onError: (error, handler) {
+        final flow = state['requests'][error.requestOptions];
+        if (flow == null) { handler.next(error); return; }
+        if (!active()) flow['ruleSnapshot'] = null;
+        final wasFinished = flow != null && flow['finished'] == true;
+        try {
+          finish(flow, error.response, error);
+          if (!wasFinished && error.type == DioExceptionType.badResponse && flow['statusChanged'] == true && error.response != null && accepted(error.response)) handler.resolve(error.response!);
+          else handler.next(error);
+        } catch (_) { handler.next(error); }
+      },
+    );
+    try {
+      client.interceptors.add(wrapper); state['clients'][client] = wrapper; return true;
+    } catch (_) { return false; }
+  }
+  state['install'] = install;
+  state['remove'] = (dynamic client) {
+    final wrapper = state['clients'][client];
+    if (wrapper != null) client.interceptors.remove(wrapper);
+    state['clients'][client] = null;
+  };
+  for (final client in __CLIENTS__) { if (install(client)) state['installed']++; }
+  return state;
+})()

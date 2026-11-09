@@ -98,3 +98,64 @@ flutter test
 - 17 项 Playwright 工作台测试通过：乱序 API 与历史倒序、目录折叠保留筛选与跨标签折叠偏好、新记录默认响应、JSON/原文切换、非 JSON/HTML 安全回退、空/二进制/截断/无响应、680px 长路径布局、详情放大恢复、复制模式与失败提示。
 - 已人工检查生成截图：`artifacts/workbench-history.png`、`artifacts/workbench-api-sorted.png`、`artifacts/workbench-api-focused.png`、`artifacts/workbench-api-narrow.png`，均使用合成数据，不包含真实认证内容。
 - 本轮不修改代理转发行为；未重新执行设备网络或真实登录验收，MFA 代理链路超时问题仍按 `.harness/momory/FAILURES.md` 跟踪。
+
+## 0.0.2 VM 零源码路线验收（2026-11-08）
+
+本节为新分支 `codex/v0.0.2-vm-service` 的增量验收，旧章节的代理、设备和布局统计保持历史基线，不代表 VM 覆盖范围。
+
+| 层级 | 实际结果 |
+| --- | --- |
+| 类型与构建 | `npm run typecheck`、`npm run build` 通过 |
+| TypeScript 回归 | 116 项 Vitest（12 个文件）通过，含注入、JSON-RPC、会话生命周期、profiling、SQLite 及原功能回归 |
+| 工作台 | 20 项 Playwright 通过；包含 VM 无引擎 / 无 CA 接入、WS 输入提交清空、开关 / 重新发现 / 断开、旧代理恢复提示、VM 无引擎历史查询及 680px 布局 |
+| 截图 | 已实际检查 `artifacts/workbench-vm.png`，使用合成数据，无溢出 |
+| Flutter 真实运行时 | iPhone 18 Pro / iOS 27.2 模拟器 8 项通过；只连 VM 采集 POST 请求 / 响应，已有 Dio HTTPS 本地 Mock、双向修改、真实 503 改 200、Hot Restart 后重新接入、Mock 开关恢复、异常观察断线后重连恢复 SDK 开关及源文件 SHA-256 不变 |
+| 零源码证据 | `examples/flutter/lib/main.dart` 运行前后 SHA-256 一致；无代理、helper、CA；本地 Mock 未访问上游 |
+| 纯 Dart 真实 VM | Dio 5.9.0 / 5.10.0 / 5.11.1 各 21 项全部通过；含真实 15 秒租约过期、跨源凭证清理、流式响应、无效 JSON 与网络错误历史 |
+| 真实 IDE VM 消息链路 | VS Code 与 Cursor 独立扩展宿主均退出 0：VM 模式激活、无 engine / CA、SQLite 查询 / 详情 / 规则草稿、合成 WS 连接、关闭工作台保活 / 重开、认证地址不落盘及 dispose 断开 |
+| 代理回归 | 官方 mitmproxy 12.3.1 standalone：36 项通过（19 项真实 HTTP / HTTPS 集成、17 项规则 / 存储），本轮实际重跑 |
+
+真实 IDE smoke 使用合成 JSON-RPC 服务并调用扩展内部消息入口，验证宿主生命周期与消息链路，不宣称覆盖真实 Webview 鼠标操作，也不替代 Flutter 真运行时 Mock 验证；浏览器交互与真实 Flutter 分别由其他测试覆盖。
+
+实现同时包含 VM JSON-RPC、SDK profiling、多 Isolate 与 Hot Restart、Dio 对象发现 / 注入、规则同步及卸载、SQLite CLI 存储和受控 UI 交互测试。VM 与代理共用规则文件，历史分库；清空历史不删除 API 目录，目录删除后仅未来调用重新发现。
+
+VM 连接默认仅采集，用户主动开启运行时 Mock 后才安装拦截器。运行中的代理也同步共用规则；代理在 VM 页重连时不会恢复人工断点。慢心跳只保留一个运行 / 排队任务，避免停用被重复超时阻塞。关闭工作台不关闭连接。正常停用尽量立即卸载，意外断开后依赖 15 秒租约旁路，并在重新启用 Mock 前提供约 16 秒冷却。新实例周期扫描存在首个请求早于接入的窗口；每 Isolate 最多接入 128 个 Dio。SDK profiling 在 App 内的缓存没有本插件强制容量上限，本地历史容量不能当作 App 内存限制。
+
+### VSIX 产物复验
+
+`artifacts/flutter-api-mocks-0.0.2.vsix` 已生成，解包确认包含 `resources/vm/interceptor.dart.txt`，运行时代码已内嵌 ws。使用该 VSIX 解包的 `extension/` 分别运行 VS Code、Cursor VM 扩展宿主 smoke，两者退出码均为 0。该复验使用隔离 IDE 配置，不覆盖用户当前安装。
+
+最终模板另在真实 iPhone 模拟器上重跑全部 8 项通过，包含 SDK profiling 异常断线后同 VM 重连恢复。通过范围仍按上表的运行时、UI 与宿主三层分别计。
+
+### VM 本轮未验证范围
+
+- VM 路线的 Android 模拟器 / USB 真机和 iOS 真机；旧代理设备通过不能换算为 VM 通过。
+- Profile / AOT / Release 运行时注入；当前承诺限 Debug/JIT。
+- 全部 Dio 版本、原生插件 / WebView、自定义 adapter 以及会短路后续拦截器的应用拦截链。
+- EXIO 的真实登录与 MFA 链路恢复。独立示例通过不等于此前代理超时问题已归因或解决。
+
+### 默认接入改为 VM WS 的增量回归
+
+用户将 VM WS 指定为默认和推荐方案，代理为备用。118 项 Vitest、21 项 Playwright、类型检查、格式检查、构建通过。新增覆盖新工作区即使存在可用引擎缓存仍不启动代理、旧版无 mode 连接文件保持代理、已保存方式优先，以及 Webview 初始直接展示 VM、代理标记备用。此增量不改变请求执行逻辑，不重复计算之前的设备验收。
+
+真实 Cursor 隔离宿主使用全新、没有 connection.json 的工作区通过：默认 VM、无引擎 / CA、离线历史和目录、合成 WS 连接、关闭 / 重开工作台及退出断开，退出码 0。
+
+复现步骤、运行时数据语义和模式切换恢复见 [VM 使用与可行性验证](v0.0.2-vm-service.md)。本版本按用户指定使用 0.0.2，低于已安装的 0.1.0；安装构建 VSIX 时使用 `--force` 覆盖。
+
+## 项目 UUID 绑定与简洁开关增量验收（2026-11-08）
+
+- 159 项 Vitest（14 个文件）通过，含 24 项项目文件、9 项私有迁移及 34 项扩展整合测试。验证 UUID 稳定、同 UUID 不同目录隔离、项目设置优先、外部规则防覆盖与读取、配置快照、旧历史备注/标签/API 目录迁移、SQLite live WAL 一致快照，以及非法配置/符号链接拒绝。
+- 23 项 Playwright 通过。项目卡显示 UUID、配置/规则入口和读取反馈；长项目名在 680px 下不横向溢出；规则仅显示 switch，鼠标与 Space 可切换，繁忙时禁用。已检查深色、浅色窄面板及项目卡合成截图。
+- Cursor 隔离扩展宿主的 VM 与代理 smoke 均退出 0。VM 使用合成 JSON-RPC 服务，覆盖规则写入项目、外部冲突拒绝、重新读取、连接保活与认证地址不落盘；代理使用真实 mitmdump，验证旧规则/配置迁移、HTTPS Mock、后台采集及目录持久化。
+- TypeScript / Webview 类型检查、Prettier、构建及 `git diff --check` 通过。
+
+本增量不重新计入设备验收；未对用户活跃 EXIO 会话强制重载。使用说明见 [项目绑定说明](project-binding.md)。
+
+本轮最终 VSIX 解包后再次运行 Cursor VM 隔离宿主，退出码 0，项目绑定、规则读写/冲突保护与 VM 生命周期检查均通过。
+
+## VM 连接与状态同步修复验收（2026-11-08）
+
+- 174 项 Vitest、24 项 Playwright、TypeScript / Webview 类型检查、Prettier 和构建通过。新增覆盖真实 HTTP/WebSocket DDS 跳转、路径/认证/端口/超时分类、跳转边界、连接取消、重复连接保护、初始化断连竞态、失败清计数及连接页四态一致。
+- 真实 EXIO worktree 的当前 Flutter VM：原始 WS 返回 HTTP 302 到本机 DDS，修复后的 VmServiceClient 从原始地址连接并完成只读 getVM，返回 VM 与 1 个 Isolate；实际端点更新为 DDS。未修改应用源码、profiling 或业务请求，完整认证地址未保存。此项仅验收传输和只读 RPC，不代表重新完成业务 Mock 或登录验收。
+- 已查看 `artifacts/workbench-vm-connected.png` 合成截图：680px 下显示“已连接 · 当前端点”，地址输入禁用，仅保留断开；连接中、失败与断开的端点和按钮状态由 Playwright 验证。
+- 原用户日志仅记录统一错误，截图端点可能残留自旧会话，不能反推出当次输入；本轮将可复现 DDS 缺陷与旧端点/状态缺陷分别修复。

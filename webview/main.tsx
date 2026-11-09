@@ -30,6 +30,7 @@ function send(action: string, payload: unknown = {}) {
   vscode?.postMessage({ action, payload });
 }
 const initial: WorkbenchState = {
+  mode: 'vm',
   rules: [],
   history: { items: [], total: 0 },
   pending: [],
@@ -347,7 +348,8 @@ function App() {
     { id: 'breakpoints', label: '断点队列', icon: 'pause', count: state.pending.length },
   ];
   const enabled = state.rules.filter((r) => r.enabled).length;
-  const running = state.proxyActive;
+  const vmMode = state.mode !== 'proxy';
+  const running = vmMode ? state.vm?.status === 'connected' : state.proxyActive;
   return (
     <div className="app">
       <header className="app-header">
@@ -365,27 +367,50 @@ function App() {
         <div className="header-actions">
           <span className={`status-pill ${running ? 'online' : ''}`}>
             <i />
-            {state.engine.status === 'starting'
-              ? '引擎启动中'
-              : running
-                ? '自动记录中'
-                : state.engine.status === 'running'
-                  ? '引擎已就绪'
-                  : '代理未启动'}
+            {vmMode
+              ? running
+                ? 'VM 记录中'
+                : state.vm?.status === 'connecting'
+                  ? 'VM 连接中'
+                  : 'VM 未连接'
+              : state.engine.status === 'starting'
+                ? '引擎启动中'
+                : running
+                  ? '自动记录中'
+                  : state.engine.status === 'running'
+                    ? '引擎已就绪'
+                    : '代理未启动'}
           </span>
-          <Button action={running ? 'stop' : 'start'} primary={!running} disabled={state.busy}>
+          <Button
+            action={vmMode ? (running ? 'vm.disconnect' : undefined) : running ? 'stop' : 'start'}
+            onClick={vmMode && !running ? () => setTab('connection') : undefined}
+            primary={!running}
+            disabled={state.busy || (vmMode && state.vm?.status === 'connecting')}
+          >
             <Icon name={running ? 'stop' : 'play'} size={14} />
-            {running ? '停止代理' : '启动代理'}
+            {vmMode
+              ? running
+                ? '断开 VM'
+                : state.vm?.status === 'connecting'
+                  ? '连接中…'
+                  : '连接 VM'
+              : running
+                ? '停止代理'
+                : '启动代理'}
           </Button>
         </div>
       </header>
       <div className="context-bar">
         <div>
           <span className="context-dot" />
-          <span>{state.workspace.split('/').filter(Boolean).at(-1) || '当前工作区'}</span>
+          <span className="context-project" title={state.workspace}>
+            {state.project?.name || state.workspace.split('/').filter(Boolean).at(-1) || '当前工作区'}
+          </span>
           <span className="divider">/</span>
           <span className="mono">
-            {state.connectionHost}:{state.engine.proxyPort ?? 8080}
+            {vmMode
+              ? `VM · ${running ? (state.vm?.endpoint ?? '已连接') : state.vm?.status === 'connecting' ? '连接中' : '未连接'}`
+              : `${state.connectionHost}:${state.engine.proxyPort ?? 8080}`}
           </span>
         </div>
         <div>
@@ -421,18 +446,220 @@ function App() {
       )}
       {state.ruleSyncError && <div className="notice global-notice">{state.ruleSyncError}</div>}
       <main>
-        {tab === 'connection' && <Connection state={state} preview={preview} />}
-        {tab === 'history' && <History state={state} selected={selected} />}
+        {tab === 'connection' && (
+          <>
+            {state.project && (
+              <section className="card project-binding" aria-label="当前绑定项目">
+                <div className="project-binding-heading">
+                  <strong>{state.project.name}</strong>
+                  <span className="tag">当前项目</span>
+                  <div className="card-actions">
+                    <Button onClick={() => send('project.open', { kind: 'config' })} disabled={state.busy}>
+                      项目配置
+                    </Button>
+                    <Button onClick={() => send('project.open', { kind: 'rules' })} disabled={state.busy}>
+                      规则文件
+                    </Button>
+                    <Button action="project.reload" disabled={state.busy}>
+                      读取项目文件
+                    </Button>
+                  </div>
+                </div>
+                <code className="project-uuid" title={state.project.id}>
+                  UUID · {state.project.id}
+                </code>
+                {state.project.notice && <small role="status">{state.project.notice}</small>}
+              </section>
+            )}
+            <Connection state={state} preview={preview} />
+          </>
+        )}
+        {tab === 'history' && <History key={state.mode ?? 'vm'} state={state} selected={selected} />}
         {tab === 'rules' && <Rules state={state} edit={edit} setEdit={setEdit} />}
-        {tab === 'breakpoints' && <Breakpoints pending={state.pending} />}
+        {tab === 'breakpoints' && (
+          <>
+            {vmMode && (
+              <div className="notice">
+                VM 模式暂不支持手动断点。自动 Mock 和双向修改请开启实验性 Dio Mock；手动暂停请使用代理模式。
+              </div>
+            )}
+            <Breakpoints pending={state.pending} />
+          </>
+        )}
       </main>
       <footer>
         <span className="footer-brand">
-          FLUTTER API MOCKS <span>v0.1.0</span>
+          FLUTTER API MOCKS <span>v0.0.2</span>
         </span>
-        <span>{running ? '后台记录中 · 关闭工作台继续记录' : '本地存储 · 仅用于开发调试'}</span>
+        <span>
+          {running
+            ? vmMode
+              ? 'VM 后台记录中 · 关闭工作台继续'
+              : '后台记录中 · 关闭工作台继续记录'
+            : '本地存储 · 仅用于开发调试'}
+        </span>
       </footer>
     </div>
+  );
+}
+function ConnectionMode({ state }: { state: WorkbenchState }) {
+  return (
+    <div className="connection-modes" aria-label="接入方式">
+      <button
+        aria-pressed={state.mode !== 'proxy'}
+        disabled={state.busy}
+        onClick={() => send('connection.mode', { mode: 'vm' })}
+      >
+        <Icon name="plug" />
+        VM 连接 <span className="tag">推荐 · 无需证书</span>
+      </button>
+      <button
+        aria-pressed={state.mode === 'proxy'}
+        disabled={state.busy}
+        onClick={() => send('connection.mode', { mode: 'proxy' })}
+      >
+        <Icon name="radar" />
+        代理连接 <span className="tag">备用方案</span>
+      </button>
+    </div>
+  );
+}
+function VmConnection({ state }: { state: WorkbenchState }) {
+  const [url, setUrl] = useState('');
+  const vm = state.vm;
+  const connected = vm?.status === 'connected';
+  const connecting = vm?.status === 'connecting';
+  return (
+    <>
+      <section className="card vm-card">
+        <div className="card-heading">
+          <span className="step">01</span>
+          <h3>连接 Dart VM Service</h3>
+          <span className={`small-status ${connected ? 'online' : ''}`}>
+            {connected ? '已连接' : connecting ? '连接中' : '未连接'}
+          </span>
+        </div>
+        <p>
+          使用原来的 Flutter Debug 启动项运行应用，复制调试输出中的 VM Service WebSocket
+          地址。无需修改项目代码、安装 CA 或启动代理。
+        </p>
+        {connected && (
+          <div className="vm-active-connection" role="status" aria-label="VM 已连接">
+            <Icon name="plug" size={18} />
+            <strong>已连接 · {vm.endpoint ?? 'Dart VM Service'}</strong>
+            <span>后台记录中</span>
+          </div>
+        )}
+        <label>
+          VM WebSocket 地址
+          <input
+            aria-label="VM WebSocket 地址"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder={connected ? '已连接，断开后可输入新的地址' : 'ws://127.0.0.1:端口/认证路径/ws'}
+            value={url}
+            disabled={state.busy || connected || connecting}
+            onChange={(event) => setUrl(event.target.value)}
+          />
+        </label>
+        <div className="card-actions">
+          {connected ? (
+            <Button action="vm.disconnect" disabled={state.busy}>
+              断开连接
+            </Button>
+          ) : (
+            <Button
+              primary
+              disabled={state.busy || connecting || !url.trim()}
+              onClick={() => {
+                send('vm.connect', { url: url.trim() });
+                setUrl('');
+              }}
+            >
+              {connecting ? '连接中…' : '连接并记录'}
+            </Button>
+          )}
+        </div>
+        <small className="muted">
+          地址可能含调试凭证，仅用于本次连接，不写入设置或日志。Hot Restart 后会重新发现 Isolate；VM
+          端口变化后请重新连接。
+        </small>
+        <div className="vm-statistics">
+          <span>
+            <b>{vm?.isolates ?? 0}</b> 个可采集 Isolate
+          </span>
+          <span>
+            <b>{vm?.recorded ?? 0}</b> 条本会话记录
+          </span>
+          <span>
+            <b>{vm?.instances ?? 0}</b> 个已接入 Dio
+          </span>
+        </div>
+        {vm?.error && (
+          <div className="notice" role="alert">
+            {vm.error}
+          </div>
+        )}
+      </section>
+      <section className="card vm-card">
+        <div className="card-heading">
+          <span className="step">02</span>
+          <h3>实验性 Dio Mock</h3>
+          <span className="tag warm">Debug · Dio 5</span>
+        </div>
+        <p>
+          通过 VM 动态安装拦截器，执行已启用的
+          Mock、请求修改、响应修改和目标转发，不保存项目源码改动。关闭后移除本插件的拦截器。
+        </p>
+        <label className="switch-row">
+          <span>
+            <strong>开启运行时 Dio Mock</strong>
+            <small>开启后仅记录已接入 Dio 的语义快照，避免与 VM 网络分析重复；手动断点暂不支持。</small>
+          </span>
+          <input
+            type="checkbox"
+            role="switch"
+            aria-label="开启运行时 Dio Mock"
+            disabled={state.busy || !connected}
+            checked={vm?.mockEnabled ?? false}
+            onChange={(event) => send('vm.mock', { enabled: event.target.checked })}
+          />
+        </label>
+        <div className="card-actions">
+          <Button action="vm.rescan" disabled={state.busy || !connected || !vm?.mockEnabled}>
+            重新发现并同步
+          </Button>
+        </div>
+        <p className="field-hint">
+          新创建的 Dio 周期性发现，首次创建后立即请求可能早于接入。普通断开会卸载；连接异常时规则租约最长约 15
+          秒到期后旁路，Hot Restart 可清除注入。
+        </p>
+        <p className="field-hint">
+          仅采集模式使用 SDK HTTP profiling，采集期间 App
+          会保存网络分析数据并有内存开销。插件限制本地历史容量，退出恢复本插件开启的采集开关，不清除其他调试工具的数据。
+        </p>
+      </section>
+      {state.proxyActive && (
+        <div className="notice">
+          旧代理仍在运行。要验证纯 VM 接入，请先用不含 API_MOCK_PROXY 的原启动项重新运行 App，再停止旧代理。
+          规则共用，保存改动也会同步到仍在运行的代理；关闭运行时 Dio Mock 只移除 VM 拦截器。
+          <div className="card-actions">
+            <Button action="proxy.stop">停止旧代理</Button>
+          </div>
+        </div>
+      )}
+      {vm?.warnings.map((warning) => (
+        <div className="notice" key={warning}>
+          {warning}
+        </div>
+      ))}
+      <div className="notice">
+        VM 与代理历史分开保存，规则共用。VM 内置采集覆盖受支持的 dart:io HTTP
+        请求；原生插件、WebView、自定义网络适配器和 Release 不在覆盖承诺内。Mock 在 Dio
+        数据层执行，其他拦截器仍可能继续处理结果。
+      </div>
+    </>
   );
 }
 function Connection({
@@ -452,16 +679,33 @@ function Connection({
     | undefined;
   const port = state.engine.proxyPort ?? 8080;
   const command = `flutter run --dart-define=API_MOCK_PROXY=${state.connectionHost}:${port}`;
+  if (state.mode !== 'proxy')
+    return (
+      <div className="connection-page">
+        <div className="page-title">
+          <div>
+            <div className="eyebrow">VM SERVICE · 0.0.2</div>
+            <h2>连接 Flutter VM，零源码记录 API</h2>
+            <p>推荐通过 VM WS 接入，无需改源码或证书；连接后先记录，按需开启运行时 Dio Mock。</p>
+          </div>
+        </div>
+        <ConnectionMode state={state} />
+        <VmConnection state={state} />
+      </div>
+    );
   return (
     <div className="connection-page">
       <div className="page-title">
         <div>
           <div className="eyebrow">GET CONNECTED</div>
           <h2>让接口调试，从连接开始</h2>
-          <p>优先使用系统代理；Dio 无法直连时，一次接入开发辅助配置。</p>
+          <p>
+            备用接入：VM 无法满足当前网络场景，或需要手动断点时使用代理；按向导配置引擎、证书和开发辅助代码。
+          </p>
         </div>
         <span className="platform-badge">macOS · Android / iOS</span>
       </div>
+      <ConnectionMode state={state} />
       <div className="setup-grid">
         <section className="card engine-card">
           <div className="card-heading">
@@ -673,10 +917,10 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
     setTags(selected?.tags.join(', ') ?? '');
   }, [selected?.id, selected?.note, selected?.tags.join(',')]);
   useEffect(() => {
-    if (state.engine.status !== 'running') return;
+    if (state.mode !== 'vm' && state.engine.status !== 'running') return;
     const t = setTimeout(() => send('history.query', { ...query, offset }), 250);
     return () => clearTimeout(t);
-  }, [query, offset, state.engine.status]);
+  }, [query, offset, state.engine.status, state.mode]);
   const groups = useMemo(() => [...(state.apis ?? [])].sort((a, b) => b.lastAt - a.lastAt), [state.apis]);
   const records = useMemo(
     () => [...state.history.items].sort((a, b) => b.startedAt - a.startedAt),
@@ -1217,16 +1461,21 @@ function Rules({
               `${r.name} ${r.match.path} ${r.match.host}`.toLowerCase().includes(search.toLowerCase()),
             )
             .map((r, i) => (
-              <div className={`rule-card ${r.enabled ? '' : 'disabled'}`} key={r.id}>
-                <label className="rule-switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={r.enabled}
-                    aria-label={`启用 ${r.name}`}
-                    onChange={() => send('rules.toggle', { id: r.id })}
-                  />
-                </label>
+              <div className={`rule-card ${r.enabled ? 'enabled' : 'inactive'}`} key={r.id}>
+                <button
+                  type="button"
+                  className="rule-switch"
+                  role="switch"
+                  aria-checked={r.enabled}
+                  aria-label={`启用 ${r.name}`}
+                  title={r.enabled ? '点击停用此规则' : '点击启用此规则'}
+                  disabled={state.busy}
+                  onClick={() => send('rules.toggle', { id: r.id })}
+                >
+                  <span className="rule-switch-track" aria-hidden="true">
+                    <span className="rule-switch-thumb" />
+                  </span>
+                </button>
                 <div className="rule-card-content">
                   <div>
                     <strong>{r.name}</strong>

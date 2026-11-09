@@ -51,6 +51,7 @@ export interface ResponseSnapshot extends BodySnapshot {
   status: number;
 }
 export interface HistoryEntry {
+  source?: 'proxy' | 'vm' | 'vm-dio';
   id: string;
   startedAt: number;
   duration: number;
@@ -106,6 +107,24 @@ export interface ApiCatalogEntry {
   lastAt: number;
 }
 export interface WorkbenchState {
+  project?: {
+    id: string;
+    name: string;
+    configPath: string;
+    rulesPath: string;
+    notice?: string;
+  };
+  mode?: 'proxy' | 'vm';
+  vm?: {
+    status: 'disconnected' | 'connecting' | 'connected';
+    endpoint?: string;
+    isolates: number;
+    recorded: number;
+    instances: number;
+    mockEnabled: boolean;
+    warnings: string[];
+    error?: string;
+  };
   rules: Rule[];
   history: HistoryResult;
   apis?: ApiCatalogEntry[];

@@ -6,6 +6,9 @@ import { EngineManager } from './engine';
 import { RuntimeManager } from './runtime';
 import { RuleStore } from './store';
 import { isFlutterWorkspace } from './discovery';
+import { VmSession } from './vm/session';
+import { openProjectBinding, type ProjectBinding, type ProjectSettings } from './project';
+import { prepareProjectStorage } from './projectStorage';
 import {
   HistoryEntry,
   HistoryQuery,
@@ -23,6 +26,7 @@ let active: Workbench | undefined;
 let output: vscode.OutputChannel;
 let status: vscode.StatusBarItem;
 let shuttingDown = false;
+let lifecycle = 0;
 const sessions = new Map<string, Workbench>();
 const previewDocuments = new Map<string, string>();
 function updateStatus() {
@@ -34,10 +38,11 @@ function updateStatus() {
     : '$(radio-tower) API Mocks';
   status.tooltip = running.length
     ? running.map((session) => session.summary).join('\n') + '\n点击打开工作台；关闭工作台仍继续记录。'
-    : '打开 Flutter API 工作台；首次请安装引擎并完成接入。';
+    : '打开 Flutter API 工作台；连接当前项目的 Flutter VM WS 开始记录。';
 }
 export async function activate(context: vscode.ExtensionContext) {
   shuttingDown = false;
+  const epoch = ++lifecycle;
   output = vscode.window.createOutputChannel('Flutter API Mocks');
   context.subscriptions.push(output);
   context.subscriptions.push(
@@ -45,14 +50,37 @@ export async function activate(context: vscode.ExtensionContext) {
       provideTextDocumentContent: (uri) => previewDocuments.get(uri.toString()) ?? '',
     }),
   );
-  function sessionFor(folder: vscode.WorkspaceFolder) {
+  const creating = new Map<string, Promise<Workbench>>();
+  async function sessionFor(folder: vscode.WorkspaceFolder): Promise<Workbench> {
     const key = folder.uri.toString();
-    let session = sessions.get(key);
-    if (!session) {
-      session = new Workbench(context, folder, updateStatus);
+    const current = sessions.get(key);
+    if (current) return current;
+    const pending = creating.get(key);
+    if (pending) return pending;
+    const task = (async () => {
+      const legacy = join(
+        context.globalStorageUri.fsPath,
+        'workspaces',
+        createHash('sha256').update(key).digest('hex').slice(0, 24),
+      );
+      const project = await openProjectBinding(folder.uri.fsPath, legacy);
+      const storage = await prepareProjectStorage(context.globalStorageUri.fsPath, key, project.projectId);
+      if (
+        shuttingDown ||
+        epoch !== lifecycle ||
+        !vscode.workspace.workspaceFolders?.some((f) => f.uri.toString() === key)
+      )
+        throw new Error('工作区已关闭，项目会话未启动。');
+      const session = new Workbench(context, folder, updateStatus, project, storage);
       sessions.set(key, session);
+      return session;
+    })();
+    creating.set(key, task);
+    try {
+      return await task;
+    } finally {
+      if (creating.get(key) === task) creating.delete(key);
     }
-    return session;
   }
   const open = async () => {
     if (process.platform !== 'darwin') throw new Error('首版支持 macOS 本地桌面 IDE。');
@@ -70,7 +98,7 @@ export async function activate(context: vscode.ExtensionContext) {
             )
           )?.folder;
     if (!folder || shuttingDown) return;
-    const session = sessionFor(folder);
+    const session = await sessionFor(folder);
     active = session;
     await session.reveal();
     return session;
@@ -111,7 +139,7 @@ export async function activate(context: vscode.ExtensionContext) {
             )
           )
             return;
-          const session = sessionFor(folder);
+          const session = await sessionFor(folder);
           await session.initialize();
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
@@ -155,6 +183,7 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 export async function deactivate() {
   shuttingDown = true;
+  lifecycle++;
   const current = [...sessions.values()];
   sessions.clear();
   active = undefined;
@@ -167,6 +196,8 @@ function messageOf(error: unknown) {
 }
 
 class Workbench {
+  private mode: 'proxy' | 'vm' = 'vm';
+  private readonly vm: VmSession;
   private readonly engine = new EngineManager();
   private readonly runtime: RuntimeManager;
   private readonly store: RuleStore;
@@ -174,7 +205,8 @@ class Workbench {
   private initialization?: Promise<void>;
   private connectionDevices: string[] = [];
   private preferredPort?: number;
-  private readonly storage: string;
+  private readonly projectSettings: ProjectSettings;
+  private readonly configuredPort?: number;
   private rules: Rule[] = [];
   private pending = new Map<string, PendingBreakpoint>();
   private history: HistoryResult = { items: [], total: 0 };
@@ -192,6 +224,7 @@ class Workbench {
   private busy = 0;
   private lastError?: string;
   private ruleSyncError?: string;
+  private projectNotice?: string;
   private inspection?: setup.FlutterInspection;
   private preview?: setup.SetupPreview;
   private disposed = false;
@@ -204,13 +237,29 @@ class Workbench {
     private readonly context: vscode.ExtensionContext,
     private readonly folder: vscode.WorkspaceFolder,
     private readonly onChange: () => void,
+    private readonly project: ProjectBinding,
+    private readonly storage: string,
   ) {
-    this.storage = join(
-      context.globalStorageUri.fsPath,
-      'workspaces',
-      createHash('sha256').update(folder.uri.toString()).digest('hex').slice(0, 24),
+    this.projectSettings = { ...project.config.settings };
+    this.configuredPort = project.config.connection.configuredPort;
+    this.store = new RuleStore(project.rulesDirectory);
+    this.vm = new VmSession(
+      this.storage,
+      {
+        retentionDays: this.config().get<number>('retentionDays', 7),
+        maxRecords: this.config().get<number>('maxRecords', 10000),
+        maxBodyBytes: this.config().get<number>('maxBodyBytes', 1048576),
+      },
+      join(this.context.extensionPath, 'resources', 'vm', 'interceptor.dart.txt'),
     );
-    this.store = new RuleStore(this.storage);
+    this.vm.on('change', () => this.push());
+    this.vm.on('history', () => {
+      if (this.mode === 'vm' && this.panel && !this.historyTimer)
+        this.historyTimer = setTimeout(() => {
+          this.historyTimer = undefined;
+          void this.reloadHistory().catch((error) => this.report(error));
+        }, 300);
+    });
     this.runtime = new RuntimeManager(
       context.globalStorageUri.fsPath,
       join(context.extensionPath, 'resources', 'engine-manifest.json'),
@@ -228,7 +277,7 @@ class Workbench {
     this.engine.on('event', (event: { event: string; data: unknown }) => this.onEvent(event));
   }
   get recording() {
-    return this.proxyActive;
+    return this.proxyActive || this.vm.state.status === 'connected';
   }
   get hasPanel() {
     return !!this.panel;
@@ -237,6 +286,8 @@ class Workbench {
     return this.folder.uri;
   }
   get summary() {
+    if (this.mode === 'vm')
+      return `${this.folder.name} · VM ${this.vm.state.endpoint ?? '未连接'}${this.proxyActive ? ' · 代理仍在运行' : ''}`;
     return `${this.folder.name} · ${this.connectionHost}:${this.engine.state.proxyPort ?? 8080}`;
   }
   async reveal() {
@@ -265,7 +316,9 @@ class Workbench {
       this.pending.clear();
       void this.enqueue(async () => {
         if (this.engine.state.status === 'running')
-          await this.engine.rpc('breakpoint.setInteractive', { enabled: !!this.panel });
+          await this.engine.rpc('breakpoint.setInteractive', {
+            enabled: this.mode === 'proxy' && !!this.panel,
+          });
       }).catch((error) => this.report(error));
       this.onChange();
     });
@@ -280,10 +333,10 @@ class Workbench {
       await this.initialize();
       await this.enqueue(async () => {
         if (this.disposed || this.panel !== panel) return;
-        if (this.engine.state.status === 'running') {
+        if (this.mode === 'proxy' && this.engine.state.status === 'running') {
           await this.engine.rpc('breakpoint.setInteractive', { enabled: true });
-          await this.reloadHistory();
         }
+        await this.reloadHistory();
         this.push();
       });
     } catch (error) {
@@ -298,7 +351,15 @@ class Workbench {
     return next;
   }
   private config() {
-    return vscode.workspace.getConfiguration('flutterApiMocks', this.folder.uri);
+    const base = vscode.workspace.getConfiguration('flutterApiMocks', this.folder.uri);
+    return {
+      get: <T>(key: string, fallback?: T): T => {
+        if (Object.prototype.hasOwnProperty.call(this.projectSettings, key))
+          return this.projectSettings[key as keyof ProjectSettings] as T;
+        if (key === 'proxyPort' && this.configuredPort !== undefined) return this.configuredPort as T;
+        return base.get<T>(key, fallback as T);
+      },
+    };
   }
   private log(text: string) {
     const clean = String(text).slice(0, 4000);
@@ -319,6 +380,8 @@ class Workbench {
     this.onChange();
     if (this.disposed || !this.panel) return;
     const state: WorkbenchState = {
+      mode: this.mode,
+      vm: { ...this.vm.state },
       rules: this.rules,
       history: this.history,
       apis: this.apis,
@@ -330,6 +393,13 @@ class Workbench {
       devices: this.discovered as unknown as WorkbenchState['devices'],
       connectionHost: this.connectionHost,
       workspace: this.folder.uri.fsPath,
+      project: {
+        id: this.project.projectId,
+        name: this.project.config.name,
+        configPath: this.project.file,
+        rulesPath: this.store.file,
+        notice: this.projectNotice,
+      },
       logs: this.logs,
       busy: this.busy > 0,
       lastError: this.lastError,
@@ -364,28 +434,29 @@ class Workbench {
   private async initializeSession() {
     await mkdir(this.storage, { recursive: true, mode: 0o700 });
     this.rules = (await this.store.load()).rules;
+    const connection = this.project.config.connection;
+    this.mode = connection.mode;
+    this.lan = connection.lan === true;
+    if (connection.connectionHost && this.addresses.some((a) => a.host === connection.connectionHost))
+      this.connectionHost = this.lan ? connection.connectionHost : '127.0.0.1';
+    this.preferredPort = connection.port;
     try {
       const saved = JSON.parse(await readFile(join(this.storage, 'connection.json'), 'utf8'));
-      this.lan = saved.lan === true;
-      if (
-        typeof saved.connectionHost === 'string' &&
-        this.addresses.some((a) => a.host === saved.connectionHost)
-      )
-        this.connectionHost = this.lan ? saved.connectionHost : '127.0.0.1';
       if (Array.isArray(saved.androidDevices))
         this.connectionDevices = saved.androidDevices.filter((id: unknown) => typeof id === 'string');
-      if (
-        saved.configuredPort === this.config().get<number>('proxyPort', 8080) &&
-        Number.isInteger(saved.port) &&
-        saved.port >= 1024 &&
-        saved.port <= 65535
-      )
-        this.preferredPort = saved.port;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
         this.log(`连接设置读取失败：${messageOf(error)}`);
     }
     this.push();
+    if (this.mode === 'vm') {
+      await this.vm.store.init();
+      await this.reloadHistory();
+      this.log(
+        'VM 模式已就绪：连接运行中的 Flutter Debug WS 即可记录，无需安装代理引擎。地址仅在本次会话使用。',
+      );
+      return;
+    }
     const executable = await this.runtime.findExecutable(
       this.config().get<string>('enginePath') || undefined,
     );
@@ -398,6 +469,7 @@ class Workbench {
   }
   async applyAutoStart() {
     await this.initialize();
+    if (this.mode === 'vm') return;
     if (!this.config().get<boolean>('autoStart', true)) {
       await this.stop();
       return;
@@ -413,15 +485,18 @@ class Workbench {
     });
   }
   private async saveConnection() {
+    await this.project.saveConnection({
+      mode: this.mode,
+      lan: this.lan,
+      configuredPort: this.config().get<number>('proxyPort', 8080),
+      connectionHost: this.connectionHost,
+      port: this.engine.state.proxyPort ?? this.preferredPort,
+    });
     await mkdir(this.storage, { recursive: true, mode: 0o700 });
     await writeFile(
       join(this.storage, 'connection.json'),
       JSON.stringify(
         {
-          lan: this.lan,
-          configuredPort: this.config().get<number>('proxyPort', 8080),
-          connectionHost: this.connectionHost,
-          port: this.engine.state.proxyPort ?? this.preferredPort,
           androidDevices: this.connectionDevices,
         },
         null,
@@ -484,7 +559,7 @@ class Workbench {
       return;
     }
     await this.syncRules();
-    await this.engine.rpc('breakpoint.setInteractive', { enabled: !!this.panel });
+    await this.engine.rpc('breakpoint.setInteractive', { enabled: this.mode === 'proxy' && !!this.panel });
     await this.health();
   }
   private async health() {
@@ -504,6 +579,7 @@ class Workbench {
   }
   async start() {
     await this.initialize();
+    if (this.mode === 'vm') throw new Error('VM 模式请在“连接与诊断”输入本次 Flutter VM WS 并点击连接。');
     await this.enqueue(() =>
       this.operation(async () => {
         await this.ensureEngine();
@@ -514,7 +590,12 @@ class Workbench {
   }
   async stop() {
     await this.initialize();
-    await this.enqueue(() => this.operation(() => this.stopInternal()));
+    await this.enqueue(() =>
+      this.operation(async () => {
+        await this.vm.disconnect();
+        await this.stopInternal();
+      }),
+    );
   }
   private async stopInternal() {
     if (this.engine.state.status === 'running') {
@@ -552,11 +633,45 @@ class Workbench {
     if (this.engine.state.status !== 'running')
       throw new Error('请先点击“安装 / 初始化引擎”，也可以在设置中指定本地 mitmdump。');
   }
+  private requireHistory() {
+    if (this.mode === 'proxy') this.requireEngine();
+  }
+  private async historyCall<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    if (this.mode === 'proxy') return this.engine.rpc<T>(method, params);
+    const db = this.vm.store;
+    let result: unknown;
+    switch (method) {
+      case 'history.list':
+        result = await db.list(params as HistoryQuery);
+        break;
+      case 'history.apis':
+        result = { items: await db.apis() };
+        break;
+      case 'history.get':
+        result = await db.get(String(params.id));
+        break;
+      case 'history.update':
+        result = await db.update(String(params.id), String(params.note ?? ''), params.tags as string[]);
+        break;
+      case 'history.delete':
+        result = await db.delete(params.ids as string[]);
+        break;
+      case 'history.clear':
+        result = await db.clear();
+        break;
+      case 'api.delete':
+        result = await db.deleteApi(String(params.method), String(params.host), String(params.path));
+        break;
+      default:
+        throw new Error('VM 模式不支持此操作');
+    }
+    return result as T;
+  }
   private async reloadHistory() {
-    if (this.engine.state.status !== 'running') return;
+    if (this.mode === 'proxy' && this.engine.state.status !== 'running') return;
     const [history, apis] = await Promise.all([
-      this.engine.rpc<HistoryResult>('history.list', this.query),
-      this.engine.rpc<{ items: NonNullable<WorkbenchState['apis']> }>('history.apis', {}),
+      this.historyCall<HistoryResult>('history.list', { ...this.query }),
+      this.historyCall<{ items: NonNullable<WorkbenchState['apis']> }>('history.apis', {}),
     ]);
     this.history = history;
     this.apis = apis.items;
@@ -572,7 +687,9 @@ class Workbench {
       void this.health()
         .then(async () => {
           if (this.engine.state.status === 'running')
-            await this.engine.rpc('breakpoint.setInteractive', { enabled: !!this.panel });
+            await this.engine.rpc('breakpoint.setInteractive', {
+              enabled: this.mode === 'proxy' && !!this.panel,
+            });
         })
         .catch((e) => this.report(e));
     }
@@ -582,7 +699,8 @@ class Workbench {
     if (event.event === 'breakpoint.resolved' && d?.id) this.pending.delete(String(d.id));
     if (
       (event.event === 'history' || event.event === 'history.updated' || event.event === 'api.updated') &&
-      this.panel
+      this.panel &&
+      this.mode === 'proxy'
     ) {
       if (!this.historyTimer)
         this.historyTimer = setTimeout(() => {
@@ -596,9 +714,31 @@ class Workbench {
   }
   private async saveRules(rules: unknown) {
     const document = validateRuleDocument({ version: 1, rules });
+    await this.project.reload();
+    const disk = await this.store.load();
+    if (JSON.stringify(disk.rules) !== JSON.stringify(this.rules))
+      throw new Error('项目规则文件已被修改，请先在“连接与诊断”点击“读取项目文件”，再编辑规则。');
     await this.store.save(document);
     this.rules = document.rules;
-    if (this.engine.state.status === 'running') await this.syncRules();
+    await this.syncSavedRules();
+  }
+  private async syncSavedRules() {
+    if (this.mode === 'vm') {
+      try {
+        const results = await Promise.allSettled([
+          this.vm.updateRules(this.rules),
+          ...(this.engine.state.status === 'running' ? [this.syncRules()] : []),
+        ]);
+        const failed = results.find((result) => result.status === 'rejected');
+        if (failed?.status === 'rejected') throw failed.reason;
+        this.ruleSyncError = this.vm.state.mockEnabled
+          ? undefined
+          : '已保存；连接 VM 并开启实验性 Dio Mock 后生效。';
+      } catch (error) {
+        this.ruleSyncError = `已保存，但运行中的会话未全部确认生效：${messageOf(error)}`;
+        throw error;
+      }
+    } else if (this.engine.state.status === 'running') await this.syncRules();
     else this.ruleSyncError = '已保存；初始化引擎后生效。';
     this.push();
   }
@@ -614,6 +754,7 @@ class Workbench {
     }
     await this.initialize();
     if (action === 'start') {
+      if (this.mode === 'vm') throw new Error('请输入 Flutter VM WS 并点击“连接 VM”。');
       await this.operation(async () => {
         await this.ensureEngine();
         await this.startInternal();
@@ -627,6 +768,58 @@ class Workbench {
     }
     await this.operation(async () => {
       switch (action) {
+        case 'project.open': {
+          await this.project.reload();
+          const file = payload.kind === 'rules' ? this.store.file : this.project.file;
+          await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: false });
+          break;
+        }
+        case 'project.reload': {
+          await this.project.reload();
+          const document = await this.store.load();
+          this.rules = document.rules;
+          await this.syncSavedRules();
+          this.projectNotice = '项目文件已读取，规则已同步；接入方式和采集参数的变更在重新加载窗口后生效。';
+          break;
+        }
+        case 'connection.mode': {
+          const mode = payload.mode === 'vm' ? 'vm' : 'proxy';
+          if (mode === this.mode) break;
+          if (mode === 'proxy') {
+            await this.vm.disconnect();
+            if (this.engine.state.status === 'running') await this.syncRules();
+          }
+          if (this.engine.state.status === 'running')
+            await this.engine.rpc('breakpoint.setInteractive', { enabled: mode === 'proxy' && !!this.panel });
+          this.mode = mode;
+          this.selected = undefined;
+          this.query = { limit: 30, offset: 0 };
+          this.history = { items: [], total: 0 };
+          this.apis = [];
+          if (mode === 'vm') await this.vm.store.init();
+          await this.saveConnection();
+          await this.reloadHistory();
+          break;
+        }
+        case 'vm.connect':
+          if (this.mode !== 'vm') throw new Error('请先切换到 VM 连接模式');
+          await this.vm.connect(String(payload.url ?? ''), this.rules);
+          await this.reloadHistory();
+          break;
+        case 'vm.disconnect':
+          await this.vm.disconnect();
+          break;
+        case 'vm.mock':
+          await this.vm.setMockEnabled(payload.enabled === true);
+          this.ruleSyncError = this.vm.state.mockEnabled ? undefined : '规则已保存；仅采集模式不执行 Mock。';
+          break;
+        case 'vm.rescan':
+          await this.vm.rescan();
+          this.ruleSyncError = undefined;
+          break;
+        case 'proxy.stop':
+          await this.stopInternal();
+          break;
         case 'install':
           await this.ensureEngine();
           if (this.config().get<boolean>('autoStart', true)) await this.startInternal();
@@ -738,7 +931,7 @@ class Workbench {
           break;
         }
         case 'history.query': {
-          this.requireEngine();
+          this.requireHistory();
           const q = payload as HistoryQuery;
           this.query = {
             host: typeof q.host === 'string' ? q.host : undefined,
@@ -757,7 +950,7 @@ class Workbench {
           break;
         }
         case 'api.delete': {
-          this.requireEngine();
+          this.requireHistory();
           const { method, host, path } = payload;
           if ([method, host, path].some((value) => typeof value !== 'string'))
             throw new Error('API 标识无效');
@@ -767,47 +960,51 @@ class Workbench {
             '移除 API',
           );
           if (answer === '移除 API') {
-            await this.engine.rpc('api.delete', { method, host, path });
+            await this.historyCall('api.delete', { method, host, path });
             await this.reloadHistory();
           }
           break;
         }
         case 'history.select':
-          this.requireEngine();
-          this.selected = await this.engine.rpc<HistoryEntry>('history.get', { id: payload.id });
+          this.requireHistory();
+          this.selected = await this.historyCall<HistoryEntry>('history.get', { id: payload.id });
           break;
         case 'history.update':
-          this.requireEngine();
-          await this.engine.rpc('history.update', { id: payload.id, note: payload.note, tags: payload.tags });
+          this.requireHistory();
+          await this.historyCall('history.update', {
+            id: payload.id,
+            note: payload.note,
+            tags: payload.tags,
+          });
           if (this.selected?.id === payload.id)
-            this.selected = await this.engine.rpc<HistoryEntry>('history.get', { id: payload.id });
+            this.selected = await this.historyCall<HistoryEntry>('history.get', { id: payload.id });
           await this.reloadHistory();
           break;
         case 'history.delete':
-          this.requireEngine();
-          await this.engine.rpc('history.delete', { ids: [payload.id] });
+          this.requireHistory();
+          await this.historyCall('history.delete', { ids: [payload.id] });
           if (this.selected?.id === payload.id) this.selected = undefined;
           await this.reloadHistory();
           break;
         case 'history.clear': {
-          this.requireEngine();
+          this.requireHistory();
           const answer = await vscode.window.showWarningMessage(
             '清空当前工作区所有请求历史？Mock 规则会保留。',
             { modal: true },
             '清空历史',
           );
           if (answer === '清空历史') {
-            await this.engine.rpc('history.clear', {});
+            await this.historyCall('history.clear', {});
             this.selected = undefined;
             await this.reloadHistory();
           }
           break;
         }
         case 'history.toRule': {
-          this.requireEngine();
+          this.requireHistory();
           if (!['mock', 'request', 'response', 'redirect'].includes(String(payload.kind)))
             throw new Error('未知规则模板');
-          const record = await this.engine.rpc<HistoryEntry>('history.get', { id: payload.id });
+          const record = await this.historyCall<HistoryEntry>('history.get', { id: payload.id });
           const rule = ruleFromHistory(record, payload.kind as 'mock', randomUUID());
           void this.panel?.webview.postMessage({ type: 'editRule', rule });
           break;
@@ -912,6 +1109,7 @@ class Workbench {
     this.disposed = true;
     if (this.historyTimer) clearTimeout(this.historyTimer);
     if (this.eventTimer) clearTimeout(this.eventTimer);
+    await this.vm.dispose().catch((e) => output.appendLine(messageOf(e)));
     await this.engine.stop().catch((e) => output.appendLine(messageOf(e)));
     await this.cleanupReverses();
     this.panel?.dispose();

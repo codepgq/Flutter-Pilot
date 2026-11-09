@@ -260,10 +260,22 @@ h1 span {
 }
 .context-bar > div:first-child {
   gap: 9px;
+  min-width: 0;
+  max-width: 100%;
 }
 .context-bar b {
   color: var(--fg);
   font-weight: 500;
+}
+.context-project {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.context-dot,
+.context-bar .mono {
+  flex-shrink: 0;
 }
 .context-dot {
   width: 6px;
@@ -382,6 +394,88 @@ footer {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+}
+.connection-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.project-binding {
+  margin: 24px 30px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.project-binding-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.project-binding-heading > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.project-binding-heading .card-actions {
+  margin: 0 0 0 auto;
+  flex-wrap: wrap;
+}
+.project-uuid {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.connection-modes button {
+  padding: 12px 16px;
+}
+.connection-modes button[aria-pressed='true'] {
+  border-color: var(--focus);
+  color: var(--focus);
+  background: color-mix(in srgb, var(--focus) 7%, transparent);
+}
+.vm-card {
+  margin-bottom: 18px;
+}
+.vm-card > label input[type='password'] {
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+.vm-active-connection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  margin: 16px 0;
+  border: 1px solid color-mix(in srgb, var(--focus) 45%, var(--line));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--focus) 8%, transparent);
+  color: var(--focus);
+}
+.vm-active-connection strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.vm-active-connection > span {
+  margin-left: auto;
+  font-size: 11px;
+}
+.vm-card input:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.vm-statistics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  margin-top: 22px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.vm-statistics b {
+  color: var(--fg);
+  margin-right: 4px;
+  font-size: 18px;
 }
 .card {
   background: var(--surface);
@@ -1317,8 +1411,48 @@ footer {
   border-radius: 7px;
   background: var(--surface);
 }
-.rule-card.disabled {
-  opacity: 0.65;
+.rule-card.enabled {
+  border-left: 3px solid var(--accent);
+}
+.rule-switch {
+  flex-shrink: 0;
+  min-width: 44px;
+  min-height: 36px;
+  padding: 7px 4px;
+  background: transparent;
+  border-color: transparent;
+}
+.rule-switch:hover:not(:disabled) {
+  border-color: var(--focus);
+  background: color-mix(in srgb, var(--focus) 9%, var(--input));
+}
+.rule-switch[aria-checked='true'] {
+  background: transparent;
+}
+.rule-switch-track {
+  display: flex;
+  align-items: center;
+  width: 36px;
+  height: 22px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--fg) 45%, var(--line));
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--fg) 18%, var(--input));
+}
+.rule-switch-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--fg);
+  transition: transform 0.15s;
+}
+.rule-switch[aria-checked='true'] .rule-switch-track {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.rule-switch[aria-checked='true'] .rule-switch-thumb {
+  transform: translateX(14px);
+  background: var(--accent-fg);
 }
 .rule-card-content {
   flex: 1;
@@ -1670,6 +1804,9 @@ footer {
   }
 }
 @media (max-width: 760px) {
+  .project-binding {
+    margin: 18px 18px 0;
+  }
   .app-header {
     padding: 18px;
   }
@@ -1762,7 +1899,7 @@ footer {
     margin-left: auto;
   }
   .rule-card-content {
-    flex-basis: 70%;
+    flex-basis: calc(100% - 65px);
   }
   .rule-card-actions {
     flex-wrap: wrap;

@@ -33,7 +33,8 @@ await writeFile(
     'flutterApiMocks.proxyPort': 18080,
   }),
 );
-const storage = join(
+// Seed only the legacy location: activation must migrate these project files.
+const legacyStorage = join(
   user,
   'User',
   'globalStorage',
@@ -41,9 +42,10 @@ const storage = join(
   'workspaces',
   createHash('sha256').update(pathToFileURL(workspace).toString()).digest('hex').slice(0, 24),
 );
-await mkdir(storage, { recursive: true });
+await mkdir(legacyStorage, { recursive: true });
+await writeFile(join(legacyStorage, 'connection.json'), JSON.stringify({ mode: 'proxy' }));
 await writeFile(
-  join(storage, 'rules.json'),
+  join(legacyStorage, 'rules.json'),
   JSON.stringify({
     version: 1,
     rules: [
@@ -63,7 +65,7 @@ await runTests({
   vscodeExecutablePath: executable,
   extensionDevelopmentPath: process.env.API_MOCK_TEST_EXTENSION_PATH || root,
   extensionTestsPath: join(root, 'tests', 'ide', 'smoke.cjs'),
-  extensionTestsEnv: { API_MOCK_TEST_STORAGE: storage },
+  extensionTestsEnv: { API_MOCK_TEST_LEGACY_STORAGE: legacyStorage },
   launchArgs: [
     workspace,
     '--user-data-dir',

@@ -38,6 +38,7 @@ const rule = {
   mock: { status: 200, headers: { 'content-type': 'application/json' }, body: body.body },
 };
 const fixture = {
+  mode: 'proxy',
   rules: [rule],
   history: { items: [{ ...entry, status: 200 }], total: 1 },
   apis: [{ method: 'GET', host: 'api.example.test', path: '/v1/orders', count: 1, lastAt: Date.now() }],
@@ -64,6 +65,69 @@ async function state(page: Page, overrides = {}, selected?: unknown) {
 async function messages(page: Page) {
   return page.evaluate(() => (window as unknown as { __messages: unknown[] }).__messages);
 }
+test('项目绑定展示 UUID 并打开配置、规则和读取项目文件', async ({ page }) => {
+  await page.setViewportSize({ width: 680, height: 920 });
+  await page.goto('/');
+  const project = {
+    id: 'edb038d8-0a2a-4b1f-a974-d39e1a5af278',
+    name: 'commerce_app_'.repeat(15),
+    configPath: '/workspace/.api-mocks/project.json',
+    rulesPath: '/workspace/.api-mocks/rules.json',
+  };
+  await state(page, { project });
+  const card = page.getByRole('region', { name: '当前绑定项目' });
+  await expect(card).toContainText(project.id);
+  await expect(card).toContainText(project.name);
+  await card.getByRole('button', { name: '项目配置', exact: true }).click();
+  await card.getByRole('button', { name: '规则文件', exact: true }).click();
+  await card.getByRole('button', { name: '读取项目文件', exact: true }).click();
+  expect(await messages(page)).toEqual(
+    expect.arrayContaining([
+      { action: 'project.open', payload: { kind: 'config' } },
+      { action: 'project.open', payload: { kind: 'rules' } },
+      { action: 'project.reload', payload: {} },
+    ]),
+  );
+  await state(page, { project: { ...project, notice: '项目文件已读取，规则已同步' } });
+  await expect(card.getByRole('status')).toContainText('规则已同步');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.screenshot({ path: 'artifacts/workbench-project-binding.png', fullPage: true });
+});
+test('规则启停只显示 switch，支持鼠标和键盘，繁忙时禁用', async ({ page }) => {
+  await page.goto('/');
+  await state(page);
+  await page.getByRole('button', { name: 'Mock 规则' }).click();
+  const toggle = page.getByRole('switch', { name: `启用 ${rule.name}`, exact: true });
+  await expect(toggle).toBeChecked();
+  await expect(toggle).toHaveText('');
+  await toggle.click();
+  expect(await messages(page)).toContainEqual({ action: 'rules.toggle', payload: { id: rule.id } });
+  await state(page, { rules: [{ ...rule, enabled: false }] });
+  await expect(toggle).not.toBeChecked();
+  await toggle.focus();
+  const before = (await messages(page)).length;
+  await page.keyboard.press('Space');
+  expect((await messages(page)).slice(before)).toContainEqual({
+    action: 'rules.toggle',
+    payload: { id: rule.id },
+  });
+  await page.screenshot({ path: 'artifacts/rule-switch-dark.png', fullPage: true, animations: 'disabled' });
+  await page.setViewportSize({ width: 680, height: 920 });
+  await page.evaluate(() => {
+    const style = document.documentElement.style;
+    style.setProperty('--vscode-editor-background', '#fafafa');
+    style.setProperty('--vscode-editor-foreground', '#252b33');
+    style.setProperty('--vscode-sideBar-background', '#f1f3f5');
+    style.setProperty('--vscode-input-background', '#ffffff');
+    style.setProperty('--vscode-panel-background', '#ffffff');
+    style.setProperty('--vscode-panel-border', '#d7dde3');
+    style.setProperty('--vscode-descriptionForeground', '#637181');
+  });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.screenshot({ path: 'artifacts/rule-switch-narrow.png', fullPage: true, animations: 'disabled' });
+  await state(page, { busy: true });
+  await expect(toggle).toBeDisabled();
+});
 test('连接引导、代理控制与局域网开关', async ({ page }) => {
   await page.goto('/');
   await state(page);
@@ -526,4 +590,187 @@ test('复制正文遵循 JSON 与原文模式，复制失败显示提示且不�
   expect(
     (await messages(page)).some((message) => (message as { action?: string }).action === 'history.update'),
   ).toBe(false);
+});
+
+test('VM 模式无需代理引擎，连接地址仅提交一次并清空输入', async ({ page }) => {
+  await page.goto('/');
+  await state(page, { engine: { status: 'stopped' }, proxyActive: false });
+  await page.getByRole('button', { name: /^VM 连接/ }).click();
+  expect(await messages(page)).toContainEqual({ action: 'connection.mode', payload: { mode: 'vm' } });
+  const disconnected = {
+    status: 'disconnected',
+    endpoint: undefined,
+    isolates: 0,
+    recorded: 0,
+    instances: 0,
+    mockEnabled: false,
+    warnings: [],
+  };
+  await state(page, { mode: 'vm', vm: disconnected, engine: { status: 'stopped' }, proxyActive: false });
+  await expect(page.getByRole('heading', { name: '连接 Flutter VM，零源码记录 API' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '准备代理引擎' })).not.toBeVisible();
+  await expect(page.getByRole('heading', { name: '信任 HTTPS 证书' })).not.toBeVisible();
+  const input = page.getByLabel('VM WebSocket 地址', { exact: true });
+  const connect = page.getByRole('button', { name: '连接并记录', exact: true });
+  await expect(input).toHaveAttribute('type', 'password');
+  await expect(connect).toBeDisabled();
+  await input.fill('  ws://127.0.0.1:1234/synthetic-auth/ws  ');
+  await connect.click();
+  expect(await messages(page)).toContainEqual({
+    action: 'vm.connect',
+    payload: { url: 'ws://127.0.0.1:1234/synthetic-auth/ws' },
+  });
+  await expect(input).toHaveValue('');
+  await expect(connect).toBeDisabled();
+  await expect(page.locator('body')).not.toContainText('synthetic-auth');
+  expect(
+    (await messages(page)).some((message) => (message as { action?: string }).action === 'install'),
+  ).toBe(false);
+  await page.getByRole('button', { name: /^代理连接/ }).click();
+  expect(await messages(page)).toContainEqual({ action: 'connection.mode', payload: { mode: 'proxy' } });
+});
+
+test('首次打开默认推荐 VM，代理标记为备用且无需先准备引擎', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: '连接 Flutter VM，零源码记录 API' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^VM 连接/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: /^VM 连接/ })).toContainText('推荐');
+  await expect(page.getByRole('button', { name: /^代理连接/ })).toContainText('备用方案');
+  await expect(page.getByRole('heading', { name: '准备代理引擎' })).not.toBeVisible();
+  await expect(page.getByRole('button', { name: '连接 VM', exact: true })).toBeVisible();
+  await expect(page.getByRole('switch', { name: '开启运行时 Dio Mock' })).not.toBeChecked();
+});
+
+test('VM 运行时 Mock 开关、重新发现、断开和旧代理恢复入口', async ({ page }) => {
+  await page.goto('/');
+  const connected = {
+    status: 'connected',
+    endpoint: '127.0.0.1:1234',
+    isolates: 1,
+    recorded: 2,
+    instances: 1,
+    mockEnabled: false,
+    warnings: [],
+  };
+  const overrides = { mode: 'vm', vm: connected, engine: { status: 'stopped' }, proxyActive: false };
+  await state(page, overrides);
+  const mock = page.getByRole('switch', { name: '开启运行时 Dio Mock', exact: true });
+  const rescan = page.getByRole('button', { name: '重新发现并同步', exact: true });
+  await expect(mock).not.toBeChecked();
+  await expect(rescan).toBeDisabled();
+  await mock.click();
+  expect(await messages(page)).toContainEqual({ action: 'vm.mock', payload: { enabled: true } });
+  await state(page, { ...overrides, vm: { ...connected, mockEnabled: true } });
+  await expect(mock).toBeChecked();
+  await rescan.click();
+  expect(await messages(page)).toContainEqual({ action: 'vm.rescan', payload: {} });
+  await mock.click();
+  expect(await messages(page)).toContainEqual({ action: 'vm.mock', payload: { enabled: false } });
+  await state(page, { ...overrides, proxyActive: true });
+  await expect(page.getByText(/旧代理仍在运行/)).toBeVisible();
+  await page.getByRole('button', { name: '停止旧代理', exact: true }).click();
+  expect(await messages(page)).toContainEqual({ action: 'proxy.stop', payload: {} });
+  await page.getByRole('button', { name: '断开连接', exact: true }).click();
+  expect(await messages(page)).toContainEqual({ action: 'vm.disconnect', payload: {} });
+  await state(page, { ...overrides, vm: { ...connected, status: 'disconnected' } });
+  await expect(mock).toBeDisabled();
+  await expect(rescan).toBeDisabled();
+  await expect(page.getByRole('button', { name: '断开连接', exact: true })).not.toBeVisible();
+});
+
+test('VM 连接中、成功、断开和失败状态一致，已连接时禁止重复连接', async ({ page }) => {
+  await page.setViewportSize({ width: 680, height: 920 });
+  await page.goto('/');
+  const vm = {
+    status: 'disconnected',
+    isolates: 0,
+    recorded: 0,
+    instances: 0,
+    mockEnabled: false,
+    warnings: [],
+  };
+  const overrides = { mode: 'vm', vm, engine: { status: 'stopped' }, proxyActive: false };
+  await state(page, overrides);
+  const input = page.getByLabel('VM WebSocket 地址', { exact: true });
+  await input.fill('ws://127.0.0.1:1234/synthetic-auth/ws');
+  await page.getByRole('button', { name: '连接并记录', exact: true }).click();
+  await state(page, { ...overrides, vm: { ...vm, status: 'connecting', endpoint: 'old-endpoint:1234' } });
+  await expect(input).toBeDisabled();
+  await expect(page.getByRole('button', { name: '连接中…', exact: true })).toHaveCount(2);
+  for (const button of await page.getByRole('button', { name: '连接中…', exact: true }).all()) {
+    await expect(button).toBeDisabled();
+  }
+  await expect(page.locator('.context-bar')).toContainText('VM · 连接中');
+  await expect(page.locator('.context-bar')).not.toContainText('old-endpoint');
+  const connected = { ...vm, status: 'connected', endpoint: '127.0.0.1:1234', isolates: 1 };
+  await state(page, { ...overrides, vm: connected });
+  await expect(page.getByRole('status', { name: 'VM 已连接' })).toContainText('已连接 · 127.0.0.1:1234');
+  await expect(page.locator('.status-pill')).toHaveText('VM 记录中');
+  await expect(input).toBeDisabled();
+  await expect(input).toHaveValue('');
+  await expect(page.getByRole('button', { name: '连接并记录', exact: true })).not.toBeVisible();
+  await expect(page.getByRole('button', { name: '连接 VM', exact: true })).not.toBeVisible();
+  await expect(page.getByRole('button', { name: '断开连接', exact: true })).toBeEnabled();
+  expect(
+    (await messages(page)).filter((m) => (m as { action: string }).action === 'vm.connect'),
+  ).toHaveLength(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.screenshot({
+    path: 'artifacts/workbench-vm-connected.png',
+    fullPage: true,
+    animations: 'disabled',
+  });
+  await page.getByRole('button', { name: '断开连接', exact: true }).click();
+  expect(await messages(page)).toContainEqual({ action: 'vm.disconnect', payload: {} });
+  await state(page, { ...overrides, vm: { ...vm, endpoint: 'old-endpoint:1234' } });
+  await expect(input).toBeEnabled();
+  await expect(page.getByRole('status', { name: 'VM 已连接' })).not.toBeVisible();
+  await expect(page.locator('.context-bar')).toContainText('VM · 未连接');
+  await expect(page.locator('.context-bar')).not.toContainText('old-endpoint');
+  await expect(page.getByRole('button', { name: '连接并记录', exact: true })).toBeDisabled();
+  await input.fill('ws://127.0.0.1:4321/new-synthetic-auth/ws');
+  await expect(page.getByRole('button', { name: '连接并记录', exact: true })).toBeEnabled();
+  await state(page, { ...overrides, vm: { ...vm, error: 'VM 端口未监听，请复制当前调试地址。' } });
+  await expect(page.getByRole('alert')).toContainText('端口未监听');
+  await expect(page.locator('.status-pill')).toHaveText('VM 未连接');
+  await expect(input).toBeEnabled();
+});
+
+test('VM 在引擎未运行时查询历史，窄面板可用并明确不支持手动断点', async ({ page }) => {
+  await page.setViewportSize({ width: 680, height: 920 });
+  await page.goto('/');
+  await state(
+    page,
+    {
+      mode: 'vm',
+      vm: {
+        status: 'connected',
+        endpoint: '127.0.0.1:1234',
+        isolates: 1,
+        recorded: 2,
+        instances: 1,
+        mockEnabled: true,
+        warnings: ['实验功能：仅 Debug / Dio 5'],
+      },
+      engine: { status: 'stopped' },
+      proxyActive: false,
+    },
+    entry,
+  );
+  await expect(page.getByRole('heading', { name: '连接 Flutter VM，零源码记录 API' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.screenshot({ path: 'artifacts/workbench-vm.png', fullPage: true });
+  await page.getByRole('button', { name: 'API 与历史' }).click();
+  await expect
+    .poll(async () => messages(page))
+    .toContainEqual({ action: 'history.query', payload: { offset: 0 } });
+  await expect(page.getByRole('region', { name: '最终响应', exact: true })).toBeVisible();
+  await page.getByLabel('搜索请求', { exact: true }).fill('/orders');
+  await expect
+    .poll(async () => messages(page))
+    .toContainEqual({ action: 'history.query', payload: { search: '/orders', offset: 0 } });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.getByRole('button', { name: '断点队列' }).click();
+  await expect(page.getByText(/VM 模式暂不支持手动断点/)).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });

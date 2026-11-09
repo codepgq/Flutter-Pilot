@@ -1,8 +1,8 @@
 {
   "name": "flutter-api-mocks",
   "displayName": "Flutter API Mocks",
-  "description": "Flutter Dio API 调试工作台：HTTPS 代理、Mock、双向修改、转发、断点和请求历史。",
-  "version": "0.1.0",
+  "description": "Flutter Dio API 调试工作台：VM 零源码采集、实验性运行时 Mock、HTTPS 代理与请求历史。",
+  "version": "0.0.2",
   "publisher": "api-mocks",
   "license": "MIT",
   "engines": {
@@ -96,7 +96,7 @@
         "flutterApiMocks.autoStart": {
           "type": "boolean",
           "default": true,
-          "description": "打开受信任的 Flutter 项目后，使用已安装引擎后台自动记录。关闭工作台后继续，首次仍需安装引擎及完成 Flutter 接入。"
+          "description": "代理模式下，打开受信任的 Flutter 项目后使用已安装引擎后台自动记录，关闭工作台后继续。VM 模式连接后后台记录，重启 IDE 需重新提供本次 VM WS。"
         }
       }
     }
@@ -109,13 +109,17 @@
     "test:proxy": "python3 -m unittest discover -s tests/proxy -v",
     "test:ui": "playwright test",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-api-mocks-0.1.0.vsix",
+    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-api-mocks-0.0.2.vsix",
     "test:ide": "node scripts/ide-test.mjs",
-    "format:check": "prettier --check \"src/**/*.ts\" \"webview/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/*.{mjs,cjs}\" \"*.{json,ts,mts}\""
+    "format:check": "prettier --check \"src/**/*.ts\" \"webview/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/*.{mjs,cjs}\" \"*.{json,ts,mts}\"",
+    "test:vm": "node scripts/vm-injection-smoke.mjs",
+    "test:vm:flutter": "node scripts/vm-flutter-smoke.mjs",
+    "test:ide:vm": "node scripts/ide-vm-test.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "ws": "^8.22.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",
@@ -123,6 +127,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/vscode": "^1.96.0",
+    "@types/ws": "^8.18.2",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^4.1.0",
     "esbuild": "^0.28.2",
