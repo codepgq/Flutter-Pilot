@@ -460,6 +460,54 @@ footer {
   margin-left: auto;
   font-size: 11px;
 }
+.vm-discovery {
+  min-width: 0;
+  padding: 14px;
+  margin: 16px 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.vm-discovery-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.vm-discovery p,
+.vm-discovery-info {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.vm-discovery p {
+  font-size: 12px;
+  margin: 10px 0;
+}
+.vm-discovery-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+}
+.vm-discovery-candidate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.vm-discovery-info {
+  display: grid;
+  flex: 1 1 180px;
+  gap: 5px;
+  font-size: 12px;
+}
+.vm-discovery-candidate > button {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.vm-discovery-error {
+  color: var(--danger);
+}
 .vm-card input:disabled {
   color: var(--muted);
   cursor: default;

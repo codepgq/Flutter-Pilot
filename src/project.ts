@@ -16,6 +16,7 @@ export interface ProjectSettings {
   maxBodyBytes?: number;
   breakpointTimeout?: number;
   autoStart?: boolean;
+  autoConnectVm?: boolean;
 }
 export interface ProjectConfig {
   version: 1;
@@ -74,8 +75,9 @@ function validateConfig(value: unknown): ProjectConfig {
       )
         invalid(`settings.${key} 超出允许范围`);
     }
-    if (value.settings.autoStart !== undefined && typeof value.settings.autoStart !== 'boolean')
-      invalid('settings.autoStart 必须是布尔值');
+    for (const key of ['autoStart', 'autoConnectVm'])
+      if (value.settings[key] !== undefined && typeof value.settings[key] !== 'boolean')
+        invalid(`settings.${key} 必须是布尔值`);
   }
   return JSON.parse(JSON.stringify(value)) as ProjectConfig;
 }

@@ -774,3 +774,140 @@ test('VM 在引擎未运行时查询历史，窄面板可用并明确不支持�
   await expect(page.getByText(/VM 模式暂不支持手动断点/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });
+
+test('VM 自动发现展示候选并只提交选中的会话 ID', async ({ page }) => {
+  await page.goto('/');
+  const vm = {
+    status: 'disconnected',
+    isolates: 0,
+    recorded: 0,
+    instances: 0,
+    mockEnabled: false,
+    warnings: [],
+  };
+  const candidates = [
+    {
+      id: 'ios-debug',
+      name: 'Flutter iOS',
+      device: 'iPhone 18 Pro',
+      endpoint: '127.0.0.1:41001',
+      source: 'debug-event',
+      status: 'available',
+    },
+    {
+      id: 'android-debug',
+      name: 'Flutter Android',
+      device: 'Pixel 9',
+      endpoint: '127.0.0.1:41002',
+      source: 'dtd',
+      status: 'available',
+    },
+  ];
+  const overrides = {
+    mode: 'vm',
+    vm,
+    engine: { status: 'stopped' },
+    proxyActive: false,
+    vmDiscovery: { enabled: true, status: 'ready', candidates },
+  };
+  await state(page, overrides);
+  const discovery = page.getByRole('region', { name: '已发现的 Flutter 调试会话' });
+  await expect(discovery).toContainText('自动连接已开启');
+  await expect(discovery).toContainText('iPhone 18 Pro · 调试事件 · 127.0.0.1:41001');
+  await expect(discovery).toContainText('Pixel 9 · 已有调试会话 · 127.0.0.1:41002');
+  expect(
+    (await messages(page)).some(
+      (message) => (message as { action?: string }).action === 'vm.discovery.connect',
+    ),
+  ).toBe(false);
+  await discovery.getByRole('button', { name: '连接 Flutter Android', exact: true }).click();
+  expect(await messages(page)).toContainEqual({
+    action: 'vm.discovery.connect',
+    payload: { id: 'android-debug' },
+  });
+  await expect(page.getByLabel('VM WebSocket 地址', { exact: true })).toBeEnabled();
+  await expect(page.getByRole('switch', { name: '开启运行时 Dio Mock' })).not.toBeChecked();
+  await state(page, {
+    ...overrides,
+    vm: { ...vm, status: 'connecting' },
+    vmDiscovery: {
+      enabled: true,
+      status: 'ready',
+      candidates: [{ ...candidates[0], status: 'connecting' }, candidates[1]],
+    },
+  });
+  for (const button of await discovery.getByRole('button').all()) await expect(button).toBeDisabled();
+  await state(page, { ...overrides, vm: { ...vm, status: 'connected', endpoint: '127.0.0.1:41002' } });
+  for (const button of await discovery.getByRole('button').all()) await expect(button).toBeDisabled();
+  await state(page, { ...overrides, busy: true });
+  for (const button of await discovery.getByRole('button').all()) await expect(button).toBeDisabled();
+});
+
+test('VM 自动发现失败和暂停后允许显式重连，窄面板可展示长会话', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 920 });
+  await page.goto('/');
+  const name = 'Flutter workspace 项目调试'.repeat(10);
+  const candidates = [
+    {
+      id: 'failed-debug',
+      name,
+      device: 'iPhone 18 Pro',
+      endpoint: '127.0.0.1:41001',
+      source: 'dtd',
+      status: 'failed',
+      error: 'VM 端口未监听，请重试连接。',
+    },
+    {
+      id: 'paused-debug',
+      name: 'Flutter 手动断开的会话',
+      endpoint: '127.0.0.1:41002',
+      source: 'debug-event',
+      status: 'paused',
+    },
+  ];
+  await state(page, {
+    mode: 'vm',
+    vm: { status: 'disconnected', isolates: 0, recorded: 0, instances: 0, mockEnabled: false, warnings: [] },
+    engine: { status: 'stopped' },
+    proxyActive: false,
+    vmDiscovery: { enabled: true, status: 'ready', candidates },
+  });
+  const discovery = page.getByRole('region', { name: '已发现的 Flutter 调试会话' });
+  await expect(discovery.getByRole('alert')).toContainText('VM 端口未监听');
+  await expect(discovery).toContainText('已暂停自动连接');
+  await discovery.getByRole('button', { name: `重试连接 ${name}`, exact: true }).click();
+  await discovery.getByRole('button', { name: '重新连接 Flutter 手动断开的会话', exact: true }).click();
+  expect(await messages(page)).toEqual(
+    expect.arrayContaining([
+      { action: 'vm.discovery.connect', payload: { id: 'failed-debug' } },
+      { action: 'vm.discovery.connect', payload: { id: 'paused-debug' } },
+    ]),
+  );
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.screenshot({ path: 'artifacts/workbench-vm-discovery-narrow.png', fullPage: true });
+});
+
+test('VM 自动发现等待、关闭自动连接和补查不可用时保留手动入口', async ({ page }) => {
+  await page.goto('/');
+  const overrides = { mode: 'vm', engine: { status: 'stopped' }, proxyActive: false };
+  await state(page, {
+    ...overrides,
+    vmDiscovery: { enabled: true, status: 'waiting', candidates: [] },
+  });
+  const discovery = page.getByRole('region', { name: '已发现的 Flutter 调试会话' });
+  await expect(discovery).toContainText('等待当前项目的 Flutter Debug 调试会话');
+  await state(page, {
+    ...overrides,
+    vmDiscovery: {
+      enabled: false,
+      status: 'unavailable',
+      message: 'Dart 扩展暂不支持已有会话查询。',
+      candidates: [],
+    },
+  });
+  await expect(discovery).toContainText('自动连接已关闭');
+  await expect(discovery).toContainText('autoConnectVm');
+  await expect(discovery.getByRole('status')).toContainText('Dart 扩展暂不支持已有会话查询');
+  await expect(discovery).toContainText('可重新启动 Flutter 调试，或手动填写本次 VM 地址');
+  await expect(page.getByLabel('VM WebSocket 地址', { exact: true })).toBeEnabled();
+});

@@ -28,6 +28,16 @@ afterEach(async () => {
 });
 
 describe('project-local identity and configuration', () => {
+  it('preserves and validates the independent project VM auto-connect setting', async () => {
+    const binding = await openProjectBinding(workspace, legacy);
+    const config = { ...binding.config, settings: { autoStart: true, autoConnectVm: false } };
+    await writeFile(binding.file, JSON.stringify(config));
+    expect((await binding.reload()).settings).toEqual({ autoStart: true, autoConnectVm: false });
+    await binding.saveConnection({ mode: 'proxy' });
+    expect((await json(binding.file)).settings.autoConnectVm).toBe(false);
+    await writeFile(binding.file, JSON.stringify({ ...config, settings: { autoConnectVm: 'yes' } }));
+    await expect(binding.reload()).rejects.toThrow('settings.autoConnectVm 必须是布尔值');
+  });
   it('creates a stable UUID with VM default and ordinary private-permission files', async () => {
     const binding = await openProjectBinding(workspace, legacy);
     expect(binding.config).toMatchObject({ version: 1, name: 'flutter-project', connection: { mode: 'vm' } });

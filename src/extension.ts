@@ -7,6 +7,8 @@ import { RuntimeManager } from './runtime';
 import { RuleStore } from './store';
 import { isFlutterWorkspace } from './discovery';
 import { VmSession } from './vm/session';
+import { VmDiscovery, createVscodeDiscoveryHost } from './vm/discovery';
+import { VmAutoConnector } from './vm/autoConnect';
 import { isWebSocketHandshake } from './vm/profiler';
 import { WsRuleStore, validateWsRuleDocument } from './ws/rules';
 import type { WsRule, WsMessageQuery } from './ws/model';
@@ -30,6 +32,7 @@ let output: vscode.OutputChannel;
 let status: vscode.StatusBarItem;
 let shuttingDown = false;
 let lifecycle = 0;
+let vmDiscovery: VmDiscovery | undefined;
 const sessions = new Map<string, Workbench>();
 const previewDocuments = new Map<string, string>();
 function updateStatus() {
@@ -48,6 +51,13 @@ export async function activate(context: vscode.ExtensionContext) {
   const epoch = ++lifecycle;
   output = vscode.window.createOutputChannel('Flutter API Mocks');
   context.subscriptions.push(output);
+  // Register debug listeners before any asynchronous workspace initialization.
+  vmDiscovery = new VmDiscovery(createVscodeDiscoveryHost(vscode));
+  context.subscriptions.push(
+    vmDiscovery.subscribe(() => {
+      for (const session of sessions.values()) session.updateVmDiscovery();
+    }),
+  );
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider('api-mocks-preview', {
       provideTextDocumentContent: (uri) => previewDocuments.get(uri.toString()) ?? '',
@@ -76,6 +86,7 @@ export async function activate(context: vscode.ExtensionContext) {
         throw new Error('工作区已关闭，项目会话未启动。');
       const session = new Workbench(context, folder, updateStatus, project, storage);
       sessions.set(key, session);
+      session.updateVmDiscovery();
       return session;
     })();
     creating.set(key, task);
@@ -90,6 +101,7 @@ export async function activate(context: vscode.ExtensionContext) {
     if (vscode.env.remoteName) throw new Error('首版暂不支持远程扩展宿主，请在本机打开 Flutter 项目。');
     if (!vscode.workspace.isTrusted) throw new Error('请先信任当前工作区，再启动调试代理。');
     const folders = vscode.workspace.workspaceFolders?.filter((f) => f.uri.scheme === 'file') ?? [];
+    void vmDiscovery?.start();
     if (!folders.length) throw new Error('请先打开本地 Flutter 项目文件夹。');
     const folder =
       folders.length === 1
@@ -131,6 +143,7 @@ export async function activate(context: vscode.ExtensionContext) {
     if (shuttingDown || process.platform !== 'darwin' || vscode.env.remoteName || !vscode.workspace.isTrusted)
       return;
     const folders = vscode.workspace.workspaceFolders?.filter((f) => f.uri.scheme === 'file') ?? [];
+    void vmDiscovery?.start();
     await Promise.all(
       folders.map(async (folder) => {
         try {
@@ -175,6 +188,9 @@ export async function activate(context: vscode.ExtensionContext) {
         if (event.affectsConfiguration('flutterApiMocks.autoStart', session.workspaceUri)) {
           void session.applyAutoStart().catch((error) => session.report(error));
         }
+      for (const session of sessions.values())
+        if (event.affectsConfiguration('flutterApiMocks.autoConnectVm', session.workspaceUri))
+          session.updateVmAutoConnect();
     }),
   );
   context.subscriptions.push({
@@ -187,6 +203,8 @@ export async function activate(context: vscode.ExtensionContext) {
 export async function deactivate() {
   shuttingDown = true;
   lifecycle++;
+  vmDiscovery?.dispose();
+  vmDiscovery = undefined;
   const current = [...sessions.values()];
   sessions.clear();
   active = undefined;
@@ -201,6 +219,8 @@ function messageOf(error: unknown) {
 class Workbench {
   private mode: 'proxy' | 'vm' = 'vm';
   private readonly vm: VmSession;
+  private readonly vmAuto: VmAutoConnector;
+  private initialized = false;
   private readonly engine = new EngineManager();
   private readonly runtime: RuntimeManager;
   private readonly store: RuleStore;
@@ -258,7 +278,19 @@ class Workbench {
       },
       join(this.context.extensionPath, 'resources', 'vm', 'interceptor.dart.txt'),
     );
-    this.vm.on('change', () => this.push());
+    this.vmAuto = new VmAutoConnector({
+      status: () => this.vm.state.status,
+      connect: async (url) => {
+        await this.vm.connect(url, this.rules);
+        await this.reloadHistory().catch((error) => this.report(error));
+      },
+      disconnect: () => this.vm.disconnect(),
+    });
+    this.vmAuto.on('change', () => this.push());
+    this.vm.on('change', () => {
+      this.vmAuto.connectionChanged();
+      this.push();
+    });
     this.vm.on('history', () => {
       if (this.mode === 'vm' && this.panel && !this.historyTimer)
         this.historyTimer = setTimeout(() => {
@@ -367,6 +399,26 @@ class Workbench {
       },
     };
   }
+  updateVmDiscovery() {
+    if (this.disposed || !vmDiscovery) return;
+    const snapshot = vmDiscovery.snapshot();
+    this.vmAuto.setAvailability(
+      snapshot.status === 'starting' ? 'waiting' : snapshot.status,
+      snapshot.message,
+    );
+    this.vmAuto.setCandidates(
+      snapshot.candidates
+        .filter((candidate) => candidate.workspaceId === this.folder.uri.toString())
+        .flatMap((candidate) => {
+          const url = vmDiscovery?.address(candidate.id);
+          return url ? [{ ...candidate, url }] : [];
+        }),
+    );
+  }
+  updateVmAutoConnect() {
+    this.vmAuto.setMode(this.mode);
+    this.vmAuto.setEnabled(this.initialized && this.config().get<boolean>('autoConnectVm', true));
+  }
   private log(text: string) {
     const clean = String(text).slice(0, 4000);
     output.appendLine(clean);
@@ -388,6 +440,7 @@ class Workbench {
     const state: WorkbenchState = {
       mode: this.mode,
       vm: { ...this.vm.state },
+      vmDiscovery: this.vmAuto.snapshot,
       ws: { ...this.vm.websocket.state },
       rules: this.rules,
       history: this.history,
@@ -454,6 +507,7 @@ class Workbench {
     }
     const connection = this.project.config.connection;
     this.mode = connection.mode;
+    this.vmAuto.setMode(this.mode);
     this.lan = connection.lan === true;
     if (connection.connectionHost && this.addresses.some((a) => a.host === connection.connectionHost))
       this.connectionHost = this.lan ? connection.connectionHost : '127.0.0.1';
@@ -471,8 +525,10 @@ class Workbench {
       await this.vm.store.init();
       await this.reloadHistory();
       this.log(
-        'VM 模式已就绪：连接运行中的 Flutter Debug WS 即可记录，无需安装代理引擎。地址仅在本次会话使用。',
+        'VM 模式已就绪：自动发现本项目的 Flutter Debug 会话，也可手动输入 VM WS。地址仅在本次会话使用。',
       );
+      this.initialized = true;
+      this.updateVmAutoConnect();
       return;
     }
     const executable = await this.runtime.findExecutable(
@@ -483,6 +539,8 @@ class Workbench {
       if (this.config().get<boolean>('autoStart', true)) await this.startInternal();
       if (this.panel) await this.reloadHistory();
     } else this.log('首次使用请打开工作台安装引擎并完成 Flutter 接入，之后打开项目即可后台自动记录。');
+    this.initialized = true;
+    this.updateVmAutoConnect();
     this.push();
   }
   async applyAutoStart() {
@@ -610,7 +668,7 @@ class Workbench {
     await this.initialize();
     await this.enqueue(() =>
       this.operation(async () => {
-        await this.vm.disconnect();
+        await this.vmAuto.manualDisconnect();
         await this.stopInternal();
       }),
     );
@@ -899,6 +957,9 @@ class Workbench {
         }
         case 'project.reload': {
           await this.project.reload();
+          this.projectSettings.autoConnectVm = this.project.config.settings?.autoConnectVm;
+          if (this.projectSettings.autoConnectVm === undefined) delete this.projectSettings.autoConnectVm;
+          this.updateVmAutoConnect();
           const document = await this.store.load();
           const wsDocument = await this.wsRules.load();
           this.wsPersistentRules = wsDocument.rules;
@@ -908,19 +969,22 @@ class Workbench {
           ]);
           this.rules = document.rules;
           await this.syncSavedRules();
-          this.projectNotice = '项目文件已读取，规则已同步；接入方式和采集参数的变更在重新加载窗口后生效。';
+          this.projectNotice =
+            '项目文件已读取，规则和 VM 自动连接设置已同步；接入方式和采集参数的变更在重新加载窗口后生效。';
           break;
         }
         case 'connection.mode': {
           const mode = payload.mode === 'vm' ? 'vm' : 'proxy';
           if (mode === this.mode) break;
           if (mode === 'proxy') {
+            this.vmAuto.setMode('proxy');
             await this.vm.disconnect();
             if (this.engine.state.status === 'running') await this.syncRules();
           }
           if (this.engine.state.status === 'running')
             await this.engine.rpc('breakpoint.setInteractive', { enabled: mode === 'proxy' && !!this.panel });
           this.mode = mode;
+          this.updateVmAutoConnect();
           this.selected = undefined;
           this.query = { limit: 30, offset: 0 };
           this.history = { items: [], total: 0 };
@@ -932,11 +996,18 @@ class Workbench {
         }
         case 'vm.connect':
           if (this.mode !== 'vm') throw new Error('请先切换到 VM 连接模式');
+          if (this.vm.state.status !== 'disconnected')
+            throw new Error('VM 已连接或正在连接，请先断开当前连接后再更换地址。');
+          await this.vmAuto.manualConnect();
           await this.vm.connect(String(payload.url ?? ''), this.rules);
           await this.reloadHistory();
           break;
+        case 'vm.discovery.connect':
+          if (this.mode !== 'vm') throw new Error('请先切换到 VM 连接模式');
+          await this.vmAuto.select(String(payload.id ?? ''));
+          break;
         case 'vm.disconnect':
-          await this.vm.disconnect();
+          await this.vmAuto.manualDisconnect();
           break;
         case 'vm.mock':
           await this.vm.setMockEnabled(payload.enabled === true);
@@ -1236,6 +1307,7 @@ class Workbench {
   async dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.vmAuto.dispose();
     if (this.historyTimer) clearTimeout(this.historyTimer);
     if (this.eventTimer) clearTimeout(this.eventTimer);
     await this.vm.dispose().catch((e) => output.appendLine(messageOf(e)));

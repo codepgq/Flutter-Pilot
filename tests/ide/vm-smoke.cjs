@@ -175,7 +175,9 @@ exports.run = async () => {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await new Promise((resolve) => server.once('listening', resolve));
   const rpcCalls = [];
-  server.on('connection', (socket) =>
+  let connections = 0;
+  server.on('connection', (socket) => {
+    connections++;
     socket.on('message', (raw) => {
       const request = JSON.parse(raw.toString());
       rpcCalls.push(request.method);
@@ -186,8 +188,8 @@ exports.run = async () => {
           result: request.method === 'getVM' ? { type: 'VM', isolates: [] } : { type: 'Success' },
         }),
       );
-    }),
-  );
+    });
+  });
   try {
     await workbench.handle({
       action: 'vm.connect',
@@ -212,10 +214,72 @@ exports.run = async () => {
     assert.ok(!(await fs.readFile(rulesFile, 'utf8')).includes('synthetic-auth-token'));
     await missing(path.join(storage, 'ca'));
     await missing(path.join(globalStorage, 'engines'));
+
+    // Synthetic discovery inputs intentionally bypass Dart-Code. The selected ID
+    // still travels through the production webview message route, coordinator,
+    // VM transport, and SQLite history reload. Real Dart discovery is tested separately.
+    await workbench.handle({ action: 'vm.disconnect', payload: {} });
+    assert.equal(workbench.vm.state.status, 'disconnected');
+    const endpoint = `127.0.0.1:${server.address().port}`;
+    const candidates = ['synthetic-session-a', 'synthetic-session-b'].map((id) => ({
+      id,
+      name: `Synthetic Flutter ${id}`,
+      device: 'synthetic-ios-simulator',
+      endpoint,
+      source: 'debug-event',
+      url: `ws://${endpoint}/synthetic-discovery-token=/ws`,
+    }));
+    assert.equal(workbench.vmAuto.snapshot.enabled, true);
+    workbench.vmAuto.setCandidates(candidates);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(workbench.vm.state.status, 'disconnected', 'multiple candidates require selection');
+    assert.equal(connections, 1, 'no automatic connection to an ambiguous candidate');
+    assert.equal(workbench.vmAuto.snapshot.candidates.length, 2);
+    assert.ok(!JSON.stringify(workbench.vmAuto.snapshot).includes('synthetic-discovery-token'));
+    assert.ok(!JSON.stringify(workbench.vmAuto.snapshot).includes('ws://'));
+    await workbench.handle({
+      action: 'vm.discovery.connect',
+      payload: { id: candidates[0].id },
+    });
+    assert.equal(workbench.vm.state.status, 'connected');
+    assert.equal(workbench.vmAuto.snapshot.connectedSessionId, candidates[0].id);
+    assert.equal(connections, 2);
+    assert.equal(workbench.vm.state.mockEnabled, false);
+    assert.equal(workbench.vm.websocket.state.captureEnabled, false);
+    assert.equal(workbench.vm.websocket.state.mockEnabled, false);
+    await assert.rejects(
+      workbench.handle({ action: 'vm.discovery.connect', payload: { id: candidates[1].id } }),
+      /先断开/,
+    );
+    assert.equal(connections, 2, 'selection cannot replace a connected VM');
+    await workbench.handle({ action: 'vm.disconnect', payload: {} });
+    assert.equal(workbench.vm.state.status, 'disconnected');
+    assert.equal(workbench.vmAuto.snapshot.candidates[0].status, 'paused');
+    workbench.vmAuto.setCandidates(candidates);
+    workbench.vmAuto.setCandidates([candidates[0]]);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(workbench.vm.state.status, 'disconnected', 'manual disconnect suppresses rediscovery');
+    assert.equal(connections, 2);
+    await workbench.handle({ action: 'vm.discovery.connect', payload: { id: candidates[0].id } });
+    assert.equal(workbench.vmAuto.snapshot.connectedSessionId, candidates[0].id);
+    assert.equal(connections, 3, 'explicit selection resumes a paused session');
+    workbench.vmAuto.setCandidates([]);
+    await waitFor(() => workbench.vm.state.status === 'disconnected');
+    assert.equal(workbench.vmAuto.snapshot.connectedSessionId, undefined);
+    await assert.rejects(
+      workbench.handle({ action: 'vm.discovery.connect', payload: { id: candidates[0].id } }),
+      /会话已结束/,
+    );
+    const nextSession = { ...candidates[0], id: 'synthetic-new-session' };
+    workbench.vmAuto.setCandidates([nextSession]);
+    await waitFor(() => workbench.vmAuto.snapshot.connectedSessionId === nextSession.id);
+    assert.equal(connections, 4, 'a new unique session automatically connects');
+    assert.ok(!(await fs.readFile(projectFile, 'utf8')).includes('synthetic-discovery-token'));
+    assert.ok(!(await fs.readFile(rulesFile, 'utf8')).includes('synthetic-discovery-token'));
     await workbench.dispose();
     await waitFor(() => server.clients.size === 0);
     console.log(
-      'IDE_VM_ONLY_PASS: HTTP and WS private SQLite/query/detail, WS project rules save/reload/conflict protection, independent WS capture/Mock default off and offline push rejection, project binding, synthetic VM transport and disposal',
+      'IDE_VM_ONLY_PASS: HTTP and WS private SQLite/query/detail, WS project rules save/reload/conflict protection, independent WS capture/Mock default off and offline push rejection, project binding, synthetic VM transport, discovery selection/manual suppression/owner removal/new-session auto-connect routes and disposal',
     );
   } finally {
     await workbench.dispose();

@@ -535,6 +535,86 @@ function ConnectionMode({ state }: { state: WorkbenchState }) {
     </div>
   );
 }
+function VmDiscovery({ state }: { state: WorkbenchState }) {
+  const discovery = state.vmDiscovery;
+  if (!discovery) return null;
+  const active = state.vm?.status === 'connected' || state.vm?.status === 'connecting';
+  const statusLabels = {
+    available: '可连接',
+    connecting: '连接中',
+    connected: '已连接',
+    paused: '已暂停自动连接',
+    failed: '连接失败',
+  };
+  return (
+    <section className="vm-discovery" aria-label="已发现的 Flutter 调试会话">
+      <div className="vm-discovery-heading">
+        <strong>自动发现调试会话</strong>
+        <span className="tag">{discovery.enabled ? '自动连接已开启' : '自动连接已关闭'}</span>
+      </div>
+      <p className="muted">
+        {discovery.enabled
+          ? '当前项目只有一个可用会话时自动连接；多个会话请选择。'
+          : '可选择已发现的会话连接，或在项目配置 / IDE 设置中开启 autoConnectVm。'}
+        Dio Mock、WS 采集与 WS Mock 仍需手动开启。
+      </p>
+      {discovery.message && (
+        <div className="notice" role="status">
+          {discovery.message}
+        </div>
+      )}
+      {discovery.candidates.length ? (
+        <ul className="vm-discovery-list">
+          {discovery.candidates.map((candidate) => (
+            <li key={candidate.id} className="vm-discovery-candidate">
+              <div className="vm-discovery-info">
+                <strong>{candidate.name}</strong>
+                <span className="muted">
+                  {candidate.device ? `${candidate.device} · ` : ''}
+                  {candidate.source === 'dtd' ? '已有调试会话' : '调试事件'} · {candidate.endpoint}
+                </span>
+                <span className={`small-status ${candidate.status === 'connected' ? 'online' : ''}`}>
+                  {statusLabels[candidate.status]}
+                </span>
+                {candidate.error && (
+                  <span className="vm-discovery-error" role="alert">
+                    {candidate.error}
+                  </span>
+                )}
+              </div>
+              <button
+                disabled={
+                  state.busy ||
+                  active ||
+                  candidate.status === 'connecting' ||
+                  candidate.status === 'connected'
+                }
+                aria-label={`${candidate.status === 'failed' ? '重试连接' : candidate.status === 'paused' ? '重新连接' : '连接'} ${candidate.name}`}
+                onClick={() => send('vm.discovery.connect', { id: candidate.id })}
+              >
+                {candidate.status === 'connected'
+                  ? '已连接'
+                  : candidate.status === 'connecting'
+                    ? '连接中'
+                    : candidate.status === 'failed'
+                      ? '重试连接'
+                      : candidate.status === 'paused'
+                        ? '重新连接'
+                        : '连接此会话'}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted">
+          {discovery.status === 'unavailable'
+            ? '已有调试会话暂时无法补查，可重新启动 Flutter 调试，或手动填写本次 VM 地址。'
+            : '等待当前项目的 Flutter Debug 调试会话。'}
+        </p>
+      )}
+    </section>
+  );
+}
 function VmConnection({ state }: { state: WorkbenchState }) {
   const [url, setUrl] = useState('');
   const vm = state.vm;
@@ -551,9 +631,10 @@ function VmConnection({ state }: { state: WorkbenchState }) {
           </span>
         </div>
         <p>
-          使用原来的 Flutter Debug 启动项运行应用，复制调试输出中的 VM Service WebSocket
-          地址。无需修改项目代码、安装 CA 或启动代理。
+          使用原来的 Flutter Debug 启动项运行或附加应用，自动发现本次 VM 地址；也可手动填写。
+          无需修改项目代码、安装 CA 或启动代理。
         </p>
+        <VmDiscovery state={state} />
         {connected && (
           <div className="vm-active-connection" role="status" aria-label="VM 已连接">
             <Icon name="plug" size={18} />

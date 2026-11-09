@@ -34,7 +34,8 @@
     "maxRecords": 10000,
     "maxBodyBytes": 1048576,
     "breakpointTimeout": 60,
-    "autoStart": true
+    "autoStart": true,
+    "autoConnectVm": true
   }
 }
 ```
@@ -61,9 +62,12 @@
 | `maxRecords` | `10000` | 1–100000 条请求历史 |
 | `maxBodyBytes` | `1048576` | 1024–10485760 字节；VM 注入正文另有 256 KiB 上限 |
 | `breakpointTimeout` | `60` | 10–300 秒，人工断点仅代理模式支持 |
-| `autoStart` | `true` | 已选择代理模式时，自动启动已安装 / 配置引擎；不会自动连接 VM |
+| `autoStart` | `true` | 已选择代理模式时，自动启动已安装 / 配置引擎 |
+| `autoConnectVm` | `true` | VM 模式唯一 Flutter Debug 会话自动连接；读取项目文件后立即应用，关闭时保留已有连接 |
 
 项目设置优先于对应 IDE 设置；未指定字段回退 IDE 设置，再使用插件默认值。引擎可执行文件路径仍由本机 IDE 的 `flutterApiMocks.enginePath` 管理，避免把某台电脑的绝对路径当成项目通用配置。
+
+`autoConnectVm` 是独立设置，项目值覆盖 IDE 值；手动断开会暂停本次调试会话自动重连。认证 VM / DTD 地址始终只在内存，不保存供下次复用。
 
 VM 默认连接后只记录 API，运行时 Dio Mock 需要在工作台主动开启。`autoStart: true` 不会保存认证 WS，也不代表在重新打开 IDE 后自动连接到上一次 App。
 

@@ -82,9 +82,15 @@ const report = {
     'WS independent SQLite query/detail routes and summary-only state',
     'WS project rules save/reload and external-edit conflict protection',
     'WS capture/Mock default off and disconnected push rejected',
+    'synthetic discovery summaries exclude authenticated URLs',
+    'multiple discovered sessions wait for explicit vm.discovery.connect selection',
+    'manual disconnect suppresses repeated discovery until explicit selection',
+    'removing the discovered owner disconnects; stale selection rejected',
+    'new unique discovered session automatically connects with all Mock and WS capture off',
   ],
   limits: [
     'Synthetic JSON-RPC server; this does not prove Flutter runtime injection.',
+    'Synthetic discovered candidates bypass Dart-Code/DTD and prove integration routing only; real Dart plugin discovery requires separate IDE acceptance.',
     'IDE internal message handler exercised; real webview pointer interaction is covered separately.',
   ],
 };

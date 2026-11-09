@@ -179,3 +179,25 @@ VM 连接默认仅采集，用户主动开启运行时 Mock 后才安装拦截�
 本轮未验收Android、iOS真机、其他Dart SDK、Socket.IO专用协议、原生插件或WebView；不把测试fixture成功当作EXIO业务WS或登录链路验收。URL关联会开启SDK HTTP profiling，App内缓存无插件强制容量上限；本地历史有界不替代该边界。代理WS不在首版范围。
 
 安装产物为`artifacts/flutter-api-mocks-0.0.3.vsix`，包含独立WS Dart模板；未覆盖用户当前安装，未自动提交或推送。
+
+## VM 自动发现与自动连接（2026-11-09）
+
+| 层级 | 实际通过范围 |
+| --- | --- |
+| 类型、格式与构建 | TypeScript / Webview、Prettier、构建及 `git diff --check` 通过 |
+| 单元及集成 | 269 项 Vitest；覆盖 DTD 延迟就绪/超时、多会话原子发布、真实路径归属、过期通知、三次重试预算、手动优先、暂停、代理排除及项目设置 |
+| 工作台 | 31 项 Playwright；新增候选选择、失败重试、暂停恢复、禁用状态和 390px 窄面板，合成截图已目视检查 |
+| 隔离 IDE 消息链路 | Cursor、VS Code 均退出 0；合成候选经 `vm.discovery.connect` 消息选择后连接合成 VM，验证暂停、owner 移除、新会话自动连接及认证地址不进入摘要/项目文件 |
+| 真实 Cursor | 3.29.9（宿主 API 1.128.0），Dart 扩展 3.146.0，9 项断言通过 |
+| 真实 VS Code | 1.116.0，Dart 扩展 3.146.0，9 项断言通过 |
+| Flutter 与设备 | Flutter 3.47.8 / Dart 3.13.7，iPhone 18 Pro / iOS 27.2 模拟器 |
+
+两种 IDE 均通过：IDE 内 launch 自动连接、自动连接后的真实 dart:io HTTP 记录、新建发现实例通过 DTD 补查已运行的真实调试会话、Hot Restart、手动断开后等待 5 秒保持暂停与候选显式恢复、停止调试自动断开、全停后新会话自动连接，以及独立启动测试 Flutter 后 IDE attach 自动连接。Dio Mock、WS 采集和 WS Mock 全程默认关闭，fixture 应用源码 SHA-256 未变。
+
+真实测试使用 `/tmp` 独立 fixture、隔离的 IDE profile 与扩展目录，只控制测试创建的调试会话；没有修改或控制用户的 EXIO 会话。测试曾因 Dart 自动追加调试名称而修正会话定位；HTTP 验证等待 profiling 就绪（`vm.state.isolates > 0`）后再发请求，未把采集前请求当作可补录。
+
+复现：`API_MOCK_TEST_IDE=cursor node scripts/ide-vm-discovery-test.mjs`，VS Code 改为 `vscode`；可设置 `API_MOCK_TEST_DEVICE` 和 `API_MOCK_TEST_FLUTTER`。完整脱敏报告在忽略目录 `artifacts/vm-discovery-cursor-report.json`、`artifacts/vm-discovery-vscode-report.json`。合成 IDE 验证仍用 `test:ide:vm`，不能替代上述真实验收。
+
+本轮未验收 Android、iOS 真机、其他 SDK / Dart 扩展版本、Web、Profile / Release 或 Remote SSH。外部终端独立运行不属于自动发现范围；本轮验证的是在 IDE 附加后发现。版本和分支沿用 0.0.3，未提交、合并或覆盖安装。
+
+用户随后要求覆盖安装并提交。最新 0.0.3 VSIX 解包后再次通过 Cursor 隔离 VM 消息链路验证，退出 0；使用 Cursor CLI `--force` 安装成功。安装后的扩展、Webview JS/CSS 和两份 Dart 模板均与包内 SHA-256 一致，扩展清单除 Cursor 注入的 `__metadata` 外一致。未自动重载用户当前窗口，需在方便时执行 **Developer: Reload Window** 加载新版；未合并分支。

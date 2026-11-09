@@ -120,19 +120,21 @@ npm run package
 1. 覆盖安装最新 VSIX，保存工作区中的文件，在调试方便时执行 **Developer: Reload Window**。重载会结束插件当前的 VM 连接，认证 WS 不会保存供下次复用。
 2. 打开 **Flutter API Mocks: 打开工作台 → 连接与诊断**，确认项目绑定卡上的名称和 UUID。首次绑定时插件创建 `.api-mocks/`，后续复用项目文件。
 3. 已有项目文件优先；缺少项目文件时导入该目录旧版私有规则和可迁移的连接配置，并将历史、API 目录及 CA 迁移到新的本机存储。源数据保留，已有目标数据不覆盖；配置错误会提示修复。
-4. 已有工作区沿用保存的接入方式，包括旧版代理配置；全新工作区默认 VM。使用 VM 时填入当前有效 WS 并连接，需要改写接口时主动开启运行时 Dio Mock。
+4. 已有工作区沿用保存的接入方式，包括旧版代理配置；全新工作区默认 VM。使用 VM 时自动发现 IDE 内的 Flutter Debug 会话；唯一会话自动连接，多个会话手动选择，也可填写当前有效 WS。需要改写接口时主动开启运行时 Dio Mock。
 5. 在 **Mock 规则** 检查规则，在 **API 与历史** 检查当前模式的历史。外部修改规则文件后，先保存文件，再点击 **读取项目文件**。
 
 升级和切换接入方式是两项操作。由代理切换到 VM 时，还需按下一节说明移除代理启动参数并重新运行应用；单纯切换工作台标签不会改变 App 已创建的网络客户端。
 
 ## VM 快速上手：无需修改 Flutter 源码
 
-1. 用原有入口以 **Debug** 启动 Flutter 应用，获取当前 VM Service 的 `ws://…/ws` 地址。它是 VM Service 的 WebSocket 地址，不是 DevTools 网页 URL 或应用自己的业务 WebSocket。
-2. 打开 **Flutter API Mocks: 打开工作台 → 连接与诊断 → VM 连接**，输入地址并点击 **连接并记录**。输入框提交后清空，地址不写入磁盘。
+1. 在 Cursor / VS Code 中用原有入口以 **Debug** 启动或附加 Flutter 应用，插件自动发现本项目的调试会话。外部终端独立运行时，先在 IDE 附加调试，或手动提供 VM Service 的 `ws://…/ws` 地址。
+2. 打开 **Flutter API Mocks: 打开工作台 → 连接与诊断 → VM 连接**。只有一个可用会话时自动连接并后台记录，多个时选择会话。手动地址入口保留，认证地址仅在内存中使用。
 3. 在应用内触发请求，进入 **API 与历史** 查看自动发现的 API、请求和响应。此时仅采集，不改变请求结果。
 4. 需要 Mock 时，主动开启 **开启运行时 Dio Mock**，等待“已接入 Dio”数量更新。尚未创建的 Dio 会周期性发现；也可点 **重新发现并同步**。新实例首次请求可能早于接入，应确认接入后再触发。
 5. 在 **Mock 规则** 创建并启用规则。保存并同步成功后，再次触发接口。已有规则可复用；VM 不支持手动断点。
-6. 关闭 Mock 后恢复观察采集；点击 **断开连接** 停止 VM 会话。Hot Restart 后会重发现新的 Isolate；停止应用或重开 IDE 后，需使用本次有效 WS 重新连接。
+6. 关闭 Mock 后恢复观察采集；点击 **断开连接** 停止 VM 会话。Hot Restart 后会重发现新的 Isolate；完整停止后新调试会话可再次自动连接。手动断开会暂停当前会话自动重连，需要时点击候选的 **重新连接**。
+
+自动连接使用实时调试事件，并通过 Dart Tooling Daemon 补查已经运行的会话；旧版 Dart 扩展不支持补查时仍保留实时发现和手动入口。详见 [VM 自动发现说明](docs/vm-auto-discovery.md)。
 
 连接中会禁用地址输入和重复提交；初始化成功后，连接卡明确显示 **已连接 · 当前端点** 和后台记录状态，隐藏连接按钮，仅保留 **断开连接**。需要换地址时先断开。断开或失败后显示未连接，不再把上一次端点显示为当前连接。
 
@@ -418,7 +420,8 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 | 设置 | 默认值 | 有效范围与说明 |
 | --- | --- | --- |
-| `flutterApiMocks.autoStart` | `true` | 仅已选择代理模式时，随受信任的本地 Flutter 工作区启动已安装 / 配置的引擎；不会自动连接 VM |
+| `flutterApiMocks.autoStart` | `true` | 仅已选择代理模式时，随受信任的本地 Flutter 工作区启动已安装 / 配置的引擎 |
+| `flutterApiMocks.autoConnectVm` | `true` | VM 模式自动发现 Flutter Debug 会话；唯一会话自动连接并记录 HTTP，多个会话由用户选择 |
 | `flutterApiMocks.enginePath` | `""` | 本地 mitmdump 绝对路径；留空使用插件管理的引擎 |
 | `flutterApiMocks.proxyPort` | `8080` | 1024–65535；初始端口占用时选择其他可用端口 |
 | `flutterApiMocks.retentionDays` | `7` | 1–365 天 |
@@ -429,6 +432,7 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 ```json
 {
   "flutterApiMocks.autoStart": true,
+  "flutterApiMocks.autoConnectVm": true,
   "flutterApiMocks.enginePath": "",
   "flutterApiMocks.proxyPort": 8080,
   "flutterApiMocks.retentionDays": 7,
@@ -555,7 +559,7 @@ adb -s YOUR_ANDROID_SERIAL reverse --remove tcp:8080
 | 找不到 Flutter 项目 | 打开包含 `pubspec.yaml` 的包根目录；monorepo 中应选择真正创建 Dio 的包 |
 | 没发现 Dio 初始化位置 | 确认直接依赖 Dio 5、实际声明位于 `lib/`；工厂、生成代码或复杂结构按手动片段接入 |
 | 预览后不能应用 | 保存相关文件并重新检测；已有 helper、自定义网络配置或源码变化会触发保护 |
-| 未自动启动 | VM 需要输入当前 WS 并连接，不会因 `autoStart` 自动重连；代理模式检查项目 / IDE 的 `autoStart`、工作区信任及可用引擎，本会话手动停止后需显式启动 |
+| 未自动启动 | VM 检查项目 / IDE 的 `autoConnectVm`，确认在本地 IDE 内启动或附加 Flutter Debug；多个会话需选择，手动断开后需点击重新连接。DTD 不可用时重新启动调试或手动填写地址；代理模式检查 `autoStart`、工作区信任及可用引擎 |
 | VM 连接失败 | 按具体提示区分端口未监听、超时、认证路径失效或初始化失败；使用本次 Debug 的完整 WS，不要填 DevTools 网页地址。App 重新运行后端口和认证路径可能变化，不能只替换旧地址的端口 |
 | VM 记录正常但 Mock 不生效 | 主动开启运行时 Mock，检查已接入 Dio 数、规则同步状态；新实例可重新发现，不支持所有自定义拦截链 |
 | VM 意外断开后暂不能启用 Mock | 可先重连观察，等待最长约 16 秒冷却，确保旧 15 秒租约已到期；正常显式关闭 / 断开且卸载成功时不受该冷却限制 |

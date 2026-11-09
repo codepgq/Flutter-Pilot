@@ -18,6 +18,10 @@ const fake = vi.hoisted(() => ({
   extraWorkspace: '',
   rejectSync: false,
   autoStart: true,
+  autoConnectVm: true,
+  debugEvents: undefined as any,
+  debugStarted: undefined as any,
+  debugStopped: undefined as any,
   trusted: true,
   folderPresent: true,
   configurationListener: undefined as any,
@@ -43,6 +47,21 @@ vi.mock('vscode', async () => {
     ViewColumn: { One: 1 },
     StatusBarAlignment: { Left: 1 },
     env: {},
+    debug: {
+      onDidReceiveDebugSessionCustomEvent: (callback: any) => {
+        fake.debugEvents = callback;
+        return { dispose() {} };
+      },
+      onDidStartDebugSession: (callback: any) => {
+        fake.debugStarted = callback;
+        return { dispose() {} };
+      },
+      onDidTerminateDebugSession: (callback: any) => {
+        fake.debugStopped = callback;
+        return { dispose() {} };
+      },
+    },
+    extensions: { getExtension: () => undefined },
     workspace: {
       get isTrusted() {
         return fake.trusted;
@@ -54,7 +73,8 @@ vi.mock('vscode', async () => {
         ];
       },
       getConfiguration: () => ({
-        get: (key: string, value: unknown) => (key === 'autoStart' ? fake.autoStart : value),
+        get: (key: string, value: unknown) =>
+          key === 'autoStart' ? fake.autoStart : key === 'autoConnectVm' ? fake.autoConnectVm : value,
       }),
       onDidGrantWorkspaceTrust: () => ({ dispose() {} }),
       onDidChangeWorkspaceFolders: (callback: any) => {
@@ -242,6 +262,7 @@ beforeEach(async () => {
   fake.runtime.download = undefined;
   fake.rejectSync = false;
   fake.autoStart = true;
+  fake.autoConnectVm = true;
   fake.trusted = true;
   fake.folderPresent = true;
   fake.confirm = undefined;
@@ -560,6 +581,114 @@ describe('VM 连接模式扩展整合', () => {
     await activateCurrent();
     return privateStorage();
   }
+
+  async function withDiscoveredVm(test: (emit: (id?: string) => void, server: any) => Promise<void>) {
+    const { WebSocketServer } = await import('ws');
+    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const address = server.address() as { port: number };
+    server.on('connection', (socket) =>
+      socket.on('message', (raw) => {
+        const request = JSON.parse(raw.toString());
+        socket.send(
+          JSON.stringify({
+            id: request.id,
+            result: request.method === 'getVM' ? { type: 'VM', isolates: [] } : { type: 'Success' },
+          }),
+        );
+      }),
+    );
+    const emit = (id = 'flutter-session') => {
+      const session = {
+        id,
+        name: `Debug ${id}`,
+        type: 'dart',
+        workspaceFolder: { uri: { toString: () => pathToFileURL(fake.workspace).toString() } },
+        configuration: { cwd: fake.workspace },
+      };
+      fake.debugStarted(session);
+      fake.debugEvents({
+        session,
+        event: 'flutter.appStart',
+        body: { mode: 'debug', deviceId: 'ios-simulator' },
+      });
+      fake.debugEvents({
+        session,
+        event: 'dart.debuggerUris',
+        body: { vmServiceUri: `ws://127.0.0.1:${address.port}/discovery-private-token=/ws` },
+      });
+    };
+    try {
+      await test(emit, server);
+    } finally {
+      await deactivate();
+      for (const client of server.clients) client.terminate();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }
+
+  it('调试事件自动连接且独立开关默认关闭，手动断开抑制并可通过消息显式重连', async () => {
+    await withDiscoveredVm(async (emit) => {
+      await activateVmMode();
+      await open();
+      emit();
+      await vi.waitFor(() => expect(latest().state.vm.status).toBe('connected'));
+      expect(latest().state.vmDiscovery.connectedSessionId).toBe('flutter-session');
+      expect(latest().state.vm.mockEnabled).toBe(false);
+      expect(latest().state.ws.captureEnabled).toBe(false);
+      expect(latest().state.ws.mockEnabled).toBe(false);
+      expect(JSON.stringify(fake.panels.at(-1).webview.messages)).not.toContain('discovery-private-token');
+      expect(await readFile(projectFile(), 'utf8')).not.toContain('discovery-private-token');
+      await message('vm.disconnect');
+      emit();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(latest().state.vm.status).toBe('disconnected');
+      expect(latest().state.vmDiscovery.candidates[0].status).toBe('paused');
+      await message('vm.discovery.connect', { id: 'flutter-session' });
+      await vi.waitFor(() => expect(latest().state.vm.status).toBe('connected'));
+      fake.debugStopped({ id: 'flutter-session' });
+      await vi.waitFor(() => expect(latest().state.vm.status).toBe('disconnected'));
+    });
+  });
+
+  it('项目设置覆盖IDE自动连接，读取后立即应用且不重启当前会话', async () => {
+    await withDiscoveredVm(async (emit) => {
+      await activateVmMode();
+      await writeProject({ settings: { autoConnectVm: false } });
+      await deactivate();
+      await activateCurrent();
+      await open();
+      emit();
+      await vi.waitFor(() => expect(latest().state.vmDiscovery.candidates).toHaveLength(1));
+      expect(latest().state.vm.status).toBe('disconnected');
+      fake.configurationListener({ affectsConfiguration: (key: string) => key.endsWith('autoConnectVm') });
+      expect(latest().state.vmDiscovery.enabled).toBe(false);
+      await writeProject({ settings: { autoConnectVm: true } });
+      await message('project.reload');
+      await vi.waitFor(() => expect(latest().state.vm.status).toBe('connected'));
+      await writeProject({ settings: { autoConnectVm: false } });
+      await message('project.reload');
+      expect(latest().state.vm.status).toBe('connected');
+      expect(latest().state.vmDiscovery.enabled).toBe(false);
+    });
+  });
+
+  it('代理模式只展示候选，切换VM后自动连接且关闭面板继续记录', async () => {
+    await withDiscoveredVm(async (emit) => {
+      await open();
+      emit();
+      await vi.waitFor(() => expect(latest().state.vmDiscovery.candidates).toHaveLength(1));
+      expect(latest().state.vm.status).toBe('disconnected');
+      await message('connection.mode', { mode: 'vm' });
+      await vi.waitFor(() => expect(latest().state.vm.status).toBe('connected'));
+      fake.panels.at(-1).dispose();
+      await open();
+      await vi.waitFor(() => expect(latest().state.vm.status).toBe('connected'));
+      await message('connection.mode', { mode: 'proxy' });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(latest().state.vm.status).toBe('disconnected');
+    });
+  });
 
   it('新工作区默认 VM，即使已有可用代理引擎也不启动代理', async () => {
     await deactivate();

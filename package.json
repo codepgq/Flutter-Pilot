@@ -24,6 +24,7 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
+    "onDebug:dart",
     "workspaceContains:pubspec.yaml",
     "onCommand:flutterApiMocks.open"
   ],
@@ -96,7 +97,13 @@
         "flutterApiMocks.autoStart": {
           "type": "boolean",
           "default": true,
-          "description": "代理模式下，打开受信任的 Flutter 项目后使用已安装引擎后台自动记录，关闭工作台后继续。VM 模式连接后后台记录，重启 IDE 需重新提供本次 VM WS。"
+          "description": "代理模式下，打开受信任的 Flutter 项目后使用已安装引擎后台自动记录，关闭工作台后继续。"
+        },
+        "flutterApiMocks.autoConnectVm": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "VM 模式下自动发现本项目的 Flutter Debug 会话，唯一可用会话自动连接并记录 HTTP。Dio Mock、WS 采集和 WS Mock 仍需手动开启。"
         }
       }
     }

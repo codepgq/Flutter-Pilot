@@ -136,3 +136,13 @@
 - 最终0.0.3 VSIX已生成，解包逐项核对extension.js、webview.js/css及两份Dart模板与构建一致；使用解包产物在Cursor隔离宿主执行新增WS消息链路验收退出0。SHA-256记录于忽略目录artifacts/v0.0.3-package-report.json。未覆盖当前安装。
 
 - 用户随后要求覆盖安装到 Cursor，CLI `--force` 安装 0.0.3 成功；活动扩展登记为 api-mocks.flutter-api-mocks@0.0.3，安装后扩展/Webview JS/CSS 与两份 Dart 模板均与 VSIX SHA-256 一致。未自动重载用户窗口。用户已明确要求提交本轮实现。
+
+## VM 自动发现与连接（2026-11-09）
+
+- `src/vm/discovery.ts` 提前注册公开 debug custom/start/stop 监听，合并 Flutter appStart 的实际 mode/device 与 debuggerUris；不依赖 Dart-Code 私有数字枚举或复制剪贴板命令。DTD 通过公开 API v3 URI 接入，订阅 Editor / Service 并调用 Editor.getDebugSessions 补查，处理延迟就绪、超时和旧响应。
+- 候选摘要与地址分离，真实路径按最具体工作区归属；另一个根目录缺失不影响有效根。DTD 多会话完整快照原子发布；stop tombstone 不被迟到 DTD started 清除，revision/generation 防旧异步结果复活。地址不会进入 WorkbenchState。
+- `autoConnect.ts` 独立管理默认关闭至Workbench初始化完成的自动调度、唯一候选、多候选选择、三次预算、手动优先、暂停与owner断开。回调只负责连接与历史刷新；历史刷新异常不误报VM连接失败。project.settings.autoConnectVm布尔校验、IDE配置更新及项目读取即时应用，关闭设置保留在线连接。
+- 新增 `vm.discovery.connect` 消息动作，以ID选择候选，Webview展示设备、来源、脱敏端点、等待/失败/暂停状态，390px窄屏无横向溢出。所有Mock与WS采集仍手动开启。
+- 本轮269项Vitest、31项Playwright、类型/格式/构建/diff检查通过；Cursor与VSCode合成隔离消息链路退出0。真实Cursor3.29.9（宿主API1.128.0）及VSCode1.116.0，Dart扩展3.146.0，Flutter3.47.8/Dart3.13.7，iPhone18Pro/iOS27.2各9项断言通过：IDE launch/attach、真实HTTP记录、已有会话DTD补查、HotRestart、手动断开抑制与显式恢复、stop/start及源码SHA不变。未修改或控制用户EXIO会话。
+- 自动连接可能早于应用HTTP profiling服务就绪，测试需等待vm.state.isolates>0后发请求；不承诺补抓采集就绪前流量。真实测试使用/tmp独立fixture与IDE profile，只控制自身调试会话；Android/真机/其他SDK未验收。报告在忽略目录artifacts/vm-discovery-{cursor,vscode}-report.json。
+- 用户随后要求安装并提交：重新构建0.0.3 VSIX，解包后Cursor隔离VM消息链路退出0；Cursor CLI --force覆盖安装成功，活动登记0.0.3。安装后的extension.js、webview.js/css及两份Dart模板SHA-256与包一致；package.json除Cursor新增__metadata外内容一致。校验报告artifacts/vm-discovery-package-report.json。未自动重载当前窗口，需用户在调试方便时Reload Window加载新版。

@@ -107,6 +107,21 @@ export interface ApiCatalogEntry {
   lastAt: number;
 }
 export interface WorkbenchState {
+  vmDiscovery?: {
+    enabled: boolean;
+    status: 'waiting' | 'ready' | 'unavailable';
+    message?: string;
+    candidates: {
+      id: string;
+      name: string;
+      device?: string;
+      endpoint: string;
+      source: 'debug-event' | 'dtd';
+      status: 'available' | 'connecting' | 'connected' | 'paused' | 'failed';
+      error?: string;
+    }[];
+    connectedSessionId?: string;
+  };
   ws?: import('./ws/model').WsState;
   project?: {
     id: string;
