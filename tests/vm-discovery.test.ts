@@ -266,6 +266,96 @@ describe('VM debugger discovery', () => {
 });
 
 describe('DTD existing-session discovery', () => {
+  it('rechecks an already-running session when opening after the initial query timed out', async () => {
+    let calls = 0;
+    let root = '';
+    const dtd = await daemon((request, socket) => {
+      if (++calls === 1) return;
+      socket.send(
+        JSON.stringify({
+          id: request.id,
+          result: {
+            debugSessions: [
+              {
+                id: 'existing',
+                name: 'Already running',
+                debuggerType: 'Flutter',
+                flutterMode: 'debug',
+                projectRootPath: root,
+                vmServiceUri: 'ws://localhost:3456/private=/ws',
+              },
+            ],
+          },
+        }),
+      );
+    });
+    const f = await fixture(dtd.api);
+    root = f.root;
+    await f.discovery.start();
+    expect(f.discovery.snapshot().status).toBe('unavailable');
+    await f.discovery.start();
+    expect(f.discovery.snapshot().status).toBe('ready');
+    expect(f.discovery.snapshot().candidates.map((candidate) => candidate.id)).toEqual(['existing']);
+    expect(calls).toBe(2);
+  });
+
+  it('reconnects the unchanged public DTD URI after its connection drops', async () => {
+    const dtd = await daemon((request, socket) =>
+      socket.send(JSON.stringify({ id: request.id, result: { debugSessions: [] } })),
+    );
+    const f = await fixture(dtd.api);
+    let connections = 0;
+    dtd.server.on('connection', () => connections++);
+    await f.discovery.start();
+    expect(f.discovery.snapshot().status).toBe('ready');
+    for (const socket of dtd.server.clients) socket.terminate();
+    await until(() => f.discovery.snapshot().status === 'unavailable');
+    await f.discovery.start();
+    expect(f.discovery.snapshot().status).toBe('ready');
+    expect(connections).toBe(2);
+  });
+
+  it('retries a failed subscription on the next open and closes the failed connection', async () => {
+    const dtd = await daemon((request, socket) =>
+      socket.send(JSON.stringify({ id: request.id, result: { debugSessions: [] } })),
+    );
+    // Simulate a startup socket that opens, but never answers streamListen.
+    let connections = 0;
+    dtd.server.prependListener('connection', (socket) => {
+      if (++connections === 1) socket.send = (() => {}) as typeof socket.send;
+    });
+    const f = await fixture(dtd.api);
+    await f.discovery.start();
+    expect(f.discovery.snapshot().status).toBe('unavailable');
+    await until(() => dtd.server.clients.size === 0);
+    await f.discovery.start();
+    expect(f.discovery.snapshot().status).toBe('ready');
+    expect(connections).toBe(2);
+  });
+
+  it('retries a temporarily unavailable Dart API without duplicating subscriptions', async () => {
+    const dtd = await daemon((request, socket) =>
+      socket.send(JSON.stringify({ id: request.id, result: { debugSessions: [] } })),
+    );
+    let available = false;
+    const f = await fixture({
+      get version() {
+        return available ? 3 : 2;
+      },
+      get dtdUri() {
+        return dtd.api.dtdUri;
+      },
+      onDtdUriChanged: dtd.api.onDtdUriChanged,
+    });
+    await f.discovery.start();
+    expect(f.discovery.snapshot().status).toBe('unavailable');
+    available = true;
+    await Promise.all([f.discovery.start(), f.discovery.start(), f.discovery.start()]);
+    expect(f.discovery.snapshot().status).toBe('ready');
+    expect(dtd.apiEvents.listenerCount('uri')).toBe(1);
+    expect(dtd.server.clients.size).toBe(1);
+  });
+
   it('controls pre-existing sessions by their exact DTD debugSessionId', async () => {
     let root = '';
     const controls: { method: string; params: unknown }[] = [];

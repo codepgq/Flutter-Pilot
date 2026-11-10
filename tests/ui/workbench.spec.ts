@@ -65,6 +65,23 @@ async function state(page: Page, overrides = {}, selected?: unknown) {
 async function messages(page: Page) {
   return page.evaluate(() => (window as unknown as { __messages: unknown[] }).__messages);
 }
+test('设置和本地引擎入口使用原生命令链接，不向扩展宿主请求打开设置', async ({ page }) => {
+  await page.goto('/');
+  await state(page);
+  await page.getByText('工作区与连接', { exact: true }).click();
+  const settings = page.getByRole('link', { name: '设置', exact: true });
+  const href = await settings.getAttribute('href');
+  expect(href?.split('?')[0]).toBe('command:workbench.action.openSettings');
+  expect(JSON.parse(decodeURIComponent(href!.split('?')[1]))).toEqual(['@ext:api-mocks.flutter-api-mocks']);
+  // Chromium has no IDE command handler; stop navigation after React handlers have run.
+  await page.evaluate(() => document.addEventListener('click', (event) => event.preventDefault()));
+  await settings.click();
+  await page.getByRole('button', { name: '连接与诊断', exact: true }).click();
+  const engine = page.getByRole('link', { name: '选择本地引擎', exact: true });
+  await expect(engine).toHaveAttribute('href', href!);
+  await engine.click();
+  expect(await messages(page)).not.toContainEqual({ action: 'settings.open', payload: {} });
+});
 test('项目绑定展示 UUID 并打开配置、规则和读取项目文件', async ({ page }) => {
   await page.setViewportSize({ width: 680, height: 920 });
   await page.goto('/');

@@ -1,5 +1,20 @@
 # 实现与验证结论
 
+## 0.0.6 发布（2026-11-10）
+
+- 用户要求提交、发布新版本及安装Cursor；manifest/lockfile、MCP serverInfo、打包路径、README/CHANGELOG升为0.0.6。包含设置入口、已有VM补查修复、已提交MCP热更新和已确认Tab滚动条调整。
+- 354项Vitest、类型、格式、构建通过；37项UI沿用修复后已通过结果。VSIX、安装一致性与SDK stdio报告：artifacts/v0.0.6-install-report.json。
+- 当前main无远端，交付本地VSIX并CLI安装；不发布商店、不启动IDE GUI、不访问钥匙串、不强制重载窗口。先前“不提交/不安装”由本次用户授权覆盖。
+- Cursor CLI --force安装成功，活动登记api-mocks.flutter-api-mocks@0.0.6；25项包文件与源码和安装目录逐项一致，manifest除Cursor安装元数据外一致。源码与安装bridge均通过真实SDK stdio：版本0.0.6、21工具、4 Prompts、5资源及离线指南读取。
+
+## 设置入口及已有 VM 补查修复（2026-11-10）
+
+- 用户确认工作台设置入口打开即卡死，Flutter 通过 Cursor Run/Debug 先运行后打开插件时无法连接。沿用既有支持已有 IDE Debug 会话的方案，无需重新设计或扩展到终端日志 / 端口扫描。
+- 设置及本地引擎入口用 renderer 原生命令链接，Webview 精确白名单；移除宿主 openSettings 调用，避开 Cursor 返回编辑器实例的 RPC 序列化。
+- VmDiscovery.start 每次打开工作台补查，启动并发共享任务，首次公开 API 不可用允许重试；已连 DTD 重新查询，断线或订阅失败关闭旧连接后支持同 URI 重连，失效旧查询不得发布状态。
+- 354项Vitest、37项Playwright、类型、格式、构建和diff检查通过。新增超时重查、同URI重连、失败订阅清理、API恢复及扩展打开后自动连接已有VM用例；设置链接参数、白名单及旧消息不触发RPC也有回归。
+- 版本保持0.0.5，本轮未提交、覆盖安装或启动IDE GUI；修复包使用独立文件名，不覆盖此前发布产物。用户实际IDE重开设置和已有VM连接尚待复验。
+
 ## MCP 热重载与热重启（2026-11-10）
 
 - 新增 hot_reload / hot_restart，工具总数21；sessionId必填，timeoutMs为100..30000，默认30000。list_sessions暴露capabilities.lifecycle支持及繁忙状态。

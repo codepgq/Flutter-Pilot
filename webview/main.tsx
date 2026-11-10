@@ -31,6 +31,7 @@ let viewPreferences = vscode?.getState?.() ?? {};
 function send(action: string, payload: unknown = {}) {
   vscode?.postMessage({ action, payload });
 }
+const settingsHref = `command:workbench.action.openSettings?${encodeURIComponent(JSON.stringify(['@ext:api-mocks.flutter-api-mocks']))}`;
 const initial: WorkbenchState = {
   mode: 'vm',
   rules: [],
@@ -415,9 +416,9 @@ function App() {
                     : '启动代理'}
               </Button>
               <span>{running ? '后台记录中 · 关闭工作台继续记录' : '本地存储 · 仅用于开发调试'}</span>
-              <button onClick={() => send('settings.open')}>
+              <a className="button-link" href={settingsHref}>
                 设置 <Icon name="external" size={12} />
-              </button>
+              </a>
             </div>
           </details>
         </div>
@@ -815,7 +816,9 @@ function Connection({
               <Icon name="box" size={15} />
               {state.engine.status === 'running' ? '检查引擎' : '安装 / 初始化引擎'}
             </Button>
-            <Button action="settings.open">选择本地引擎</Button>
+            <a className="button-link" href={settingsHref}>
+              选择本地引擎
+            </a>
           </div>
         </section>
         <section className="card">

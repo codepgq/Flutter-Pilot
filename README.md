@@ -4,7 +4,9 @@
 
 配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key 精确操作页面，减少逐步截图识别的耗时与 token 消耗。
 
-当前版本为 **0.0.5**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+当前版本为 **0.0.6**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+
+**0.0.6 修复 Cursor 设置卡死和已有 VM 会话补查恢复**：打开工作台会重新补查先前已运行的 Flutter Debug 会话；新增 MCP `hot_reload` / `hot_restart`，精确控制当前 VM 绑定的 IDE 调试会话。
 
 **0.0.5 优化全部六个 Tab 的内容布局**：压缩共用顶部，连接与设置收进“工作区与连接”，高级筛选、规则模板、诊断及维护说明按需展开，让列表和正文使用更多窗口空间。
 
@@ -111,17 +113,17 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 
 ### 从 VSIX 安装
 
-1. 获取 `flutter-api-mocks-0.0.5.vsix`。从源码构建见下方步骤。
+1. 获取 `flutter-api-mocks-0.0.6.vsix`。从源码构建见下方步骤。
 2. 在 VS Code 或 Cursor 扩展面板右上角菜单选择 **Install from VSIX… / 从 VSIX 安装…**。
 3. 选择安装包，按 IDE 提示重新加载窗口。
 4. 打开包含 `pubspec.yaml` 的 Flutter 项目根目录，并信任工作区。
 5. 执行 **Flutter API Mocks: 打开工作台**。扩展激活后，也可点击状态栏 **API Mocks**。
 6. 默认进入推荐的 **VM 连接**，输入本次 Flutter VM WS 后点击 **连接并记录**。只有需要备用方案时才切换到 **代理连接**，安装 / 初始化引擎并按向导接入。新工作区即使已有引擎缓存，也不会自动启动代理。
 
-本版本号 0.0.5 比旧包 0.1.0 小。已有 0.1.0 时需强制覆盖安装，例如：
+本版本号 0.0.6 比旧包 0.1.0 小。已有 0.1.0 时需强制覆盖安装，例如：
 
 ```sh
-cursor --install-extension artifacts/flutter-api-mocks-0.0.5.vsix --force
+cursor --install-extension artifacts/flutter-api-mocks-0.0.6.vsix --force
 # VS Code 使用 code --install-extension 同一文件 --force
 ```
 
@@ -144,7 +146,7 @@ npm test
 npm run package
 ```
 
-产物为 `artifacts/flutter-api-mocks-0.0.5.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
+产物为 `artifacts/flutter-api-mocks-0.0.6.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
 
 ### 使用已有引擎
 
@@ -700,7 +702,7 @@ python3 tool/device_smoke.py --mitmdump /absolute/path/to/mitmdump --ios YOUR_SI
 
 ```sh
 npm run package
-shasum -a 256 artifacts/flutter-api-mocks-0.0.5.vsix
+shasum -a 256 artifacts/flutter-api-mocks-0.0.6.vsix
 ```
 
 VSIX 包含扩展构建产物、VM 注入模板、代理 addon、引擎清单及文档，不包含 Node 开发依赖、Flutter 示例构建结果或真实证书。首次引擎下载单独发生。源码中的 README 修改后，应重新打包，安装包内的文档才会更新。

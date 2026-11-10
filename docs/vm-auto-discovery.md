@@ -19,7 +19,7 @@
 
 ## 发现通道与边界
 
-实时通道使用 VS Code 公开调试事件接口接收 `flutter.appStart` 和 `dart.debuggerUris`。插件启动前已存在的会话，通过 Dart 扩展公开 API v3 提供的 Dart Tooling Daemon（DTD），调用 `Editor.getDebugSessions` 补查，并监听会话变化。DTD 服务延迟注册时会补查；不支持或不可用时保留实时发现，并提示重新启动调试或手动填写地址。
+实时通道使用 VS Code 公开调试事件接口接收 `flutter.appStart` 和 `dart.debuggerUris`。插件启动前已存在的会话，通过 Dart 扩展公开 API v3 提供的 Dart Tooling Daemon（DTD），调用 `Editor.getDebugSessions` 补查，并监听会话变化。DTD 服务延迟注册时会补查；每次打开工作台也会重新补查，首次 API / 查询失败或 DTD 连接断开后可恢复，无需为重试重新启动 Flutter。补查仍不可用时保留实时发现和手动地址入口。
 
 候选按调试会话 ID 去重，按项目真实路径与工作区归属，支持 Dart workspace 下的 Flutter 子项目。不会按项目名称猜测，也不会跨工作区连接。多个已有候选整批发布，避免补查过程中误触单会话自动连接。
 

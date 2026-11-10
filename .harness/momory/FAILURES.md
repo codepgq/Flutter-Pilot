@@ -1,5 +1,13 @@
 # 问题与验证记录
 
+## Cursor 设置入口卡死及已有 VM 补查无法恢复（2026-11-10）
+
+- 状态：源码已修复，354 项单测、37 项 UI、类型、格式与构建通过；随后用户授权发布0.0.6及Cursor CLI安装，交付证据见artifacts/v0.0.6-install-report.json。未启动 IDE GUI 复验。
+- 用户确认从工作台点击设置、尚未修改即卡死。Cursor main.log 在 15:55:49 记录窗口8阻塞15秒，随后无响应；6次采样均在 RPC serializeReplyOK / JSON.stringify，扩展宿主随后正常 exit0。本机 Cursor 的 openSettings 返回设置编辑器实例，宿主 executeCommand 会导致 renderer 序列化该对象图。
+- 两处设置入口改为原生 command URI，仅放行 workbench.action.openSettings；移除 settings.open 消息处理。不能仅删除 await，因为序列化发生在宿主收到返回值之前。
+- 用户确认先通过 Cursor Run/Debug 运行 Flutter。发现已有会话补查 start 一次性锁存，首次 API / DTD 查询失败或断线后再打开工作台无法恢复。改为每次打开重新补查、并发去重、恢复相同 URI 的 DTD 连接，失败关闭连接并阻止旧代结果回写。
+- 合成 DTD / VM 的扩展整合已验证首次 Editor 未就绪后打开工作台自动连接已有会话，不需要新调试事件，Mock / WS 仍关闭且不泄漏认证地址。该证据不等于用户当前 Cursor 真实会话已复验。
+
 ## VM DDS 跳转失败与连接状态误导（2026-11-08）
 
 - 状态：已修复；174 项单测、24 项 UI、真实 Flutter DDS 只读 RPC 及打包后的 Cursor 隔离宿主验证通过。安装已覆盖，活跃用户窗口等待手动重载。

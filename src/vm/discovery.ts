@@ -60,7 +60,7 @@ interface DartApi {
   dtdUri?: string;
   onDtdUriChanged?: (listener: (uri: string | undefined) => void) => Disposable;
 }
-const unavailableMessage = '无法补查已有调试会话；可重新启动 Flutter 调试或手动连接。';
+const unavailableMessage = '无法补查已有调试会话；可重新打开工作台重试，或手动连接。';
 const nativeFlutter = (input: SessionInput) =>
   input.debuggerType === 'Flutter' &&
   (input.flutterMode === undefined || input.flutterMode === 'debug') &&
@@ -97,7 +97,8 @@ export class VmDiscovery {
   private readonly controls = new Map<string, VmDebugSession>();
   private revision = 0;
   private disposed = false;
-  private started = false;
+  private starting?: Promise<void>;
+  private api?: DartApi;
   private generation = 0;
   private daemon?: DtdClient;
   private daemonUri?: string;
@@ -153,8 +154,22 @@ export class VmDiscovery {
   }
 
   async start(): Promise<void> {
-    if (this.started || this.disposed) return;
-    this.started = true;
+    if (this.disposed) return;
+    if (this.starting) return this.starting;
+    const starting = this.startOrRefresh();
+    this.starting = starting;
+    try {
+      await starting;
+    } finally {
+      if (this.starting === starting) this.starting = undefined;
+    }
+  }
+
+  private async startOrRefresh(): Promise<void> {
+    if (this.api) {
+      await this.refresh();
+      return;
+    }
     try {
       const candidate = await this.host.getDartApi();
       if (this.disposed) return;
@@ -163,6 +178,7 @@ export class VmDiscovery {
         this.setStatus('unavailable', unavailableMessage);
         return;
       }
+      this.api = api;
       this.disposables.push(
         api.onDtdUriChanged((uri) => {
           void this.useDaemon(uri);
@@ -178,7 +194,11 @@ export class VmDiscovery {
     if (this.disposed) return;
     const inputs = [...this.inputs.values()];
     await Promise.all(inputs.map((input) => this.accept(input)));
-    await this.querySessions();
+    // Opening the workbench must recover a failed startup query or a dropped
+    // daemon connection even when Dart-Code has not changed its public URI.
+    if (this.api && (!this.daemon || this.daemonUri !== this.api.dtdUri))
+      await this.useDaemon(this.api.dtdUri);
+    else await this.querySessions();
   }
 
   private changed(id: string): number {
@@ -305,10 +325,13 @@ export class VmDiscovery {
     this.daemonUri = uri;
     daemon.on('disconnected', () => {
       if (this.disposed || generation !== this.generation) return;
-      this.setStatus('unavailable', unavailableMessage);
+      ++this.generation;
       this.daemon = undefined;
       this.daemonUri = undefined;
+      this.query = undefined;
+      this.queryAgain = false;
       daemon.dispose();
+      this.setStatus('unavailable', unavailableMessage);
     });
     daemon.on('notification', (params: unknown) => {
       if (this.disposed || generation !== this.generation) return;
@@ -342,7 +365,12 @@ export class VmDiscovery {
       if (this.disposed || generation !== this.generation) return;
       await this.querySessions();
     } catch {
-      if (!this.disposed && generation === this.generation) this.setStatus('unavailable', unavailableMessage);
+      if (!this.disposed && generation === this.generation) {
+        this.daemon = undefined;
+        this.daemonUri = undefined;
+        daemon.dispose();
+        this.setStatus('unavailable', unavailableMessage);
+      }
     }
   }
 
@@ -438,6 +466,7 @@ export class VmDiscovery {
     this.daemon?.dispose();
     this.daemon = undefined;
     this.daemonUri = undefined;
+    this.api = undefined;
     this.visibleCandidates = [];
     this.sessions.clear();
     this.inputs.clear();

@@ -465,6 +465,8 @@ class Workbench {
       vscode.ViewColumn.One,
       {
         enableScripts: true,
+        // Open settings in the renderer: its editor instance must not be serialized back over RPC.
+        enableCommandUris: ['workbench.action.openSettings'],
         retainContextWhenHidden: true,
         localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')],
       },
@@ -1651,12 +1653,6 @@ class Workbench {
           await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(h.caCertPath));
           break;
         }
-        case 'settings.open':
-          await vscode.commands.executeCommand(
-            'workbench.action.openSettings',
-            '@ext:api-mocks.flutter-api-mocks',
-          );
-          break;
         case 'log.clear':
           this.logs = [];
           break;

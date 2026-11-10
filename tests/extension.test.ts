@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { discoverSessions, requestSession } from '../src/mcp/server';
 const fake = vi.hoisted(() => ({
   commands: new Map<string, () => Promise<unknown>>(),
+  executedCommands: [] as string[],
   panels: [] as any[],
   engines: [] as any[],
   runtime: {
@@ -23,6 +24,7 @@ const fake = vi.hoisted(() => ({
   debugEvents: undefined as any,
   debugStarted: undefined as any,
   debugStopped: undefined as any,
+  dartApi: undefined as any,
   trusted: true,
   folderPresent: true,
   configurationListener: undefined as any,
@@ -62,7 +64,7 @@ vi.mock('vscode', async () => {
         return { dispose() {} };
       },
     },
-    extensions: { getExtension: () => undefined },
+    extensions: { getExtension: () => (fake.dartApi ? { activate: async () => fake.dartApi } : undefined) },
     workspace: {
       get isTrusted() {
         return fake.trusted;
@@ -94,7 +96,10 @@ vi.mock('vscode', async () => {
         fake.commands.set(name, callback);
         return { dispose() {} };
       },
-      executeCommand: async (name: string) => fake.commands.get(name)?.(),
+      executeCommand: async (name: string) => {
+        fake.executedCommands.push(name);
+        return fake.commands.get(name)?.();
+      },
     },
     window: {
       createOutputChannel: () => ({ appendLine() {}, dispose() {} }),
@@ -106,8 +111,9 @@ vi.mock('vscode', async () => {
       showTextDocument: async (uri: any) => {
         fake.shownDocuments.push(uri.fsPath);
       },
-      createWebviewPanel: () => {
+      createWebviewPanel: (_type: string, _title: string, _column: number, options: unknown) => {
         const panel = {
+          options,
           webview: {
             html: '',
             cspSource: 'test-src',
@@ -258,6 +264,7 @@ beforeEach(async () => {
   fake.storage = join(directory, 'storage');
   process.env.API_MOCKS_MCP_ROOT = join(directory, 'bridge');
   fake.commands.clear();
+  fake.executedCommands = [];
   fake.panels = [];
   fake.engines = [];
   fake.runtime.cached = '/fake/mitmdump';
@@ -265,6 +272,7 @@ beforeEach(async () => {
   fake.rejectSync = false;
   fake.autoStart = true;
   fake.autoConnectVm = true;
+  fake.dartApi = undefined;
   fake.trusted = true;
   fake.folderPresent = true;
   fake.confirm = undefined;
@@ -289,6 +297,12 @@ afterEach(async () => {
   delete process.env.API_MOCKS_MCP_ROOT;
 });
 describe('扩展与工作台整合', () => {
+  it('仅放行原生设置链接，旧设置消息不能再触发编辑器返回值的跨进程序列化', async () => {
+    const panel = await open();
+    expect(panel.options.enableCommandUris).toEqual(['workbench.action.openSettings']);
+    await message('settings.open');
+    expect(fake.executedCommands).not.toContain('workbench.action.openSettings');
+  });
   it('MCP defaults off, survives panel close, isolates sessions and cleans up on disable', async () => {
     await open();
     expect(latest().state.mcp).toMatchObject({ enabled: false, running: false });
@@ -607,6 +621,72 @@ describe('VM 连接模式扩展整合', () => {
     await activateCurrent();
     return privateStorage();
   }
+
+  it('启动补查失败后，打开工作台重新发现并连接已运行的 Flutter，无需新调试事件', async () => {
+    const { WebSocketServer } = await import('ws');
+    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const port = (server.address() as { port: number }).port;
+    let queries = 0;
+    server.on('connection', (socket) => {
+      socket.on('message', (raw) => {
+        const request = JSON.parse(raw.toString());
+        if (request.method === 'Editor.getDebugSessions') {
+          queries++;
+          socket.send(
+            JSON.stringify(
+              queries === 1
+                ? { id: request.id, error: { code: -32601, message: 'Editor not ready' } }
+                : {
+                    id: request.id,
+                    result: {
+                      debugSessions: [
+                        {
+                          id: 'already-running',
+                          name: 'Already running Flutter',
+                          debuggerType: 'Flutter',
+                          flutterMode: 'debug',
+                          projectRootPath: fake.workspace,
+                          vmServiceUri: `ws://127.0.0.1:${port}/private-vm=/ws`,
+                        },
+                      ],
+                    },
+                  },
+            ),
+          );
+        } else {
+          socket.send(
+            JSON.stringify({
+              id: request.id,
+              result: request.method === 'getVM' ? { type: 'VM', isolates: [] } : { type: 'Success' },
+            }),
+          );
+        }
+      });
+    });
+    try {
+      fake.dartApi = {
+        version: 3,
+        dtdUri: `ws://127.0.0.1:${port}/private-dtd=/ws`,
+        onDtdUriChanged: () => ({ dispose() {} }),
+      };
+      await activateVmMode();
+      await vi.waitFor(() => expect(queries).toBe(1));
+      // No Flutter start/URI events or DTD ServiceRegistered notification are emitted.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await open();
+      await vi.waitFor(() => expect(latest().state.vm.status).toBe('connected'));
+      expect(latest().state.vmDiscovery.connectedSessionId).toBe('already-running');
+      expect(latest().state.vm.mockEnabled).toBe(false);
+      expect(latest().state.ws.captureEnabled).toBe(false);
+      expect(latest().state.ws.mockEnabled).toBe(false);
+      expect(JSON.stringify(latest())).not.toMatch(/private-vm|private-dtd/);
+    } finally {
+      await deactivate();
+      for (const client of server.clients) client.terminate();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 
   async function withDiscoveredVm(test: (emit: (id?: string) => void, server: any) => Promise<void>) {
     const { WebSocketServer } = await import('ws');

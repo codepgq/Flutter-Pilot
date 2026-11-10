@@ -1,5 +1,19 @@
 # 验收记录
 
+## 0.0.6 本地发布与 Cursor 安装（2026-11-10）
+
+- 本版本包含设置入口卡死修复、已有VM补查恢复、MCP热重载/热重启和Tab滚动条隐藏。manifest、lockfile、MCP serverInfo、README及VSIX包名统一为0.0.6。
+- 354项Vitest、类型、格式、构建通过；37项Playwright沿用本轮已完成的界面验证，版本递增不修改UI逻辑。
+- 本地VSIX：`artifacts/flutter-api-mocks-0.0.6.vsix`。Cursor CLI安装结果、包/源码/安装目录逐项一致性及真实SDK stdio握手见`artifacts/v0.0.6-install-report.json`。
+- 未启动IDE GUI、未访问钥匙串、不强制重载窗口；在调试方便时执行Developer: Reload Window加载新版，再重连Agent MCP。用户真实窗口设置页与已有VM连接仍需实际复验。
+
+## Cursor 设置卡死与已有 VM 补查修复（2026-11-10）
+
+- 354项Vitest、37项Playwright、TypeScript/Webview类型、格式、构建和diff检查通过。
+- 设置及本地引擎入口的命令URI、精确Webview白名单和不再走宿主RPC已验证；没有在本轮自动打开Cursor设置页，不能将浏览器测试视为Cursor GUI复验。
+- 合成DTD服务覆盖首次查询超时、相同URI断线重连、订阅失败清理及公开API暂不可用后恢复。扩展整合用真实WebSocket传输模拟已有Flutter会话：首次Editor查询失败，打开工作台重查并自动连接，无需新启动事件，Dio Mock、WS采集及WS Mock仍关闭，认证地址不进入界面状态。
+- 未启动IDE GUI、未连接用户Flutter应用、未覆盖安装；用户实际Cursor会话尚待复验。终端独立flutter run边界沿用原约定。
+
 ## MCP 热重载与热重启（2026-11-10）
 
 - 348项Vitest、类型、格式和构建通过。覆盖工具参数、精确调试会话控制、DTD已有会话、无VM及手动地址诊断、取消、超时、关闭MCP、失败不误报、独立开关及重发现Mock。
