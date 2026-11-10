@@ -238,14 +238,18 @@ export class VmServiceClient extends EventEmitter implements VmRpc {
     });
   }
 
-  call<T = any>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  call<T = any>(
+    method: string,
+    params: Record<string, unknown> = {},
+    timeoutMs = this.options.timeoutMs,
+  ): Promise<T> {
     if (!this.connected) return Promise.reject(new Error('尚未连接 Dart VM Service'));
     const id = String(++this.sequence);
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`VM RPC ${method} 等待超时`));
-      }, this.options.timeoutMs);
+      }, timeoutMs);
       timer.unref?.();
       this.pending.set(id, { method, resolve, reject, timer });
       this.socket!.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }), (error) => {

@@ -1,5 +1,11 @@
 # 验收记录
 
+## MCP 热重载与热重启（2026-11-10）
+
+- 348项Vitest、类型、格式和构建通过。覆盖工具参数、精确调试会话控制、DTD已有会话、无VM及手动地址诊断、取消、超时、关闭MCP、失败不误报、独立开关及重发现Mock。
+- 独立Flutter3.47.8应用，SDK Debug Adapter及iPhone18Pro/iOS27.2模拟器，真实SDK MCP stdio和IPC调用验证14项。hot_reload应用源码且保留计数；hot_restart重置计数，新Isolate重新接入已开启Dio Mock；修改规则后重启，按Key请求并显示第二种数据，HTTP历史保留两次Mock命中证据；无变更及编译失败不报告成功。报告：[MCP热更新验证结果](../artifacts/mcp-lifecycle-flutter-report.json)。复现：设置VM_FLUTTER_DEVICE后执行npm run test:mcp:lifecycle。
+- 未启动Cursor或VSCode GUI，未访问钥匙串、未修改或控制用户业务应用；已安装IDE真实会话、Android及真机未在本轮验收。启动请求可能早于Mock注入，不保证启动首请求已Mock。用户随后授权本地提交；未安装。
+
 ## MCP Prompts 与双向 WS 主动消息（2026-11-09）
 
 - 324 项 Vitest（26 个文件）、TypeScript / Webview 类型检查、Prettier、构建和 diff 检查通过。标准 SDK stdio 验证 4 个 Prompts 的发现与读取、19 个工具的发现、双向消息参数、错误处理和指南示例；覆盖原始 text 与 topic/data 互斥、JSON 值、UTF-8 序列化上限及队列取消。

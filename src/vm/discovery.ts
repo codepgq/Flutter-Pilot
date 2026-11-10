@@ -13,6 +13,7 @@ export interface VmDebugSession {
   type: string;
   workspaceId?: string;
   configuration: Record<string, unknown>;
+  customRequest?(command: string, args: Record<string, unknown>): PromiseLike<unknown>;
 }
 export interface VmDiscoveryHost {
   getWorkspaceRoots(): readonly { id: string; path: string }[];
@@ -93,6 +94,7 @@ export class VmDiscovery {
   private readonly inputs = new Map<string, SessionInput>();
   private readonly revisions = new Map<string, number>();
   private readonly stopped = new Set<string>();
+  private readonly controls = new Map<string, VmDebugSession>();
   private revision = 0;
   private disposed = false;
   private started = false;
@@ -112,6 +114,7 @@ export class VmDiscovery {
   ) {
     this.disposables.push(
       host.onSessionStarted((session) => {
+        this.controls.set(session.id, session);
         this.stopped.delete(session.id);
         this.changed(session.id);
       }),
@@ -136,6 +139,17 @@ export class VmDiscovery {
   }
   address(id: string): string | undefined {
     return this.sessions.get(id)?.address;
+  }
+
+  /** Targets exactly one discovered Flutter session, including pre-existing DTD sessions. */
+  async control(id: string, action: 'hot_reload' | 'hot_restart'): Promise<void> {
+    if (this.disposed || !this.sessions.has(id) || this.stopped.has(id))
+      throw new Error('Flutter 调试会话已结束。');
+    const command = action === 'hot_reload' ? 'hotReload' : 'hotRestart';
+    const session = this.controls.get(id);
+    if (session?.customRequest) await session.customRequest(command, { reason: 'manual' });
+    else if (this.daemon) await this.daemon.call(`Editor.${command}`, { debugSessionId: id }, 30000);
+    else throw new Error('无法控制此 IDE 调试会话，请重新启动或附加 Flutter Debug。');
   }
 
   async start(): Promise<void> {
@@ -173,6 +187,7 @@ export class VmDiscovery {
     return revision;
   }
   private stop(id: string): void {
+    this.controls.delete(id);
     this.stopped.add(id);
     this.changed(id);
     this.inputs.delete(id);
@@ -180,6 +195,7 @@ export class VmDiscovery {
   }
   private handleEvent(event: { session: VmDebugSession; event: string; body?: unknown }): void {
     if (this.disposed || event.session.type !== 'dart' || this.stopped.has(event.session.id)) return;
+    this.controls.set(event.session.id, event.session);
     if (!['dart.debuggerUris', 'flutter.appStart'].includes(event.event)) return;
     const config = event.session.configuration;
     const body = record(event.body);
@@ -427,6 +443,7 @@ export class VmDiscovery {
     this.inputs.clear();
     this.listeners.clear();
     this.stopped.clear();
+    this.controls.clear();
     this.revisions.clear();
   }
 }
@@ -439,6 +456,7 @@ export function createVscodeDiscoveryHost(api: typeof vscode): VmDiscoveryHost {
     type: value.type,
     workspaceId: value.workspaceFolder?.uri.toString(),
     configuration: value.configuration,
+    customRequest: (command, args) => value.customRequest(command, args),
   });
   return {
     getWorkspaceRoots: () =>

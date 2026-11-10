@@ -291,6 +291,12 @@ export class VmNetworkProfiler extends EventEmitter {
     return this.work;
   }
 
+  async rediscover(): Promise<void> {
+    await this.work;
+    this.lastDiscovery = 0;
+    await this.pollNow();
+  }
+
   /** Injection emits its own snapshots; stop redundant SDK body collection then. */
   async setCaptureEnabled(enabled: boolean): Promise<void> {
     if (enabled === this.captureEnabled) return;

@@ -26,9 +26,13 @@ export class DtdClient extends EventEmitter {
     }
   }
 
-  async call<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  async call<T = unknown>(
+    method: string,
+    params: Record<string, unknown> = {},
+    timeoutMs?: number,
+  ): Promise<T> {
     try {
-      return await this.client.call<T>(method, params);
+      return await this.client.call<T>(method, params, timeoutMs);
     } catch {
       // Never relay a daemon error body, which may contain an authenticated URI.
       throw new Error('Dart Tooling Daemon 查询暂不可用。');

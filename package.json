@@ -126,6 +126,7 @@
     "test:ws:flutter": "node scripts/ws-flutter-smoke.mjs",
     "test:ui:flutter": "node scripts/ui-flutter-smoke.mjs",
     "test:mcp:flutter": "node scripts/mcp-flutter-smoke.mjs",
+    "test:mcp:lifecycle": "node scripts/mcp-lifecycle-flutter-smoke.mjs",
     "test:mcp:agents": "node scripts/mcp-agent-smoke.mjs",
     "test:ide:mcp": "node scripts/ide-mcp-test.mjs"
   },

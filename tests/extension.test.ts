@@ -653,6 +653,39 @@ describe('VM 连接模式扩展整合', () => {
     }
   }
 
+  it('MCP routes lifecycle to the bound debug session and rejects manual VM ownership', async () => {
+    await withDiscoveredVm(async (emit, server) => {
+      await activateVmMode();
+      await open();
+      emit();
+      await vi.waitFor(() => expect(latest().state.vm.status).toBe('connected'));
+      await message('mcp.enable', { enabled: true });
+      await vi.waitFor(() => expect(latest().state.mcp.running).toBe(true));
+      const descriptor = (await discoverSessions(join(directory, 'bridge', 'sessions'), fake.workspace))[0];
+      const describe = () => requestSession(descriptor, { kind: 'describe' }) as Promise<any>;
+      expect((await describe()).capabilities.lifecycle.supported).toBe(true);
+      // This VM fixture has no Flutter isolate: the MCP route must reject it before any control request.
+      const result = await requestSession(descriptor, {
+        kind: 'call',
+        tool: 'hot_restart',
+        args: { sessionId: descriptor.sessionId },
+      });
+      expect(result).toMatchObject({ ok: false, submitted: false, code: 'FLUTTER_UNAVAILABLE' });
+      await message('vm.disconnect');
+      const port = server.address().port;
+      await message('vm.connect', { url: `ws://127.0.0.1:${port}/discovery-private-token=/ws` });
+      await vi.waitFor(() => expect(latest().state.vm.status).toBe('connected'));
+      expect((await describe()).capabilities.lifecycle.supported).toBe(false);
+      await expect(
+        requestSession(descriptor, {
+          kind: 'call',
+          tool: 'hot_reload',
+          args: { sessionId: descriptor.sessionId },
+        }),
+      ).rejects.toMatchObject({ code: 'DEBUG_SESSION_UNAVAILABLE' });
+    });
+  });
+
   it('调试事件自动连接且独立开关默认关闭，手动断开抑制并可通过消息显式重连', async () => {
     await withDiscoveredVm(async (emit) => {
       await activateVmMode();

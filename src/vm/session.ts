@@ -285,6 +285,30 @@ export class VmSession extends EventEmitter {
       await this.syncInternal();
     });
   }
+  /** Re-discovers new isolates and reapplies only controls that are still explicitly enabled. */
+  refreshAfterLifecycle(signal: AbortSignal): Promise<void> {
+    const generation = this.generation;
+    return this.enqueue(async () => {
+      const check = () => {
+        signal.throwIfAborted();
+        if (generation !== this.generation || this.state.status !== 'connected')
+          throw new Error('VM 会话已失效');
+      };
+      check();
+      this.state.instances = 0;
+      await this.profiler.rediscover();
+      check();
+      if (this.state.mockEnabled) {
+        await this.injector.heartbeat();
+        check();
+        await this.syncInternal();
+        check();
+      }
+      if (this.websocket.state.captureEnabled) await this.websocket.rescan();
+      check();
+      this.changed();
+    });
+  }
   private async tick() {
     if (this.tickPending || !this.state.mockEnabled || this.state.status !== 'connected' || this.syncing)
       return;

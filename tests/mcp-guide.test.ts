@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getUsageGuide, guideTopics, httpExample, wsExample } from '../src/mcp/guide';
 import { parseTool } from '../src/mcp/tools';
+import { getMcpPrompt } from '../src/mcp/prompts';
 import { validateRuleDocument } from '../src/model';
 import { validateWsRuleDocument } from '../src/ws/model';
 
@@ -47,4 +48,29 @@ describe('Agent usage guide contracts', () => {
       expect(() => parseTool('get_usage_guide', args)).toThrow();
     }
   });
+
+  it('explains rule loading before restart and evidence after runtime reinjection', () => {
+    const lifecycle = getUsageGuide('workflow').lifecycle as Record<string, unknown>;
+    expect(lifecycle.restart).toEqual({
+      tool: 'hot_restart',
+      arguments: { sessionId: expect.any(String), timeoutMs: 30000 },
+    });
+    expect(lifecycle.reload).toEqual({
+      tool: 'hot_reload',
+      arguments: { sessionId: expect.any(String), timeoutMs: 30000 },
+    });
+    expect(lifecycle.restartMeaning).toContain('先reload_rules');
+    expect(lifecycle.runtime).toContain('启动首请求可能早于Mock重新注入');
+    expect(lifecycle.verification).toContain('不自动重试重启');
+  });
+
+  it.each(['http_mock', 'flutter_ui', 'mock_workflow'])(
+    'makes MCP lifecycle controls discoverable through %s',
+    (name) => {
+      const text = getMcpPrompt(name, { task: '修改API后展示不同状态和UI' }).messages[0].content.text;
+      expect(text).toContain('hot_reload');
+      expect(text).toContain('hot_restart');
+      expect(text).toContain('IDE');
+    },
+  );
 });

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter, once } from 'node:events';
 import { mkdtemp, mkdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -106,6 +106,42 @@ async function daemon(handler: (request: any, socket: WebSocket) => void) {
 }
 
 describe('VM debugger discovery', () => {
+  it('controls only the requested live Flutter session through its captured debug object', async () => {
+    const f = await fixture();
+    const selected = { ...f.session('selected'), customRequest: vi.fn(async () => undefined) };
+    const unrelated = { ...f.session('unrelated'), customRequest: vi.fn(async () => undefined) };
+    f.send(selected);
+    f.send(unrelated);
+    await until(() => f.discovery.snapshot().candidates.length === 2);
+    await f.discovery.control('selected', 'hot_reload');
+    await f.discovery.control('selected', 'hot_restart');
+    expect(selected.customRequest.mock.calls).toEqual([
+      ['hotReload', { reason: 'manual' }],
+      ['hotRestart', { reason: 'manual' }],
+    ]);
+    expect(unrelated.customRequest).not.toHaveBeenCalled();
+  });
+
+  it('refuses unknown, stopped and disposed debug sessions before sending any control request', async () => {
+    const f = await fixture();
+    const session = { ...f.session(), customRequest: vi.fn(async () => undefined) };
+    f.send(session);
+    await until(() => f.discovery.address('debug') !== undefined);
+    await expect(f.discovery.control('unknown', 'hot_reload')).rejects.toThrow('已结束');
+    f.events.emit('stop', session);
+    await expect(f.discovery.control('debug', 'hot_restart')).rejects.toThrow('已结束');
+    f.discovery.dispose();
+    await expect(f.discovery.control('debug', 'hot_reload')).rejects.toThrow('已结束');
+    expect(session.customRequest).not.toHaveBeenCalled();
+  });
+
+  it('reports discovered sessions with no IDE control channel as unavailable', async () => {
+    const f = await fixture();
+    f.send();
+    await until(() => f.discovery.address('debug') !== undefined);
+    await expect(f.discovery.control('debug', 'hot_restart')).rejects.toThrow('无法控制');
+  });
+
   it('normalizes debugger URIs and exposes only safe candidate summaries', async () => {
     const f = await fixture();
     f.send();
@@ -230,6 +266,43 @@ describe('VM debugger discovery', () => {
 });
 
 describe('DTD existing-session discovery', () => {
+  it('controls pre-existing sessions by their exact DTD debugSessionId', async () => {
+    let root = '';
+    const controls: { method: string; params: unknown }[] = [];
+    const dtd = await daemon((request, socket) => {
+      const result =
+        request.method === 'Editor.getDebugSessions'
+          ? {
+              debugSessions: ['existing', 'unrelated'].map((id) => ({
+                id,
+                name: id,
+                debuggerType: 'Flutter',
+                flutterMode: 'debug',
+                projectRootPath: root,
+                vmServiceUri: 'ws://localhost:3456/vm-secret=/ws',
+              })),
+            }
+          : { type: 'Success' };
+      if (request.method !== 'Editor.getDebugSessions')
+        controls.push({ method: request.method, params: request.params });
+      socket.send(JSON.stringify({ id: request.id, result }));
+    });
+    const f = await fixture(dtd.api);
+    root = f.root;
+    await f.discovery.start();
+    expect(f.discovery.snapshot().candidates).toHaveLength(2);
+    await f.discovery.control('existing', 'hot_reload');
+    await f.discovery.control('existing', 'hot_restart');
+    expect(controls).toEqual([
+      { method: 'Editor.hotReload', params: { debugSessionId: 'existing' } },
+      { method: 'Editor.hotRestart', params: { debugSessionId: 'existing' } },
+    ]);
+    dtd.notify('Editor', 'debugSessionStopped', { debugSessionId: 'existing' });
+    await until(() => f.discovery.address('existing') === undefined);
+    await expect(f.discovery.control('existing', 'hot_restart')).rejects.toThrow('已结束');
+    expect(controls).toHaveLength(2);
+  });
+
   it('queries already-running Flutter sessions and follows Editor start/change/stop notifications', async () => {
     let root = '';
     const dtd = await daemon((request, socket) =>

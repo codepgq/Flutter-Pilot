@@ -56,6 +56,29 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 
 例如用户要求“模拟订单列表空数据并验证页面”，Agent 应先读取 `http`／`workflow` 指南，选择对应项目会话，读取并编辑规则，再完成重载、Mock、Key 操作和结果验证。具体是否主动调用仍由客户端 Agent 根据任务和上下文决定；MCP 说明提供发现与操作指引，不替代用户授权和客户端审批。
 
+## 通过 MCP 热重载与热重启
+
+Agent 可以直接调用两个 MCP 工具控制当前应用：
+
+- `hot_reload`：应用已保存的源码变更，保留当前内存和页面状态，不重新执行 `main` 或 `initState`，也不保证重新请求 API。
+- `hot_restart`：重置应用内存状态并重新执行入口，页面回到应用定义的初始状态；磁盘持久化数据不会因此自动清除。
+
+`list_sessions` 的 `capabilities.lifecycle` 返回当前会话是否支持热更新及繁忙状态。两者都需要 `sessionId`，可选 `timeoutMs` 为 100～30000 毫秒，默认 30000 毫秒。例如：
+
+```json
+{ "sessionId": "从 list_sessions 获取", "timeoutMs": 30000 }
+```
+
+首版仅控制当前已连接 VM 准确对应的 Cursor／VS Code Flutter Debug 会话。应用可由 IDE 启动或附加；无法绑定调试会话、会话已结束或不支持操作时返回明确诊断，不会操作其他项目或当前碰巧处于焦点的会话。仅手动输入 VM 地址且无法关联 IDE 会话时不可用。Agent 使用 MCP 入口即可，无需额外终端操作。
+
+“修改 API → restart → 展示不同状态和 UI”的流程是：增量修改目标 Mock 文件，调用 `reload_rules` 检查加载和同步，显式开启所需采集与 Mock，记录请求／消息基线，再调用 `hot_restart`。热重启不会代替规则文件重载；仅修改源码且需要保留页面状态时选择 `hot_reload`。编译失败时先修复源码，不自动改成热重启。
+
+VM 连接未断时，已有采集／Mock 开关维持，并重新发现运行时对象。启动首请求可能早于 Mock 重新注入，因此不能保证拦截；检查工具返回的 `network` 及 `get_network_status`，必要时待接入后按 Key 再次触发请求。实际 VM 断线后仍按既有规则关闭 Mock，重新连接后须按任务显式开启。
+
+热重载用当前 Flutter Isolate／Group 的成功事件确认，热重启用旧 Flutter Isolate 消失且新 Isolate 就绪确认。部分运行时在源码无变化时不发送重载事件，此时可能超时并返回 `completed=false`，需要检查当前 UI 和 IDE 诊断；不将调试协议响应本身当成更新成功。
+
+工具完成表示热重载／重启流程完成，业务结果需要另行验证。重新读取 UI 快照和 WS 连接，不复用旧 UI 对象或 `connectionId`；检查本次新 HTTP／WS 记录的规则命中、有效正文及页面状态。超时、取消或断线后先查询当前状态和新记录，不自动重试重启。
+
 ## Widget 定位与 Key 诊断
 
 正式定位支持精确的 `ValueKey<String>` 与 `ValueKey<int>`，工具参数 `key` 使用字符串或整数。可用 `ancestorKey` 限定父节点范围；Key 在局部树中可重复，范围内多个匹配会报告 `AMBIGUOUS_KEY`。
@@ -110,6 +133,7 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 | ------------------------------------------ | ----------------------------------------------------- |
 | `get_usage_guide`                          | 按主题读取规则编辑、UI 定位和验证指南，无需在线 IDE   |
 | `list_sessions`                            | 获取已开启 MCP 的项目和能力                           |
+| `hot_reload` / `hot_restart`               | 控制当前 VM 对应 IDE 调试会话的热重载／热重启         |
 | `get_ui_snapshot`                          | 获取有界的已挂载 UI 结构                              |
 | `find_widget`                              | 按 Key 查询目标                                       |
 | `tap` / `enter_text` / `scroll`            | 点击、替换输入内容、滚动                              |
@@ -130,6 +154,8 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 可以向编码 Agent 下达以下任务：
 
 > 读取 Flutter API Mocks 的 `get_usage_guide`（http／ui／workflow），调用 `list_sessions` 选择当前项目。查看 `get_network_status` 返回的规则路径，保留已有规则，只修改产品详情 Mock 正文。保存 `.api-mocks/rules.json` 后调用 `reload_rules`，确认加载和同步成功，显式开启 HTTP Mock。通过 `get_ui_snapshot` 找到实际产品及详情 Key，确认目标唯一后点击产品，等待详情出现，查询对应 HTTP 请求并验证响应字段。出现 Key 诊断问题时修改业务源码补稳定 Key，重新验证；不要用文本点击绕过问题。
+
+> 分别构造接口成功、失败和空数据三个场景。每次只启用对应 Mock，保存后 `reload_rules`，确认采集和 Mock 状态，再用 `hot_restart` 重置页面状态。检查重启返回的网络状态及本次新请求；如果启动请求早于 Mock 接入，待接入后按 Key 再次触发。最后核对接口命中和对应 UI，不把热重启完成当作场景通过。
 
 HTTP 规则保存在 `.api-mocks/rules.json`，WS 持久规则保存在 `.api-mocks/ws-rules.json`。Agent 直接维护文件；配置非法时保留文件及上一份有效规则。重载并不自动开启 Mock，WS 重载保留仍有效的连接临时规则。HTTP 与 WS 开关彼此独立，VM 断线后按原有规则关闭，重新连接后须显式开启。
 

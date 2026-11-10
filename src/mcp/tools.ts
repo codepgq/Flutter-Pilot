@@ -42,6 +42,16 @@ export const mcpTools = {
       '需要Flutter Mock或UI操作时先get_usage_guide，再列出项目选择对应sessionId；不要操作无关项目。',
     schema: z.object({}).strict(),
   },
+  hot_reload: {
+    description:
+      '通过当前 VM 绑定的 Cursor/VS Code Flutter Debug 会话热重载已保存源码，保留页面内存状态。仅 MCP 入口，无需终端；无法绑定 IDE 会话时返回诊断。Mock 文件修改先 reload_rules；完成后重新定位 UI 并检查新网络记录，超时勿自动重试。',
+    schema: z.object({ ...session, timeoutMs: timeout }).strict(),
+  },
+  hot_restart: {
+    description:
+      '通过当前 VM 绑定的 Cursor/VS Code Flutter Debug 会话热重启，重置内存并重新执行入口。先 reload_rules 并显式开启所需采集/Mock；返回重启确认及网络状态，启动首请求可能早于 Mock 注入，需查新记录和 UI。旧 WS 连接及 UI 对象失效；超时勿自动重试。',
+    schema: z.object({ ...session, timeoutMs: timeout }).strict(),
+  },
   get_ui_snapshot: {
     description:
       '不知道UI Key时先读取当前界面快照，从key/ancestorKeys发现目标，再find_widget确认唯一。详细流程见get_usage_guide(topic=ui)。',

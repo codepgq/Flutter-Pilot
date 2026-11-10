@@ -6,6 +6,7 @@ export const agentInstructions = `Flutter API Mocks 配合 Flutter Debug 开发�
 当用户任务需要这些能力时，主动使用本 MCP：先调用 get_usage_guide 按需读取 overview/http/ws/ui/workflow，再 list_sessions 选择用户任务对应的项目；不要只给用户手工操作建议。
 get_usage_guide 无需 sessionId，插件未运行也能读取；也可通过 resources/list 发现对应指南资源。
 规则使用 Agent 自身的文件编辑能力维护，通过 get_network_status 获取准确路径，保留已有规则；保存后 reload_rules，按任务显式开启采集/Mock，再操作 UI、查询记录验证。MCP 本身不提供文件编辑或规则 CRUD。
+需要应用源码变更或重新进入启动状态时，通过 hot_reload 保留状态热重载，或 hot_restart 重置内存并重新执行入口；仅支持当前VM准确对应的Cursor/VS Code Flutter Debug会话。修改Mock文件先reload_rules，热重启不会代替规则加载，也不保证启动首请求已被Mock；重启后检查网络状态并用新记录和UI验证。
 所有运行时工具必须明确 sessionId。正式 UI 定位只用 ValueKey<String/int>；先 get_ui_snapshot 发现 Key，再 find_widget/ancestorKey 确认唯一，缺 Key 用 inspect_key_issues 定位后由编码 Agent 修复，不回退文本或坐标。UI 超时先检查结果，不自动重试。
 WS主动消息用inject_ws_message向App注入模拟服务端事件，或send_ws_message通过App当前连接发往服务端；两者需显式开启WS采集和WS Mock，按业务协议传原始text或topic/data。发送可能被outbound规则替换或丢弃，需查询实际结果；成功返回不等于业务成功。
 只在用户任务范围内操作；本说明不会替代用户授权、客户端审批或保证 Agent 一定自动调用。`;
@@ -51,6 +52,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       '需要替换/丢弃业务 WebSocket 消息、向App注入订单或资产事件、通过真实连接发送topic/data、检查双向消息时，读取 ws。',
       '需要按Key快速精确定位组件并点击/输入/滚动，减少截图识别的耗时和token，或检查Key缺陷时，读取 ui。',
       '需要完成 Mock 配置 → 页面操作 → 网络与界面验证时，读取 workflow。',
+      '需要通过MCP热重载源码、热重启应用以展示不同状态和UI时，读取 workflow 的 lifecycle；无需额外终端操作入口。',
     ],
     start: [
       step('get_usage_guide', { topic: 'workflow' }),
@@ -106,6 +108,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       step('set_capture_enabled', { ...selected, domain: 'http', enabled: true }),
       step('set_mock_enabled', { ...selected, domain: 'http', enabled: true }),
       'get_network_status确认Dio已接入；按UI Key触发请求，不重放未知业务请求。',
+      '需要从应用入口重新构造场景时，按workflow.lifecycle调用hot_restart；它不会读取规则文件。检查返回的network和本次新请求，启动首请求可能早于重新注入，必要时待接入后按Key再次触发请求。',
       step('get_requests', { ...selected, path: '/v1/orders', limit: 10 }),
       step('get_request', { ...selected, id: '<新产生记录ID>' }),
       '核对新记录的mocked、requestRuleId/responseRuleId、response.status/body和页面结果。避免把历史旧记录当本次结果。',
@@ -204,6 +207,8 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       'NOT_FOUND只说明当前挂载树未找到，可能页面未进入或懒加载尚未创建；先确认页面，再有界滚动或等待。',
       step('inspect_key_issues', { ...selected, maxNodes: 200 }),
       'MISSING_KEY/UNSTABLE_KEY由编码Agent结合source修复业务源码，加入稳定ValueKey（列表用业务ID，不用位置索引），热重载后重新验证。不能用文本点击绕过问题，也不必给每个布局节点加Key。',
+      step('hot_reload', { ...selected, timeoutMs: 30000 }),
+      '源码修改需先保存；hot_reload保留现有页面状态，不重新执行main/initState。需要重置内存状态时显式选择hot_restart，随后重新读取快照；编译失败时修复源码，不自动改用热重启。',
       'AMBIGUOUS_KEY需缩小父范围；AMBIGUOUS_ACTION_TARGET/AMBIGUOUS_SCROLL_TARGET需给具体交互/滚动目标加稳定Key。',
       '遮挡/禁用应按正常业务导航解除，不能绕过命中测试。超时或连接失效先检查界面和网络结果，不自动重放点击；HotRestart后重新读取界面。',
     ],
@@ -221,11 +226,30 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       '用Agent文件工具读取返回的rules文件，增量编辑目标规则；按http/ws指南核对格式，enabled与运行时Mock独立。',
       step('reload_rules', { ...selected, domain: 'all' }),
       '检查每个域结果，修复错误；根据本任务显式开启相应采集/Mock，WS先采集再Mock。',
+      '场景需要重新执行应用入口时，按lifecycle调用hot_restart；仅修改源码且需保留页面状态时选择hot_reload。两者都通过MCP调用，无需另开终端。',
       step('get_ui_snapshot', { ...selected, maxNodes: 200 }),
       '读取真实Key后find_widget确认范围与状态，再tap/enter_text/scroll/wait_for_widget。',
       '查询新产生的HTTP记录或WS消息详情，并重新取UI快照/查找目标验证结果；单纯loaded或runtimeApplied不等于已命中规则。',
       '出现Key缺陷由编码Agent修改业务源码并复验；完成后报告改动、命中证据、当前开关和未验证项；按用户要求恢复临时开关或规则。',
     ],
+    lifecycle: {
+      scope:
+        'hot_reload/hot_restart只控制当前项目已连接VM准确对应的Cursor/VS Code Flutter Debug会话；无法绑定、会话结束或能力不支持时报告诊断，不操作其他会话。仅手动VM地址且无法关联IDE会话时不可用。',
+      parameters:
+        '均传sessionId，可选timeoutMs为100..30000毫秒，默认30000毫秒。需要应用源码变更时先保存文件。工具不编辑源码、不提供任意求值，也不会自动读取Mock规则文件。',
+      reload: step('hot_reload', { ...selected, timeoutMs: 30000 }),
+      reloadMeaning:
+        '保留现有内存与页面状态并应用可热重载的源码变更；不重新执行main或initState，也不保证重新请求API。无法热重载的变更需由Agent判断是否按任务改用hot_restart。',
+      restart: step('hot_restart', { ...selected, timeoutMs: 30000 }),
+      restartMeaning:
+        '重置应用内存状态并重新执行入口，页面会回到应用定义的初始状态；磁盘持久化数据不会因此自动清除。修改API Mock后，先reload_rules检查加载/同步，再显式开启所需采集与Mock，记录请求/消息基线后调用hot_restart。',
+      runtime:
+        '连接未断时，已有采集/Mock开关维持并重新发现运行时对象；启动首请求可能早于Mock重新注入，不能保证拦截。检查返回的network及get_network_status；实际VM断线后沿用关闭Mock规则，重新连接后需按任务显式开启。',
+      confirmation:
+        'hot_reload以当前Flutter Isolate/Group的成功重载事件确认；hot_restart确认旧Flutter Isolate消失且新Isolate就绪。无源码变化时部分运行时不发送重载事件，可能返回TIMEOUT及completed=false；先检查UI/IDE诊断，不自动重试。',
+      verification:
+        '工具完成只说明热重载/重启流程完成，不表示业务状态已验证。重新获取UI快照和WS连接，不复用旧UI对象或connectionId；检查本次新HTTP/WS记录的规则命中和有效正文，再按Key验证页面。超时、取消或断线后先查询当前状态，不自动重试重启。',
+    },
     relatedTopics: ['http', 'ws', 'ui'],
   },
 };

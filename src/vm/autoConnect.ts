@@ -45,6 +45,10 @@ export class VmAutoConnector extends EventEmitter {
     super();
   }
 
+  owns(id: string, url: string): boolean {
+    return this.connection.status() === 'connected' && this.owner?.id === id && this.owner.url === url;
+  }
+
   get snapshot(): NonNullable<WorkbenchState['vmDiscovery']> {
     const connectionStatus = this.connection.status();
     return {

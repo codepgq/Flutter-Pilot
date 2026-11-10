@@ -31,3 +31,7 @@
 - 状态：已修复并以回归测试验证。较早的历史刷新和scan等待SQLite期间断线可能回写在线/active；现使用epoch、refresh序号及每次await后校验。
 - TCP端口可复用，单凭握手tuple不能把同一握手分配给新socket；仅成功101允许关联，维护握手所有权，不唯一时保持URL未知。关闭采集清握手缓存，不从历史导入运行时关联。
 - 出站不能只包consumer._subscription，该订阅会被addStream更换；现使用协议transformer前稳定controller订阅。恢复handler前检查身份，外部工具持有的旧wrapper用record enabled再保证旁路。
+## 热重载完成事件兼容（2026-11-10）
+
+- 已修复：Dart3.13的IsolateReload成功事件可仅含isolateGroup而无isolate，按单个isolate匹配会误报TIMEOUT。现预读Flutter isolateGroupId并按准确group或isolate确认，补回归测试及真实Flutter验证。
+- 已知边界：无源码变化时Flutter可能跳过VM reload事件；DAP返回也可能掩盖编译失败，因此保持completed=false并提示核对UI或IDE诊断，不声称成功、不自动重试。

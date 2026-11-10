@@ -85,6 +85,8 @@ WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服�
 
 > 按当前项目的 WS 协议向 App 注入一条资产更新事件，验证资产组件变化；再通过真实连接发送指定订阅 topic 和 data，核对实际发出的消息及业务响应。
 
+Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `hot_restart` 重置内存并重新执行应用入口。修改 Mock 后先调用 `reload_rules`，再按场景热重启并检查新请求与 UI；启动首请求可能早于 Mock 重新注入。两个工具仅控制当前 VM 绑定的 IDE Flutter Debug 会话。
+
 运行时操作需要已开启 MCP 的插件会话和可用 VM；UI 能力取决于运行时探测。工具参数、配置范围、使用限制和验收范围见 [MCP 使用说明](docs/mcp.md) 与 [验收记录](docs/validation.md)。
 
 ## 环境要求与兼容范围

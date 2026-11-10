@@ -11,6 +11,7 @@ import { VmUiController } from './vm/ui';
 import { McpSessionServer } from './mcp/server';
 import { AgentAdapterManager, detectNodeRuntime } from './mcp/adapters';
 import { McpNetworkController } from './mcp/network';
+import { McpLifecycleController } from './mcp/lifecycle';
 import type { McpAgentId, McpScope, McpWorkbenchState } from './mcp/model';
 import { homedir } from 'node:os';
 import { copyFile, chmod } from 'node:fs/promises';
@@ -230,6 +231,7 @@ class Workbench {
   private readonly vm: VmSession;
   private readonly ui: VmUiController;
   private readonly mcpNetwork: McpNetworkController;
+  private readonly mcpLifecycle: McpLifecycleController;
   private mcpServer?: McpSessionServer;
   private readonly mcpSessionId = randomUUID();
   private readonly bridgeRoot =
@@ -384,6 +386,30 @@ class Workbench {
         await this.reloadHistory().catch((error) => this.report(error));
       },
       disconnect: () => this.vm.disconnect(),
+    });
+    this.mcpLifecycle = new McpLifecycleController({
+      target: () => {
+        const id = this.vmAuto.snapshot.connectedSessionId;
+        const candidate = vmDiscovery
+          ?.snapshot()
+          .candidates.find((item) => item.id === id && item.workspaceId === this.folder.uri.toString());
+        const url = candidate && vmDiscovery?.address(candidate.id);
+        return candidate && url && this.vmAuto.owns(candidate.id, url)
+          ? { debugSessionId: candidate.id }
+          : undefined;
+      },
+      connected: () => this.vm.state.status === 'connected',
+      rpc: this.vm.client,
+      control: async (target, action) => {
+        if (!vmDiscovery) throw new Error('IDE 调试发现已关闭');
+        await vmDiscovery.control(target.debugSessionId, action);
+      },
+      invalidateUi: () => {
+        this.ui.invalidate();
+        this.mcpState.ui = { supported: false, reason: '热更新后请重新探测并读取界面' };
+      },
+      refresh: (signal) => this.vm.refreshAfterLifecycle(signal),
+      networkStatus: () => this.mcpNetwork.status(),
     });
     this.vmAuto.on('change', () => this.push());
     this.vm.on('change', () => {
@@ -1039,7 +1065,7 @@ class Workbench {
           name: this.project.config.name,
           describe: () => ({
             vmConnected: this.vm.state.status === 'connected',
-            capabilities: { ui: this.mcpState.ui, network: true },
+            capabilities: { ui: this.mcpState.ui, network: true, lifecycle: this.mcpLifecycle.status() },
           }),
           call: async (tool, args, context) => {
             const run = this.messageQueue.then(async () => {
@@ -1050,6 +1076,18 @@ class Workbench {
                 !this.mcpState.enabled
               )
                 return { ok: false, code: 'SESSION_INVALIDATED', message: 'MCP 会话已关闭，操作未执行。' };
+              if (tool === 'hot_reload' || tool === 'hot_restart') {
+                try {
+                  return await this.mcpLifecycle.execute(
+                    tool,
+                    args.timeoutMs as number | undefined,
+                    context.signal,
+                    () => !this.disposed && epoch === this.mcpGeneration && this.mcpState.enabled,
+                  );
+                } finally {
+                  this.push();
+                }
+              }
               if (
                 [
                   'get_ui_snapshot',

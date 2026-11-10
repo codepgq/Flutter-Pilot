@@ -1,5 +1,14 @@
 # 实现与验证结论
 
+## MCP 热重载与热重启（2026-11-10）
+
+- 新增 hot_reload / hot_restart，工具总数21；sessionId必填，timeoutMs为100..30000，默认30000。list_sessions暴露capabilities.lifecycle支持及繁忙状态。
+- 当前VM必须准确匹配当前项目发现的IDE调试会话及地址；按session对象customRequest控制，已有DTD会话回退Editor.hotReload/Editor.hotRestart，独立30秒控制超时。不调用全局多会话命令。
+- hot_reload核验当前Flutter Isolate或Group成功事件；hot_restart核验旧Isolate消失及新Flutter Isolate就绪。未确认、取消、断线不声称完成，在途请求未结束时拒绝重复操作。预检期间关闭MCP会阻止后续发送。
+- UI锚点失效；刷新profiling isolate、清旧Dio锚点并同步已开启Mock，WS采集已开才重扫，禁用开关不自动开启。真实VM断线沿用原关闭策略；不保证启动首请求已Mock。指南、Prompts和文档含完整流程。
+- 类型、格式、构建、348项Vitest通过；Flutter3.47.8 SDK Debug Adapter及iPhone18Pro/iOS27.2独立fixture，经真实MCP stdio、IPC、调试协议及VM验证14项：源码热更且状态保留、restart重置状态、两种Mock数据及HTTP规则命中和UI闭环、无变更及编译失败不误报。报告artifacts/mcp-lifecycle-flutter-report.json，脚本npm run test:mcp:lifecycle。
+- 未启动IDE GUI、未访问钥匙串、未控制用户业务应用；已安装IDE真实会话、Android及真机未在本轮验收。用户随后授权本地提交；未安装或递增版本。
+
 ## 0.0.4 打包与 Cursor 安装（2026-11-09）
 
 - 扩展 manifest、lockfile、MCP serverInfo 和安装包命名统一为 0.0.4，README/CHANGELOG 同步。324 项测试、类型和格式检查通过，VSIX 构建成功。

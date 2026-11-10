@@ -87,7 +87,7 @@ exports.run = async () => {
       }),
     );
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 19);
+    assert.equal(tools.tools.length, 21);
     const list = await client.callTool({ name: 'list_sessions', arguments: {} });
     const sessions = list.structuredContent.sessions;
     assert.equal(sessions.length, 1);

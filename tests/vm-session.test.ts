@@ -47,6 +47,9 @@ vi.mock('../src/vm/profiler', async () => {
         fixtures.order.push('profiler.start');
         this.emit('isolates', this.isolateIds);
       });
+      rediscover = vi.fn(async () => {
+        this.emit('isolates', this.isolateIds);
+      });
       stop = vi.fn(async () => {
         fixtures.order.push('profiler.stop');
       });
@@ -159,6 +162,38 @@ afterEach(async () => {
 });
 
 describe('VM session without a proxy engine', () => {
+  it('rebinds enabled Mock after lifecycle without enabling disabled controls', async () => {
+    const { session, profiler, injector } = fixture();
+    await session.connect('ws://127.0.0.1:1234/ws', [originalRule]);
+    const rescan = vi.spyOn(session.websocket, 'rescan').mockResolvedValue();
+    await session.refreshAfterLifecycle(new AbortController().signal);
+    expect(profiler.rediscover).toHaveBeenCalledOnce();
+    expect(injector.sync).not.toHaveBeenCalled();
+    expect(rescan).not.toHaveBeenCalled();
+    await session.setMockEnabled(true);
+    await session.setCaptureEnabled(false);
+    session.websocket.state.captureEnabled = true;
+    profiler.isolateIds = ['isolates/restarted'];
+    await session.refreshAfterLifecycle(new AbortController().signal);
+    expect(injector.heartbeat).toHaveBeenCalled();
+    expect(injector.sync).toHaveBeenLastCalledWith('isolates/restarted', [originalRule]);
+    expect(session.state).toMatchObject({ mockEnabled: true, captureEnabled: false, instances: 1 });
+    expect(profiler.setCaptureEnabled).toHaveBeenLastCalledWith(false);
+    expect(rescan).toHaveBeenCalledOnce();
+    session.websocket.state.captureEnabled = false;
+  });
+  it('does not rescan or restore controls after cancellation or disconnection', async () => {
+    const { session, profiler, injector } = fixture();
+    await session.connect('ws://127.0.0.1:1234/ws', [originalRule]);
+    const abort = new AbortController();
+    abort.abort();
+    await expect(session.refreshAfterLifecycle(abort.signal)).rejects.toThrow();
+    await session.disconnect();
+    await expect(session.refreshAfterLifecycle(new AbortController().signal)).rejects.toThrow('失效');
+    expect(profiler.rediscover).not.toHaveBeenCalled();
+    expect(injector.sync).not.toHaveBeenCalled();
+    expect(session.state.mockEnabled).toBe(false);
+  });
   it('HTTP capture can stop independently of Mock and stays stopped after rule resync', async () => {
     const { session, profiler, injector, store } = fixture();
     await session.connect('ws://127.0.0.1:1234/auth/ws', []);
