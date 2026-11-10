@@ -1,5 +1,7 @@
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { GuideTopic } from './guide';
+import { mcpTools, type McpToolName } from './tools';
+import { z } from 'zod';
 
 interface PromptTemplate {
   description: string;
@@ -66,21 +68,169 @@ const templates = {
   },
 } as const satisfies Record<string, PromptTemplate>;
 
-export const mcpPrompts = Object.entries(templates).map(([name, { description }]) => ({
+/** Every runtime capability must have an explicit prompt; new tools fail type checking until mapped. */
+export const toolPromptPlans = {
+  get_usage_guide: {
+    topics: ['overview'],
+    steps: [
+      '按任务选择 overview/http/ws/ui/workflow 主题调用 get_usage_guide；无需 sessionId 或在线 IDE。读取指南后再决定是否执行运行时操作。',
+    ],
+  },
+  list_sessions: {
+    topics: ['overview'],
+    steps: [
+      '调用 list_sessions，按 workspace 与用户任务选择唯一项目，检查 vmConnected 和 capabilities；不要把调试会话 ID 当作工具 sessionId。没有候选或无法确定时报告阻碍。',
+    ],
+  },
+  hot_reload: {
+    topics: ['ui', 'workflow'],
+    steps: [
+      '确认任务是保留页面状态应用源码变更；先保存获准修改的源码，检查 list_sessions 的 capabilities.lifecycle，再调用 hot_reload。它不重跑 main/initState，不替代 reload_rules。',
+      '检查 completed、code、statePreserved 和 network；无源码变化可能缺少重载事件并返回未确认，编译失败应检查 IDE 诊断，不自动改用 hot_restart。重新读取 UI 并验证变更。',
+    ],
+  },
+  hot_restart: {
+    topics: ['http', 'workflow'],
+    steps: [
+      '确认任务需要重置内存并重跑入口；检查 capabilities.lifecycle，Mock 文件改动先 reload_rules，显式开启需要的采集/Mock并记录网络基线，再调用 hot_restart。',
+      '检查 completed 和 network；启动首请求可能早于 Mock 注入，必要时待接入后按 Key 触发请求。重新获取 UI 与 WS 连接 ID，用新记录核验不同业务状态；磁盘数据不会自动清除。',
+    ],
+  },
+  get_ui_snapshot: {
+    topics: ['ui'],
+    steps: [
+      '调用 get_ui_snapshot，按 maxNodes 有界读取当前挂载界面；从 widgets 的 typed key、ancestorKeys、状态与 source 发现目标，再用 find_widget 确认唯一。截图验收使用客户端实际可用的截图工具。',
+    ],
+  },
+  find_widget: {
+    topics: ['ui'],
+    steps: [
+      '先从快照获得真实 ValueKey，保留字符串/整数类型，使用 find_widget；有重复 Key 时传 ancestorKey。NOT_FOUND 可能是页面未进入或懒加载，不能直接认定缺 Key；不回退文本或坐标。',
+    ],
+  },
+  tap: {
+    topics: ['ui'],
+    steps: [
+      '通过快照和 find_widget 确认可操作且唯一的 Key，记录业务基线后调用 tap。操作使用真实命中测试；遮挡或禁用应按业务导航处理，随后用页面及新网络记录确认结果。',
+    ],
+  },
+  enter_text: {
+    topics: ['ui'],
+    steps: [
+      '确认唯一且可编辑的 Key 和用户期望的完整文本，再调用 enter_text 替换内容；核对 formatter、onChanged 和界面效果。不能据此宣称已验证真实系统键盘 IME。',
+    ],
+  },
+  scroll: {
+    topics: ['ui'],
+    steps: [
+      '确认唯一滚动区域 Key；调用 scroll 并明确 direction，可传 targetKey、maxSteps 和 timeoutMs 作有界查找。滚动后重新定位目标；目标懒加载或未出现不等于缺 Key。',
+    ],
+  },
+  wait_for_widget: {
+    topics: ['ui'],
+    steps: [
+      '使用真实 Key 调用 wait_for_widget，按目标选 present/absent/actionable 并设置有界 timeoutMs。等待超时先检查当前快照、页面路径与网络，不自动重放触发业务的点击。',
+    ],
+  },
+  inspect_key_issues: {
+    topics: ['ui'],
+    steps: [
+      '调用 inspect_key_issues 诊断当前挂载交互组件，结合 source 区分 MISSING_KEY、UNSTABLE_KEY 和歧义；有授权时修复源码的稳定 ValueKey，再 hot_reload 并重新验证。它不是全仓静态审计。',
+    ],
+  },
+  get_network_status: {
+    topics: ['http', 'ws'],
+    steps: [
+      '调用 get_network_status 获取准确 files.http/files.ws、采集/Mock 开关及运行时接入状态。只查询无需开启 Mock；文件已加载不等于运行时应用，更不等于请求已命中。',
+    ],
+  },
+  get_requests: {
+    topics: ['http'],
+    steps: [
+      '调用 get_requests 按 method/host/path/search 过滤并使用 limit/offset 分页。按时间或 ID 基线选择本次新记录，使用 get_request 查看正文与规则命中；记录事实不能通过此工具改写。',
+    ],
+  },
+  get_request: {
+    topics: ['http'],
+    steps: [
+      '先通过 get_requests 取得真实请求 id，再调用 get_request；检查实际请求、response.status/body、mocked、requestRuleId/responseRuleId，区分 HTTP 状态与业务错误码。记录证据与 UI 对应。',
+    ],
+  },
+  get_ws_connections: {
+    topics: ['ws'],
+    steps: [
+      '调用 get_ws_connections 选择当前业务连接，检查 URL、status=open 和 capture=attached。不是 VM 调试连接；未知 URL 不能猜，重启或连接重建后重新取 connectionId。',
+    ],
+  },
+  get_ws_messages: {
+    topics: ['ws'],
+    steps: [
+      '先选准确 connectionId，调用 get_ws_messages 并按方向、search、limit/offset 筛选；需要正文时 includeBodies=true。核对新消息的 original/effective、outcome 和 ruleId，再验证业务响应；采集前消息不可补抓。',
+    ],
+  },
+  inject_ws_message: {
+    topics: ['ws'],
+    steps: [
+      '显式开启 WS 采集和 Mock，从 get_ws_connections 选在线且已接入的连接；按实际协议传 text 或 topic/data 二选一，调用 inject_ws_message 向 App 注入模拟服务端消息，不向服务端发送。',
+      '正文最多256 KiB并受运行时限制；记录消息基线，查询新消息及 UI 验证处理结果，不凭提交成功断言业务成功。',
+    ],
+  },
+  send_ws_message: {
+    topics: ['ws'],
+    steps: [
+      '确认任务授权向真实服务端发送业务消息；显式开启 WS 采集和 Mock，选择现有准确连接，按真实协议传 text 或 topic/data 二选一调用 send_ws_message，不新建连接。',
+      '正文最多256 KiB并受运行时限制；outbound 规则可能替换或丢弃，查询新消息 effective/outcome 及服务端业务响应，提交成功不代表服务端收到或处理成功。',
+    ],
+  },
+  reload_rules: {
+    topics: ['http', 'ws'],
+    steps: [
+      '先 get_network_status 获取路径，使用 Agent 文件工具增量编辑规则并保存，保留其他规则；调用 reload_rules 仅重载涉及的 http/ws/all。',
+      '逐域检查 loaded、synchronized、runtimeApplied 和 pending；失败时修复文件，不能把旧有效规则当作新规则已生效。重载不自动开启 Mock，不代替 hot_reload/hot_restart，也不重放业务请求。',
+    ],
+  },
+  set_capture_enabled: {
+    topics: ['http', 'ws'],
+    steps: [
+      '调用 get_network_status 确认域及当前开关，再显式调用 set_capture_enabled(domain=http/ws, enabled=true/false)。HTTP/WS 独立，开启采集不自动开启 Mock；关闭 WS 采集会关闭 WS Mock，采集前记录不可补抓。',
+    ],
+  },
+  set_mock_enabled: {
+    topics: ['http', 'ws'],
+    steps: [
+      '用 get_network_status 和 reload_rules 确认目标规则及域，WS 先开启采集，再显式调用 set_mock_enabled(domain=http/ws, enabled=true/false)。两域独立，规则 enabled 与运行时 Mock 总开关均需满足。',
+      '检查 runtimeApplied 并触发一次任务需要的业务行为，以新记录与 UI 验证规则命中；真实 VM 断线后不擅自恢复 Mock。关闭只关闭对应域，不删除规则文件。',
+    ],
+  },
+} as const satisfies Record<McpToolName, Pick<PromptTemplate, 'topics' | 'steps'>>;
+
+const toolTemplates: Record<string, PromptTemplate> = Object.fromEntries(
+  Object.entries(toolPromptPlans).map(([name, plan]) => [
+    name,
+    {
+      description: `${name}：${mcpTools[name as McpToolName].description}`,
+      topics: plan.topics,
+      steps: plan.steps,
+    },
+  ]),
+);
+const allTemplates: Record<string, PromptTemplate> = { ...templates, ...toolTemplates };
+
+export const mcpPrompts = Object.entries(allTemplates).map(([name, { description }]) => ({
   name,
   description,
   arguments: [{ name: 'task', description: '需要完成的具体任务和验证目标', required: false }],
 }));
 
 export function getMcpPrompt(name: string, args: Record<string, string> = {}) {
-  if (!Object.hasOwn(templates, name)) throw new McpError(ErrorCode.InvalidParams, '未知提示模板。');
+  if (!Object.hasOwn(allTemplates, name)) throw new McpError(ErrorCode.InvalidParams, '未知提示模板。');
   if (
     Object.keys(args).some((key) => key !== 'task') ||
     (args.task !== undefined && args.task.length > 4000)
   ) {
     throw new McpError(ErrorCode.InvalidParams, '提示模板参数无效。');
   }
-  const { description, topics, steps } = templates[name as keyof typeof templates];
+  const { description, topics, steps } = allTemplates[name];
   return {
     description,
     messages: [
@@ -93,8 +243,17 @@ export function getMcpPrompt(name: string, args: Record<string, string> = {}) {
               ? `任务：${args.task.trim()}`
               : '尚未指定具体任务：先询问操作目标和预期结果，再执行以下流程。',
             `使用 flutter-api-mocks MCP 完成任务；先调用 get_usage_guide，按需读取主题：${topics.join('、')}。详细参数和限制以指南及工具 schema 为准。`,
-            '调用 list_sessions，按项目路径和任务上下文选择对应会话；多个候选无法确定时询问，所有运行时调用明确传入该 sessionId。无可用会话时说明需在 IDE 开启 MCP；VM 未连接或能力不支持时报告具体阻碍。',
+            name === 'get_usage_guide'
+              ? '这是离线只读指南入口，不要求先调用 list_sessions、连接 VM 或开启 Mock。'
+              : name === 'list_sessions'
+                ? '这是会话发现入口，不需要 sessionId 或已连接 VM；空列表应报告需在目标 IDE 项目开启 MCP，不猜测会话。'
+                : '调用 list_sessions，按项目路径和任务上下文选择对应会话；多个候选无法确定时询问，所有运行时调用明确传入该 sessionId。无可用会话时说明需在 IDE 开启 MCP；VM 未连接或能力不支持时报告具体阻碍。',
             steps.map((step, index) => `${index + 1}. ${step}`).join('\n'),
+            ...(Object.hasOwn(mcpTools, name)
+              ? [
+                  `目标工具：${name}。以下 JSON Schema 是调用参数约束，按实际任务填写，不将模板的 task 字段传给工具：\n${JSON.stringify(z.toJSONSchema(mcpTools[name as McpToolName].schema), null, 2)}`,
+                ]
+              : []),
             '仅执行用户任务和授权范围内的操作。超时、取消或断线可能发生在动作执行之后，先检查界面和新网络记录，不自动重试有副作用的动作；重连后重新获取会话和状态，不擅自恢复 Mock。',
             '完成后报告修改的规则/源码、关键操作、规则命中与页面证据、当前采集/Mock 开关及未验证项；按用户要求恢复临时规则和开关，保留其他改动。不得仅凭配置成功、工具返回成功或规则已加载就声称业务验证通过。',
           ].join('\n\n'),

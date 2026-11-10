@@ -1,5 +1,17 @@
 # 验收记录
 
+## 0.0.7 本地发布（2026-11-10）
+
+- 发布MCP全工具同名提示词：21个工具、25个Prompts、5份指南资源；manifest、lockfile、MCP serverInfo及VSIX命名统一为0.0.7。
+- 357项Vitest、类型和格式检查通过。VSIX、安装文件一致性及构建/安装桥接的真实SDK stdio验证结果见`artifacts/v0.0.7-install-report.json`；本地包为`artifacts/flutter-api-mocks-0.0.7.vsix`。
+- 本轮不启动IDE GUI、不访问钥匙串、不强制重载当前窗口；用户方便时执行Developer: Reload Window，再重连Agent MCP以加载全部提示词。
+
+## MCP 全能力提示词覆盖（2026-11-10）
+
+- 检查结果：热更新此前已出现在初始化说明、指南和场景模板正文中，但没有独立同名Prompt；现全部21工具均有同名提示词，并保留4场景模板，共25个。工具模板包含准备、执行、验证步骤及与生产工具共用的JSON Schema。
+- 357项Vitest、类型、格式、构建及diff检查通过。真实SDK通过构建后的dist/mcp-bridge.cjs，在离线注册目录下发现21工具/25Prompts，逐个读取全部21工具模板，验证同名覆盖、参数schema和初始化说明中的能力名称；未转发运行时操作。报告：[提示词覆盖结果](../artifacts/mcp-prompt-coverage-report.json)。
+- 新增工具遗漏同名模板会触发类型或协议测试失败。用户随后授权发布及安装0.0.7；未启动IDE GUI、未连接用户App或修改真实Agent配置。工具通过tools/list提供，Prompts为可选说明，不声称仅补提示词即可保证Agent主动使用能力。
+
 ## 0.0.6 本地发布与 Cursor 安装（2026-11-10）
 
 - 本版本包含设置入口卡死修复、已有VM补查恢复、MCP热重载/热重启和Tab滚动条隐藏。manifest、lockfile、MCP serverInfo、README及VSIX包名统一为0.0.6。

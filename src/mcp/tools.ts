@@ -34,12 +34,12 @@ export function encodeWsMessage(args: Record<string, unknown>): string {
 export const mcpTools = {
   get_usage_guide: {
     description:
-      '当需要编辑 rules.json/ws-rules.json、Mock API/WS、查找和操作Flutter UI或修复Key时，先读取本指南。包含字段说明、可复制示例和验证流程；topic为overview/http/ws/ui/workflow。无需sessionId或在线IDE。文件由Agent编辑，MCP负责重载和运行时操作。',
+      '当需要编辑 rules.json/ws-rules.json、Mock API/WS、操作Flutter UI、修复Key或热重载/热重启时，先读取本指南。topic为overview/http/ws/ui/workflow，热更新见workflow。无需sessionId或在线IDE。每个工具另有同名MCP Prompt可按需读取操作步骤。',
     schema: z.object({ topic: z.enum(guideTopics).optional() }).strict(),
   },
   list_sessions: {
     description:
-      '需要Flutter Mock或UI操作时先get_usage_guide，再列出项目选择对应sessionId；不要操作无关项目。',
+      '需要Flutter Mock、UI操作或hot_reload/hot_restart时先get_usage_guide，再列出项目选择对应sessionId；检查vmConnected和capabilities.lifecycle等能力，不操作无关项目。',
     schema: z.object({}).strict(),
   },
   hot_reload: {

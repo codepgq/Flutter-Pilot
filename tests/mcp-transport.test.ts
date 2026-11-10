@@ -98,6 +98,7 @@ describe('MCP local session transport', () => {
         'websocket_mock',
         'flutter_ui',
         'mock_workflow',
+        ...Object.keys(mcpTools),
       ]);
       for (const prompt of prompts.prompts) {
         const result = await client.getPrompt({ name: prompt.name, arguments: { task: '验证订单页面' } });
@@ -111,6 +112,12 @@ describe('MCP local session transport', () => {
         code: -32602,
       });
       const tools = await client.listTools();
+      for (const tool of tools.tools) {
+        const prompt = await client.getPrompt({ name: tool.name, arguments: { task: '检查此工具的用法' } });
+        expect(JSON.stringify(prompt)).toContain(`目标工具：${tool.name}`);
+        expect(JSON.stringify(prompt)).toContain('检查此工具的用法');
+        expect(prompts.prompts.some((item) => item.name === tool.name)).toBe(true);
+      }
       expect(tools.tools.find((tool) => tool.name === 'get_usage_guide')).toMatchObject({
         annotations: { readOnlyHint: true, openWorldHint: false },
         inputSchema: { properties: { topic: { enum: [...guideTopics] } } },

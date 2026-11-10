@@ -1,5 +1,18 @@
 # 实现与验证结论
 
+## 0.0.7 发布（2026-11-10）
+
+- 用户要求提交、发布及安装Cursor；manifest、lockfile、MCP serverInfo、打包路径、README和CHANGELOG升为0.0.7。包含21个工具的独立同名Prompts及覆盖检查，共25个提示词。
+- 类型、格式、357项Vitest通过；发布验证报告保存在artifacts/v0.0.7-install-report.json。安装通过CLI执行，不启动IDE GUI或强制重载窗口。
+- Cursor CLI --force安装成功，活动登记api-mocks.flutter-api-mocks@0.0.7；25项包文件与源码及安装目录逐项一致，manifest除Cursor元数据外一致。源码和安装bridge均通过真实SDK stdio：版本0.0.7、21工具、25 Prompts、5资源；全部同名提示词含参数schema，离线可读。
+
+## MCP 全工具同名 Prompts（2026-11-10）
+
+- src/mcp/prompts.ts为21个工具补同名操作计划，保留4个场景模板，共25个；getMcpPrompt按需输出指南主题、步骤与实时生产JSON Schema。toolPromptPlans通过Record<McpToolName,...>约束，新增工具漏模板会类型检查失败。
+- 初始化说明列全21个工具、同名Prompt入口及未加载Prompts时的指南回退。get_usage_guide/list_sessions模板明确无需在线VM或sessionId。
+- 357项Vitest、类型、格式、构建及diff检查通过；真实SDK读取构建后dist桥接，离线发现21工具/25Prompts，全部21工具同名Prompt可读、含参数schema且在初始化说明中出现。证据artifacts/mcp-prompt-coverage-report.json。
+- 用户随后授权本地提交、发布及CLI安装0.0.7；不启动IDE GUI、不控制用户App、不修改Agent配置。活跃窗口需在方便时重载并重连MCP以加载更新。
+
 ## 0.0.6 发布（2026-11-10）
 
 - 用户要求提交、发布新版本及安装Cursor；manifest/lockfile、MCP serverInfo、打包路径、README/CHANGELOG升为0.0.6。包含设置入口、已有VM补查修复、已提交MCP热更新和已确认Tab滚动条调整。

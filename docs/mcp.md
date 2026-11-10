@@ -50,7 +50,17 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 
 同一份指南还可通过 `resources/list` 发现，URI 为 `flutter-api-mocks://guides/<topic>`，使用 `resources/read` 读取。工具入口兼容只使用 MCP tools 的 Agent，资源入口方便支持参考资料的客户端；两者返回相同内容。
 
-支持 MCP Prompts 的客户端还可以通过 `prompts/list` 发现、通过 `prompts/get` 选用四个任务模板：`http_mock`、`websocket_mock`、`flutter_ui` 和 `mock_workflow`。每个模板都可传入可选的 `task` 文本，描述具体目标；模板可在 IDE 离线时读取，不会自行执行工具。模板引导 Agent 读取相应指南并选择项目会话。客户端如何展示或使用 Prompts 由客户端决定，提供模板本身不保证 Agent 主动调用工具；初始化说明和工具描述仍用于能力发现。
+支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 25 个模板：原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及下文工具列表中全部 21 个工具的同名独立模板。`hot_reload` 和 `hot_restart` 可以直接按同名 Prompt 查找，无需先打开其他场景模板。
+
+例如读取热重启提示词：
+
+```json
+{ "name": "hot_restart", "arguments": { "task": "修改订单 Mock 后重启并验证空状态页面" } }
+```
+
+每个模板可传可选 `task`，描述具体目标；工具模板包含准备、操作及验证步骤，并直接引用生产工具 schema，`task` 本身不是工具调用参数。模板可在 IDE 离线时读取，不会自行执行工具。`get_usage_guide` 模板不要求在线会话；运行时工具则引导 Agent 选择准确项目，并检查对应能力与前提。
+
+Agent 的可调用能力由 `tools/list` 提供，Prompts 是可选的使用指导；未读取 Prompts 不等于工具不存在。初始化说明已明确列出所有工具及同名 Prompt 入口。不支持 Prompts 的客户端仍可通过工具描述和 `get_usage_guide` 发现用法。新增工具必须补齐同名提示词，类型检查及真实 MCP stdio 测试会校验完整覆盖和可读性。
 
 指南明确由 Agent 文件工具增量编辑规则，先通过 `get_network_status` 获取准确路径并保留已有规则。HTTP JSON 正文必须序列化为字符串；WS 规则针对业务连接，连接临时规则不能写入持久文件。保存后调用 `reload_rules`，检查各域加载与同步结果，再显式控制开关并验证本次新记录。UI 先用快照发现 Key，再确认唯一目标；没有 Key 时诊断并补业务源码，不回退文本定位。
 
