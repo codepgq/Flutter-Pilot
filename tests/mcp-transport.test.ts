@@ -91,7 +91,25 @@ describe('MCP local session transport', () => {
       if (registryState === 'unsafe') await mkdir(registry, { mode: 0o755 });
       const client = await connect(registry);
       expect(client.getInstructions()).toBe(agentInstructions);
-      expect(client.getServerCapabilities()).toMatchObject({ tools: {}, resources: {} });
+      expect(client.getServerCapabilities()).toMatchObject({ tools: {}, resources: {}, prompts: {} });
+      const prompts = await client.listPrompts();
+      expect(prompts.prompts.map((prompt) => prompt.name)).toEqual([
+        'http_mock',
+        'websocket_mock',
+        'flutter_ui',
+        'mock_workflow',
+      ]);
+      for (const prompt of prompts.prompts) {
+        const result = await client.getPrompt({ name: prompt.name, arguments: { task: '验证订单页面' } });
+        expect(result.messages[0]).toMatchObject({ role: 'user', content: { type: 'text' } });
+        expect(JSON.stringify(result)).toContain('验证订单页面');
+        expect(JSON.stringify(result)).toContain('get_usage_guide');
+        await expect(client.getPrompt({ name: prompt.name })).resolves.toHaveProperty('messages');
+      }
+      await expect(client.getPrompt({ name: 'unknown' })).rejects.toMatchObject({ code: -32602 });
+      await expect(client.getPrompt({ name: 'http_mock', arguments: { extra: 'x' } })).rejects.toMatchObject({
+        code: -32602,
+      });
       const tools = await client.listTools();
       expect(tools.tools.find((tool) => tool.name === 'get_usage_guide')).toMatchObject({
         annotations: { readOnlyHint: true, openWorldHint: false },
@@ -130,11 +148,35 @@ describe('MCP local session transport', () => {
     const client = await connect(f.registryRoot, f.workspace);
     await client.callTool({ name: 'get_usage_guide', arguments: { topic: 'http' } });
     await client.readResource({ uri: 'flutter-api-mocks://guides/ui' });
+    await client.listPrompts();
+    await client.getPrompt({ name: 'flutter_ui' });
     expect(calls).toBe(0);
     const list = await client.callTool({ name: 'list_sessions', arguments: {} });
     expect(list.structuredContent).toMatchObject({
       usageGuide: { tool: 'get_usage_guide', topics: [...guideTopics] },
     });
+  });
+
+  it('discovers and dispatches both WS message directions over real SDK stdio', async () => {
+    const calls: { tool: string; args: Record<string, unknown> }[] = [];
+    const f = await fixture('ws-messages', async (tool, args) => {
+      calls.push({ tool, args });
+      return { ok: true, submitted: true };
+    });
+    const client = await connect(f.registryRoot, f.workspace);
+    const tools = (await client.listTools()).tools;
+    for (const tool of ['inject_ws_message', 'send_ws_message']) {
+      expect(tools.find((entry) => entry.name === tool)).toMatchObject({
+        inputSchema: { type: 'object' },
+        annotations: { readOnlyHint: false },
+      });
+      const args = { sessionId: 'ws-messages', connectionId: 'exact', topic: 'assets', data: { amount: 9 } };
+      expect((await client.callTool({ name: tool, arguments: args })).isError).not.toBe(true);
+      expect(calls.at(-1)).toEqual({ tool, args });
+      const invalid = await client.callTool({ name: tool, arguments: { ...args, text: 'conflicting' } });
+      expect(invalid.isError).toBe(true);
+    }
+    expect(calls).toHaveLength(2);
   });
 
   it('publishes private descriptors without VM credentials and removes them on stop', async () => {

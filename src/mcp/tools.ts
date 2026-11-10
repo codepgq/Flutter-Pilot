@@ -9,6 +9,27 @@ const page = {
   limit: z.number().int().min(1).max(100).optional(),
   offset: z.number().int().min(0).max(1000000).optional(),
 };
+const wsMessage = z
+  .object({
+    ...session,
+    connectionId: z.string().min(1).max(512),
+    text: z.string().max(262144).optional(),
+    topic: z.string().min(1).max(1024).optional(),
+    data: z.json().optional(),
+  })
+  .strict();
+
+export function encodeWsMessage(args: Record<string, unknown>): string {
+  const hasText = args.text !== undefined;
+  const hasTopic = args.topic !== undefined;
+  const hasData = args.data !== undefined;
+  if (hasText ? hasTopic || hasData : !hasTopic || !hasData)
+    throw new McpToolError('INVALID_ARGUMENTS', '消息须二选一：text 原始文本，或 topic 与 data。');
+  const text = hasText ? (args.text as string) : JSON.stringify({ topic: args.topic, data: args.data });
+  if (Buffer.byteLength(text, 'utf8') > 256 * 1024)
+    throw new McpToolError('INVALID_ARGUMENTS', 'WS 消息序列化后最多 256 KiB。');
+  return text;
+}
 
 export const mcpTools = {
   get_usage_guide: {
@@ -106,6 +127,16 @@ export const mcpTools = {
       })
       .strict(),
   },
+  inject_ws_message: {
+    description:
+      '向准确的业务 WS 连接注入一条模拟服务端消息供 App 接收，不发往服务端。需先显式开启 WS 采集和 Mock；参数二选一：text 原始文本，或 topic 与 data（序列化为 {topic,data}）。自定义协议用 text，最多256 KiB；按 Key 验证界面并查询新消息，超时不自动重试。',
+    schema: wsMessage,
+  },
+  send_ws_message: {
+    description:
+      '通过 App 当前准确的真实 WS 连接向服务端发送一条文本，不新建连接。需先显式开启 WS 采集和 Mock；参数二选一：text，或 topic 与 data（序列化为 {topic,data}），最多256 KiB。经过 outbound 规则，可能替换或丢弃；返回仅表示已提交，需查新消息及业务响应，超时不自动重试。',
+    schema: wsMessage,
+  },
   reload_rules: {
     description:
       'Agent编辑rules.json/ws-rules.json后必须调用，检查loaded/synchronized/runtimeApplied/pending；不自动开启Mock，仍需显式开关并触发请求验证。字段及示例见get_usage_guide。',
@@ -136,6 +167,7 @@ export function parseTool(name: string, args: unknown): Record<string, unknown> 
   if (!Object.hasOwn(mcpTools, name)) throw new McpToolError('UNKNOWN_TOOL', '未知 MCP 工具。');
   const parsed = mcpTools[name as McpToolName].schema.safeParse(args);
   if (!parsed.success) throw new McpToolError('INVALID_ARGUMENTS', '工具参数不符合接口定义。');
+  if (name === 'inject_ws_message' || name === 'send_ws_message') encodeWsMessage(parsed.data);
   return parsed.data;
 }
 

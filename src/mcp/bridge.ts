@@ -5,6 +5,8 @@ import {
   ListToolsRequestSchema,
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
   McpError,
   ErrorCode,
 } from '@modelcontextprotocol/sdk/types.js';
@@ -14,6 +16,7 @@ import { isAbsolute, resolve } from 'node:path';
 import { discoverSessions, requestSession, type SessionDescriptor } from './server';
 import { mcpTools, McpToolError, parseTool, toolError } from './tools';
 import { agentInstructions, getUsageGuide, guideResources, guideTopics, type GuideTopic } from './guide';
+import { getMcpPrompt, mcpPrompts } from './prompts';
 
 export interface BridgeOptions {
   registryRoot: string;
@@ -25,9 +28,9 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
   const connectionId = randomUUID();
   const announced = new Map<string, SessionDescriptor>();
   const server = new Server(
-    { name: 'flutter-api-mocks', version: '0.0.3' },
+    { name: 'flutter-api-mocks', version: '0.0.4' },
     {
-      capabilities: { tools: {}, resources: {} },
+      capabilities: { tools: {}, resources: {}, prompts: {} },
       instructions: agentInstructions,
     },
   );
@@ -80,6 +83,10 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
     })),
   }));
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: guideResources }));
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: mcpPrompts }));
+  server.setRequestHandler(GetPromptRequestSchema, async (request) =>
+    getMcpPrompt(request.params.name, request.params.arguments),
+  );
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const index = guideResources.findIndex((resource) => resource.uri === request.params.uri);
     if (index < 0) throw new McpError(ErrorCode.InvalidParams, '未知使用指南资源；请先列出资源。');

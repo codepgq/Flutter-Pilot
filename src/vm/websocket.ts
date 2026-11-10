@@ -335,24 +335,44 @@ export class WsVmInjector extends EventEmitter {
     return [...this.connections.values()].map((item) => ({ ...item }));
   }
 
-  push(connectionId: string, text: string): Promise<void> {
+  push(connectionId: string, text: string, signal?: AbortSignal): Promise<void> {
+    return this.dispatch('push', connectionId, text, signal);
+  }
+
+  send(connectionId: string, text: string, signal?: AbortSignal): Promise<void> {
+    return this.dispatch('send', connectionId, text, signal);
+  }
+
+  private dispatch(
+    action: 'push' | 'send',
+    connectionId: string,
+    text: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
     return this.enqueue(async () => {
+      if (signal?.aborted) throw new Error('WS 消息操作已取消，未执行发送');
+      if (this.disposed) throw new Error('WS 采集会话已关闭');
       if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > this.maxBodyBytes)
-        throw new Error(`模拟 WS 消息不能超过 ${this.maxBodyBytes} 字节`);
+        throw new Error(`手动 WS 消息不能超过 ${this.maxBodyBytes} 字节`);
       const connection = this.connections.get(connectionId);
       if (!connection || connection.status !== 'open' || connection.capture !== 'attached')
         throw new Error('所选 WS 连接未接入或已经关闭，请重新选择在线连接');
       const anchor = this.anchors.get(connection.isolateId);
       if (!anchor) throw new Error('WS 采集已断开，请重新开启采集');
+      const generation = this.generation;
       try {
+        if (signal?.aborted) throw new Error('cancelled');
         await this.evaluate(
           anchor.isolateId,
           anchor.libraryId,
-          `state['push'](${dartLiteral(connectionId)}, ${dartLiteral(text)})`,
+          `state['${action}'](${dartLiteral(connectionId)}, ${dartLiteral(text)})`,
           { state: anchor.stateId },
         );
+        if (generation !== this.generation || signal?.aborted) throw new Error('invalidated');
       } catch {
-        throw new Error('模拟推送失败：请确认 WS Mock 已开启，且当前连接仍在线并有接收监听');
+        throw new Error(
+          `${action === 'push' ? '模拟推送' : '向服务端发送'}未确认：请检查 WS Mock、当前连接及消息记录；动作可能已执行，请勿自动重试`,
+        );
       }
     });
   }

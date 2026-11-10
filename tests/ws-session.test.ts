@@ -15,6 +15,7 @@ vi.mock('../src/vm/websocket', async () => {
         fixture.order.push('abandon');
       });
       push = vi.fn(async () => undefined);
+      send = vi.fn(async () => undefined);
       dispose = vi.fn(async () => undefined);
       constructor() {
         super();
@@ -205,17 +206,49 @@ describe('independent WS session lifecycle', () => {
     session.connected();
     await expect(session.setCaptureEnabled(true)).rejects.toThrow('租约');
   });
-  it('rejects stale and unknown connections for push without reconnecting', async () => {
+  it.each(['push', 'send'] as const)(
+    'rejects stale and unknown connections for %s without reconnecting',
+    async (action) => {
+      session.connected();
+      await session.setCaptureEnabled(true);
+      await expect(session[action](connection.id, 'one')).rejects.toThrow('开启 WS Mock');
+      await session.setMockEnabled(true);
+      await session[action](connection.id, 'one');
+      expect(injector[action]).toHaveBeenCalledWith(connection.id, 'one', undefined);
+      await expect(session[action]('another', 'two')).rejects.toThrow('失效');
+      await session.disconnect(false);
+      await expect(session[action](connection.id, 'three')).rejects.toThrow('连接 VM');
+      expect(injector[action]).toHaveBeenCalledTimes(1);
+    },
+  );
+  it('does not confirm a send invalidated while the VM call is pending or retry it', async () => {
     session.connected();
     await session.setCaptureEnabled(true);
-    await expect(session.push(connection.id, 'one')).rejects.toThrow('开启 WS Mock');
     await session.setMockEnabled(true);
-    await session.push(connection.id, 'one');
-    expect(injector.push).toHaveBeenCalledWith(connection.id, 'one');
-    await expect(session.push('another', 'two')).rejects.toThrow('失效');
-    await session.disconnect(false);
-    await expect(session.push(connection.id, 'three')).rejects.toThrow('连接 VM');
-    expect(injector.push).toHaveBeenCalledTimes(1);
+    const gate = deferred<void>();
+    injector.send.mockReturnValue(gate.promise);
+    const pending = session.send(connection.id, 'once');
+    await settle();
+    session.invalidate();
+    gate.resolve();
+    await expect(pending).rejects.toThrow('结果未确认');
+    expect(injector.send).toHaveBeenCalledTimes(1);
+  });
+  it('rejects a send cancelled while waiting in the session queue without dispatching it', async () => {
+    session.connected();
+    await session.setCaptureEnabled(true);
+    await session.setMockEnabled(true);
+    const gate = deferred<void>();
+    injector.send.mockReturnValueOnce(gate.promise);
+    const first = session.send(connection.id, 'first');
+    const cancel = new AbortController();
+    const second = session.send(connection.id, 'cancelled', cancel.signal);
+    await settle();
+    cancel.abort();
+    gate.resolve();
+    await first;
+    await expect(second).rejects.toThrow('已取消');
+    expect(injector.send).toHaveBeenCalledTimes(1);
   });
   it('displays unsupported capability without enabling Mock', async () => {
     injector.scan.mockResolvedValue([{ ...connection, capture: 'unsupported', warning: 'unsupported SDK' }]);

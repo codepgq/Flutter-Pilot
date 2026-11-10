@@ -2,11 +2,15 @@
 
 面向 **VS Code 和 Cursor** 的 Flutter Dio 接口调试插件。支持通过 **Flutter VM WebSocket 零源码记录 API、实验性运行时 Dio Mock**，也保留 HTTP/HTTPS 代理、双向修改、转发、手动断点和请求历史。
 
-当前版本为 **0.0.3**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key 精确操作页面，减少逐步截图识别的耗时与 token 消耗。
+
+当前版本为 **0.0.4**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+
+**0.0.4 新增 MCP Prompts 与双向 WS 主动消息**：提供四个开发场景模板，通过 MCP 向 App 注入模拟服务端消息或经 App 当前连接发送给服务端，支持原始文本或 `topic/data`；配合 API 多状态 Mock 和 Key 精确交互完成开发验证。详见 [更新记录](CHANGELOG.md) 与 [MCP 使用说明](docs/mcp.md)。
 
 **0.0.3 新增业务 WebSocket Tab**：通过现有 VM 手动开启 WS 采集，查看双向消息；独立开启实验性 WS Mock 后，可按规则整条替换或丢弃文本消息，向 App 手动注入模拟推送。运行时结构须探测通过；接入前消息不可补抓。详见 [WebSocket 使用说明](docs/v0.0.3-websocket.md)。
 
-**MCP 与编码 Agent 接入**：工作台新增 MCP Tab，默认按项目适配 Claude Code CLI、Codex CLI／App。Agent 可复用现有 VM 按 Key 操作 UI，编辑项目 HTTP／WS 规则文件后重载、开启 Mock 并查询记录验证结果。配置写入与客户端实际加载分别展示，UI 能力以运行时探测和真实验收范围为准。详见 [MCP 使用说明](docs/mcp.md)。
+**MCP 与编码 Agent 接入**：MCP 服务名为 `flutter-api-mocks`。工作台的 MCP Tab 默认按项目适配 Claude Code CLI、Codex CLI／App；Agent 可复用现有 VM 操作 UI、重载 HTTP／WS 规则并查询记录验证结果。详见 [MCP 与编码 Agent](#mcp-与编码-agent) 和 [MCP 使用说明](docs/mcp.md)。
 
 项目首次初始化会生成 `.api-mocks/project.json` 保存 UUID 和项目配置，Mock 规则保存在 `.api-mocks/rules.json`。复制项目或创建 worktree 后，各目录读取自己的规则、分别记录本机历史。API 与历史按新到旧展示，目录可折叠，响应自动尝试 JSON 格式化；规则启停使用简洁 switch。
 
@@ -15,6 +19,7 @@
 ## 目录
 
 - [功能概览](#功能概览)
+- [MCP 与编码 Agent](#mcp-与编码-agent)
 - [环境要求与兼容范围](#环境要求与兼容范围)
 - [安装插件](#安装插件)
 - [升级现有项目](#升级现有项目)
@@ -55,6 +60,31 @@
 
 规则通过表单或完整 JSON 配置，首版不执行用户脚本。工作台跟随 IDE 明暗主题，并适配窄面板。
 
+## MCP 与编码 Agent
+
+MCP 服务名称和客户端配置项名称均为 **`flutter-api-mocks`**；插件显示名称是 **Flutter API Mocks**。服务使用标准 MCP stdio 传输，支持工具、资源和提示模板；桥接进程通过本机私有 Unix socket 访问插件会话。它复用 Flutter Debug VM，无需向应用添加 Driver 或 helper。
+
+1. 在受信任的本地 Flutter 工作区启动 Debug 应用，并在工作台的 **连接与诊断** 中确认 VM 已连接。
+2. 在 **MCP** Tab 开启服务，选择目标 Agent 和 **当前项目**（默认）或全局范围，点击 **一键适配**。需要本机 Node.js 20+。
+3. 按客户端提示加载配置、信任或批准项目 MCP；必要时重连或新建会话。**已配置不代表客户端已连接**，实际握手状态在工作台显示。
+4. 让 Agent 使用 `flutter-api-mocks` 的 `get_usage_guide` 和 `list_sessions`，选择对应项目后执行任务。
+
+Agent 可按 `ValueKey<String/int>` 查找、点击、输入和滚动，诊断当前界面的 Key 问题；也可查询 HTTP 请求和业务 WebSocket 消息、重载规则并控制采集与 Mock。规则由 Agent 编辑项目的 `.api-mocks/rules.json` 和 `.api-mocks/ws-rules.json`，重载规则不会自动开启 Mock。多状态测试逐个切换场景，分别检查新网络记录和页面结果；Key 用于日常精确交互，视觉样式和布局验收再补充截图。
+
+WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服务端消息，`send_ws_message` 通过 App 当前真实 WS 连接发给服务端。均需显式开启 WS 采集与 WS Mock，并选择准确的在线连接；不新建连接。可传原始 `text`，或传 `topic` 和 `data` 组装为 `{"topic": "...", "data": ...}`；自定义业务协议使用完整原始文本。真实发送经过当前 outbound 规则，可能被替换或丢弃；工具调用成功后仍需核对消息和业务结果。
+
+服务提供 `overview`、`http`、`ws`、`ui`、`workflow` 五个指南主题，以及 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个 MCP 提示模板。指南可通过工具或资源读取；支持 Prompts 的客户端可选择模板并填写任务。初始化说明、工具描述和模板帮助 Agent 发现能力，是否主动使用仍取决于客户端和 Agent。
+
+例如可以向 Agent 提出：
+
+> 使用 `flutter-api-mocks` 模拟订单列表为空，并验证页面。先读取 HTTP 和工作流指南，选择当前项目；保留其他规则，重载后显式开启 Mock，通过实际 UI Key 操作页面，并检查新产生的请求和页面结果。
+
+> 分别测试下单成功、下单失败和余额不足状态。每个场景只启用对应规则，按 Key 操作下单入口，核对请求命中、页面提示和资产变化，记录各场景结果。
+
+> 按当前项目的 WS 协议向 App 注入一条资产更新事件，验证资产组件变化；再通过真实连接发送指定订阅 topic 和 data，核对实际发出的消息及业务响应。
+
+运行时操作需要已开启 MCP 的插件会话和可用 VM；UI 能力取决于运行时探测。工具参数、配置范围、使用限制和验收范围见 [MCP 使用说明](docs/mcp.md) 与 [验收记录](docs/validation.md)。
+
 ## 环境要求与兼容范围
 
 | 项目 | 要求或说明 |
@@ -77,17 +107,17 @@
 
 ### 从 VSIX 安装
 
-1. 获取 `flutter-api-mocks-0.0.3.vsix`。从源码构建见下方步骤。
+1. 获取 `flutter-api-mocks-0.0.4.vsix`。从源码构建见下方步骤。
 2. 在 VS Code 或 Cursor 扩展面板右上角菜单选择 **Install from VSIX… / 从 VSIX 安装…**。
 3. 选择安装包，按 IDE 提示重新加载窗口。
 4. 打开包含 `pubspec.yaml` 的 Flutter 项目根目录，并信任工作区。
 5. 执行 **Flutter API Mocks: 打开工作台**。扩展激活后，也可点击状态栏 **API Mocks**。
 6. 默认进入推荐的 **VM 连接**，输入本次 Flutter VM WS 后点击 **连接并记录**。只有需要备用方案时才切换到 **代理连接**，安装 / 初始化引擎并按向导接入。新工作区即使已有引擎缓存，也不会自动启动代理。
 
-本版本号 0.0.3 比旧包 0.1.0 小。已有 0.1.0 时需强制覆盖安装，例如：
+本版本号 0.0.4 比旧包 0.1.0 小。已有 0.1.0 时需强制覆盖安装，例如：
 
 ```sh
-cursor --install-extension artifacts/flutter-api-mocks-0.0.3.vsix --force
+cursor --install-extension artifacts/flutter-api-mocks-0.0.4.vsix --force
 # VS Code 使用 code --install-extension 同一文件 --force
 ```
 
@@ -110,7 +140,7 @@ npm test
 npm run package
 ```
 
-产物为 `artifacts/flutter-api-mocks-0.0.3.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
+产物为 `artifacts/flutter-api-mocks-0.0.4.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
 
 ### 使用已有引擎
 
@@ -666,7 +696,7 @@ python3 tool/device_smoke.py --mitmdump /absolute/path/to/mitmdump --ios YOUR_SI
 
 ```sh
 npm run package
-shasum -a 256 artifacts/flutter-api-mocks-0.0.3.vsix
+shasum -a 256 artifacts/flutter-api-mocks-0.0.4.vsix
 ```
 
 VSIX 包含扩展构建产物、VM 注入模板、代理 addon、引擎清单及文档，不包含 Node 开发依赖、Flutter 示例构建结果或真实证书。首次引擎下载单独发生。源码中的 README 修改后，应重新打包，安装包内的文档才会更新。

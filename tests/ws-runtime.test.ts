@@ -51,11 +51,23 @@ describe('WebSocket VM runtime boundaries', () => {
     const injector = new WsVmInjector(new Rpc());
     expect(await injector.scan([], [], false)).toEqual([]);
     await expect(injector.push('missing', 'hello')).rejects.toThrow('未接入');
+    await expect(injector.send('missing', 'hello')).rejects.toThrow('未接入');
+    await injector.dispose();
+  });
+  it('checks cancellation again when a queued message reaches the injector', async () => {
+    const rpc = new Rpc();
+    const injector = new WsVmInjector(rpc);
+    const cancel = new AbortController();
+    const pending = injector.send('missing', 'hello', cancel.signal);
+    cancel.abort();
+    await expect(pending).rejects.toThrow('已取消');
+    expect(rpc.calls).toEqual([]);
     await injector.dispose();
   });
   it('bounds replacement and synthetic payloads by the selected capture limit', async () => {
     const injector = new WsVmInjector(new Rpc(), { maxBodyBytes: 4 });
     await expect(injector.push('missing', '中文')).rejects.toThrow('4 字节');
+    await expect(injector.send('missing', '中文')).rejects.toThrow('4 字节');
     await expect(
       injector.scan(
         [],

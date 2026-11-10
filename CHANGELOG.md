@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.4 — MCP 开发场景与双向 WS 消息（2026-11-09）
+
+- 新增标准 MCP Prompts，提供 HTTP Mock、WebSocket Mock、Flutter UI 和完整验证流程四个模板，支持按任务读取、IDE 离线发现与获取。
+- 新增 `inject_ws_message` 向 App 注入模拟服务端事件，以及 `send_ws_message` 经 App 当前真实 WS 连接发送给服务端；支持原始 `text` 或 `topic/data`，真实发送沿用出站规则和消息记录。
+- 完善消息大小限制、准确连接校验、队列取消和断线处理；采集与 WS Mock 需显式开启，发送结果通过新消息及业务响应验证。
+- 指南、模板及 README 突出下单成功/失败、资产信息等多状态开发场景，优先按 Key 精确操作组件并核对网络与页面证据。
+- 标准 SDK stdio、真实 Dart WS/WSS 双向消息验证通过；Flutter 设备及客户端界面验收边界见 [验收记录](docs/validation.md)。
+
 ## 0.0.3 — 业务 WebSocket（2026-11-09）
 
 - MCP 新增按主题读取的 `get_usage_guide` 和指南资源：介绍 HTTP/WS 规则编辑、Key 发现与 UI 操作、Mock 与网络验证闭环；初始化及工具描述引导 Agent 按任务主动使用，离线也可读取。

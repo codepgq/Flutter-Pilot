@@ -178,6 +178,8 @@ try {
     getHttp: (id) => vm.store.get(id),
     connections: async () => [],
     messages: async () => ({ items: [], total: 0 }),
+    injectWs: (connectionId, text, signal) => vm.websocket.push(connectionId, text, signal),
+    sendWs: (connectionId, text, signal) => vm.websocket.send(connectionId, text, signal),
     setCapture: async (domain, enabled) => {
       assert.equal(domain, 'http');
       await vm.setCaptureEnabled(enabled);

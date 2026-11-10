@@ -140,6 +140,17 @@
     enqueue({'id': '${record['id']}:${++state['sequence']}', 'connectionId': id, 'timestamp': DateTime.now().microsecondsSinceEpoch / 1000, 'direction': 'inbound', ...value, 'effective': text, 'outcome': 'synthetic'});
     return true;
   };
+  state['send'] = (String id, String text) {
+    if (!active() || state['mock'] != true) throw StateError('disabled');
+    final record = state['records'].values.firstWhere((dynamic item) => item['id'] == id);
+    if (record['enabled'] != true || record['capture'] != 'attached' || record['socket'].readyState != WebSocket.open) throw StateError('closed');
+    for (final hook in record['hooks']) { if (!api['owns'](hook['subscription'], hook['wrapper'])) throw StateError('changed'); }
+    if (snapshot(text)['truncated'] == true) throw StateError('too large');
+    // Use the app's actual socket and its existing outbound interception chain.
+    // add only confirms local acceptance; the outbound hook records replace/drop separately.
+    record['socket'].add(text);
+    return true;
+  };
   state['timer'] = Timer.periodic(const Duration(milliseconds: 100), (dynamic timer) {
     if (!active()) { state['detach'](); return; }
     flush();

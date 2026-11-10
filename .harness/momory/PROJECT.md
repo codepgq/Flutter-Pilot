@@ -2,6 +2,10 @@
 
 ## MCP Agent 使用指南确认（2026-11-09）
 
+- 用户要求完成后创建新的小版本并安装 Cursor，本轮递增为 0.0.4；允许 CLI 安装，继续不启动 IDE GUI、不访问钥匙串、不强制重载用户窗口。
+- 用户确认 MCP 用于开发多状态验证：HTTP 构造下单成功/失败、资产数据等状态；WS 同时支持向 App 注入模拟服务端消息和经 App 当前真实连接发往服务端，覆盖此前 MCP 首版不提供推送的限制；UI 优先按 Key 精确操作，减少截图识别的耗时与 token，视觉验收仍用截图。
+- 双向 WS 工具为 inject_ws_message / send_ws_message，消息二选一原始 text 或 topic/data（序列化为 JSON {topic,data}，自定义业务信封用 text）；要求显式开启 WS 采集与 Mock，不新建连接、不猜业务协议。真实发送保留 outbound 规则；本地提交不代表服务端业务成功，需查询新消息与界面/业务响应验证。
+- 用户要求增加标准 MCP Prompts，并进一步完善模板。保留 http_mock、websocket_mock、flutter_ui、mock_workflow 四个入口，将模板展开为明确的准备、执行、异常处理和证据验证步骤；未提供具体 task 时先澄清目标。Prompts 不保证客户端主动调用，规则编辑、Key 定位和开关约束继续沿用现有指南。
 - 用户要求把 rules.json、ws-rules.json 编辑方式、UI 查找等能力介绍放进 MCP，使 Agent 在相关任务中主动发现并使用。沿用既有文件编辑、MCP 重载与运行时操作分工，不新增规则 CRUD 或文本定位。
 - 初始化说明和工具描述提示使用场景；get_usage_guide 按 overview/http/ws/ui/workflow 读取指南，并提供同内容 MCP 资源。指南无需在线 IDE 或会话；具体主动调用仍取决于客户端 Agent，不以此绕过用户授权。
 

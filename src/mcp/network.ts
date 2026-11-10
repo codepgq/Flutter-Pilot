@@ -1,5 +1,6 @@
 import type { HistoryQuery, HistoryResult, HistoryEntry, Rule } from '../model';
 import type { WsMessageQuery, WsMessageResult, WsRule } from '../ws/model';
+import { encodeWsMessage } from './tools';
 
 export interface NetworkHost {
   httpRulesPath: string;
@@ -15,6 +16,8 @@ export interface NetworkHost {
   messages(query: WsMessageQuery): Promise<WsMessageResult>;
   setCapture(domain: 'http' | 'ws', enabled: boolean): Promise<void>;
   setMock(domain: 'http' | 'ws', enabled: boolean): Promise<void>;
+  injectWs(connectionId: string, text: string, signal?: AbortSignal): Promise<void>;
+  sendWs(connectionId: string, text: string, signal?: AbortSignal): Promise<void>;
 }
 
 /** File-backed rules and runtime controls shared by MCP and the workbench. */
@@ -76,7 +79,7 @@ export class McpNetworkController {
     return { ok: Object.values(results).every((r: any) => r.synchronized), results, status: this.status() };
   }
 
-  async execute(tool: string, args: Record<string, any>) {
+  async execute(tool: string, args: Record<string, any>, signal?: AbortSignal) {
     const { sessionId: _, ...query } = args;
     switch (tool) {
       case 'get_network_status':
@@ -91,6 +94,24 @@ export class McpNetworkController {
         return this.host.connections();
       case 'get_ws_messages':
         return this.host.messages(query);
+      case 'inject_ws_message':
+      case 'send_ws_message': {
+        const text = encodeWsMessage(args);
+        const injection = tool === 'inject_ws_message';
+        signal?.throwIfAborted();
+        if (injection) await this.host.injectWs(args.connectionId, text, signal);
+        else await this.host.sendWs(args.connectionId, text, signal);
+        return {
+          ok: true,
+          submitted: true,
+          connectionId: args.connectionId,
+          direction: injection ? 'inbound' : 'outbound',
+          bytes: Buffer.byteLength(text, 'utf8'),
+          message: injection
+            ? '模拟消息已注入 App；请查询新 WS 记录并按 Key 验证页面结果。'
+            : '消息已提交到 App 连接；outbound 规则可能替换或丢弃，请查询新 WS 记录和业务响应确认结果。',
+        };
+      }
       case 'set_capture_enabled':
         await this.host.setCapture(args.domain, args.enabled);
         return this.status();

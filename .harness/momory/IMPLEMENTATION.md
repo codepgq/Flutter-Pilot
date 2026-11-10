@@ -1,5 +1,17 @@
 # 实现与验证结论
 
+## 0.0.4 打包与 Cursor 安装（2026-11-09）
+
+- 扩展 manifest、lockfile、MCP serverInfo 和安装包命名统一为 0.0.4，README/CHANGELOG 同步。324 项测试、类型和格式检查通过，VSIX 构建成功。
+- Cursor 3.29.9 CLI `--force` 安装成功；VSIX、源码构建和安装目录 11 项文件 SHA-256 一致，manifest 除 Cursor 元数据外完全一致。构建及安装桥接均通过真实 SDK stdio：版本 0.0.4、19 工具、4 Prompts、5 资源及离线读取。报告 artifacts/v0.0.4-install-report.json。
+- 未强制 Reload Window、未修改 Agent 配置；用户方便时重载 Cursor 窗口并重连 Agent MCP，才能让已有进程加载本次更新。当前改动未提交。
+
+## MCP Prompts 与双向 WS 消息（2026-11-09）
+
+- 新增标准 prompts/list、prompts/get，4 个开发场景模板；新增 inject_ws_message / send_ws_message，现有工具共 19 个。支持 text 或 topic/data，序列化后最多 256 KiB，仍受具体运行时采集上限限制。
+- 复用现有 push 入 App，新增 socket.add 出站并保留规则替换/丢弃与记录。要求采集与 WS Mock 显式开启，按准确连接操作；MCP 取消信号透传各级队列，断线或在途取消不声称动作未执行，不自动重试。
+- 324 项单测、类型、格式、构建、diff 检查通过。Dart 3.13.7 / macOS arm64 真实 WS/WSS 均通过 SDK stdio→IPC→网络控制器→VM 的双向 topic/data、记录与规则闭环。报告 artifacts/ws-mcp-bidirectional-report.json。非 Flutter 设备/IDE GUI 验收；本轮未安装或提交。
+
 ## MCP 内置 Agent 指南（2026-11-09）
 
 - 新增 src/mcp/guide.ts，初始化 instructions、工具描述、get_usage_guide 工具和5份固定 URI 资源共用指南；17个工具可被发现。指南在桥接本地处理，不转发运行时调用，不依赖会话注册目录可用。

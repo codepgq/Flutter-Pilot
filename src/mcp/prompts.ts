@@ -1,0 +1,103 @@
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import type { GuideTopic } from './guide';
+
+interface PromptTemplate {
+  description: string;
+  topics: readonly GuideTopic[];
+  steps: readonly string[];
+}
+
+const templates = {
+  http_mock: {
+    description: '构造下单成功/失败、资产数据等 API 业务状态，按场景验证规则命中与页面表现。',
+    topics: ['http'],
+    steps: [
+      '根据任务确定请求 method、host、path、预期响应和触发方式；先用 get_network_status 查看 files.http、采集与 Dio Mock 状态，必要时查询已有请求确认接口，不能猜测业务字段。',
+      '任务包含多种状态时，按实际业务协议列出本次需要的场景，例如下单成功、业务失败、余额不足或不同资产信息；区分 HTTP 错误与 HTTP 200 中的业务失败码，逐个切换场景并验证，不同时启用互相冲突的规则。',
+      '使用 Agent 文件工具读取 files.http，按 ID 增量修改或追加规则，保留无关规则。核对匹配范围、priority 与 enabled；JSON 正文序列化为字符串，避免空 match 意外匹配全部请求。',
+      '保存后调用 reload_rules(domain=http)，检查 results.http 的 loaded、synchronized、runtimeApplied 和 pending。校验失败时修正规则；pending 表示仍待应用，不能据此宣称 Mock 已生效。',
+      '任务需要运行时修改时，显式调用 set_capture_enabled 和 set_mock_enabled，domain=http、enabled=true；重新查询状态确认 Dio 已接入。规则 enabled 与运行时 Mock 开关都需满足；仅查询记录时不必开启 Mock。',
+      '记录触发前的请求 ID 或时间作为基线；需要界面操作时先读取 ui 指南，再按真实 Key 触发一次任务要求的请求，不重放未知业务请求。',
+      '通过 get_requests 筛选本次新记录，再用 get_request 检查 mocked、requestRuleId/responseRuleId、实际请求和响应；按任务核对状态码、正文及页面表现。未命中时检查匹配范围、优先级、开关和 Dio 接入，不把旧记录当作本次证据。',
+    ],
+  },
+  websocket_mock: {
+    description: '模拟 WS 业务事件：替换/丢弃消息、向 App 注入推送或通过真实连接发送 topic/data。',
+    topics: ['ws'],
+    steps: [
+      '先用 get_network_status 获取 files.ws 和 WS 状态，再调用 get_ws_connections 确认业务连接、URL 和方向。业务 WebSocket 与 Dart VM 调试连接不同；没有连接时先完成任务需要的正常业务导航。',
+      '确定本次是规则 Mock、向 App 注入模拟服务端事件，还是通过 App 的真实连接发送给服务端；按已知业务协议确定 topic 和 data，例如订单状态变化或资产更新，不凭示例猜测字段。',
+      '需要规则 Mock 时，使用 Agent 文件工具增量编辑 files.ws，保留无关规则；按明确 URL、inbound/outbound 和 contains 缩小匹配范围。replace 为整条文本替换，JSON 必须序列化；drop 为丢弃，二进制消息只读。仅注入或发送消息时无需创建规则。',
+      '修改规则后调用 reload_rules(domain=ws)，检查加载、同步和实际应用状态；显式调用 set_capture_enabled(domain=ws, enabled=true)，再次检查目标连接的 capture、status 与 URL。URL 无法关联时不能使用 URL 匹配规则，但可选择已准确识别的连接发送或注入；不猜 URL，不把 connectionId 临时规则写入持久文件。',
+      '任务需要修改消息时，再调用 set_mock_enabled(domain=ws, enabled=true)。WS 采集、WS Mock 和 HTTP Mock 彼此独立；只查询消息时不必开启 Mock。',
+      '记录消息 ID 或时间基线；使用 inject_ws_message 向 App 注入模拟服务端消息，或用 send_ws_message 经当前准确连接发往服务端。两者需要 WS 采集和 WS Mock 显式开启，不新建连接；传 text 或 topic/data 二选一，topic/data 会序列化为 {topic,data}，自定义信封或 Socket.IO 等协议应按实际格式传 text。',
+      'send_ws_message 走当前 outbound 规则，可能被替换或丢弃；发送工具返回成功不代表服务端业务处理成功，需要查询消息结果和任务要求的响应。规则 Mock 则通过正常业务操作触发或有界等待事件；采集前消息无法补抓。',
+      '调用 get_ws_messages，按 connectionId、方向和 includeBodies=true 检查新消息的 original/effective、outcome 与 ruleId，并核对页面变化。连接重建后重新查询连接 ID；未收到事件或未命中时明确说明，不能把规则加载成功当作消息验证成功。',
+    ],
+  },
+  flutter_ui: {
+    description: '按稳定 Key 精确定位并操作 Flutter 组件，减少截图识别耗时与 token，验证业务状态。',
+    topics: ['ui'],
+    steps: [
+      '先调用 get_ui_snapshot，读取当前 widgets 的 key、ancestorKeys、type、bounds、enabled/actionable 与 source，确定当前页面和目标。保留 Key 的字符串或整数类型，不猜测 Key。',
+      '开发联调与多状态测试优先使用结构化快照和 Key 操作，避免每一步都截图识别；只有任务涉及视觉样式或布局验收时，再通过可用的截图工具补充视觉证据。',
+      '调用 find_widget 确认目标唯一；重复 Key 用 ancestorKey 限定范围。正式选择器只支持 ValueKey<String/int>，不回退文本、裸坐标或直接执行按钮回调。',
+      '按任务使用 tap、enter_text、scroll 和 wait_for_widget；滚动与等待设置有限次数和超时。enter_text 替换输入内容，操作前核对目标与预期文本，不将其描述为真实系统键盘 IME 测试。',
+      'NOT_FOUND 先检查是否进入目标页面、是否懒加载，再有界等待或滚动，不能直接判为缺 Key。遇到 MISSING_KEY、UNSTABLE_KEY 或交互目标歧义时，调用 inspect_key_issues，结合 source 和业务源码定位原因。',
+      '任务涉及源码修复时补稳定 ValueKey，列表优先使用业务 ID；没有源码修改授权时报告诊断。热重载或 Hot Restart 后重新读取快照并定位，确认修复；不把当前挂载树诊断宣称为全仓审计。',
+      '每次关键操作后，用 wait_for_widget、find_widget 或新快照验证预期页面和状态；任务包含网络效果时读取相应指南并核对本次新记录。遮挡或禁用时按正常业务流程处理，不绕过命中测试。',
+    ],
+  },
+  mock_workflow: {
+    description: '通过 API 状态和 WS 事件构造业务场景，按 Key 操作界面并逐项验证，辅助开发联调。',
+    topics: ['workflow'],
+    steps: [
+      '把任务拆成接口或消息条件、Mock 预期、界面操作和可观察的通过标准；按实际涉及的域读取 http、ws、ui 指南。不要求不存在的网络事件，不凭空增加测试场景。',
+      '任务要求多状态验证时，按本次指定场景逐个执行，例如下单成功、失败和资产变化；每个场景先构造 API 响应或 WS 事件，再操作目标 Key 并核对结果，避免前一场景的规则、消息或页面状态干扰下一场景。',
+      '用 get_network_status 记录规则文件路径和当前开关；查询已有请求或连接确认目标，再用 get_ui_snapshot 确认起始页面和真实 Key，记录请求/消息 ID 或时间基线。',
+      '使用 Agent 文件工具增量编辑目标规则，保留其他规则；调用 reload_rules，仅重载任务涉及的域，并逐域检查 loaded、synchronized、runtimeApplied 和 pending。',
+      '仅开启任务需要的采集与 Mock，WS 先采集再 Mock；确认 HTTP/Dio 或 WS 运行时接入有效。仅界面或只读排查任务无需修改规则或开启 Mock。',
+      '需要主动 WS 事件时，选择 inject_ws_message 向 App 注入，或 send_ws_message 经真实连接发往服务端；使用实际业务协议的 topic/data 或原始 text，检查 outbound 规则影响，并验证事件处理结果。',
+      '按真实 Key 和 ancestorKey 确认唯一目标，再执行点击、输入、滚动和有界等待；出现 Key 问题先诊断。每个关键步骤检查状态，避免连续操作后无法判断哪一步失败。',
+      '将本次新 HTTP 记录或 WS 消息与规则 ID、实际内容及界面变化对应起来，分别判断规则加载、命中和业务结果。某一环节无法验证时保留已取得的证据，明确剩余阻碍和未验证项。',
+    ],
+  },
+} as const satisfies Record<string, PromptTemplate>;
+
+export const mcpPrompts = Object.entries(templates).map(([name, { description }]) => ({
+  name,
+  description,
+  arguments: [{ name: 'task', description: '需要完成的具体任务和验证目标', required: false }],
+}));
+
+export function getMcpPrompt(name: string, args: Record<string, string> = {}) {
+  if (!Object.hasOwn(templates, name)) throw new McpError(ErrorCode.InvalidParams, '未知提示模板。');
+  if (
+    Object.keys(args).some((key) => key !== 'task') ||
+    (args.task !== undefined && args.task.length > 4000)
+  ) {
+    throw new McpError(ErrorCode.InvalidParams, '提示模板参数无效。');
+  }
+  const { description, topics, steps } = templates[name as keyof typeof templates];
+  return {
+    description,
+    messages: [
+      {
+        role: 'user' as const,
+        content: {
+          type: 'text' as const,
+          text: [
+            args.task?.trim()
+              ? `任务：${args.task.trim()}`
+              : '尚未指定具体任务：先询问操作目标和预期结果，再执行以下流程。',
+            `使用 flutter-api-mocks MCP 完成任务；先调用 get_usage_guide，按需读取主题：${topics.join('、')}。详细参数和限制以指南及工具 schema 为准。`,
+            '调用 list_sessions，按项目路径和任务上下文选择对应会话；多个候选无法确定时询问，所有运行时调用明确传入该 sessionId。无可用会话时说明需在 IDE 开启 MCP；VM 未连接或能力不支持时报告具体阻碍。',
+            steps.map((step, index) => `${index + 1}. ${step}`).join('\n'),
+            '仅执行用户任务和授权范围内的操作。超时、取消或断线可能发生在动作执行之后，先检查界面和新网络记录，不自动重试有副作用的动作；重连后重新获取会话和状态，不擅自恢复 Mock。',
+            '完成后报告修改的规则/源码、关键操作、规则命中与页面证据、当前采集/Mock 开关及未验证项；按用户要求恢复临时规则和开关，保留其他改动。不得仅凭配置成功、工具返回成功或规则已加载就声称业务验证通过。',
+          ].join('\n\n'),
+        },
+      },
+    ],
+  };
+}

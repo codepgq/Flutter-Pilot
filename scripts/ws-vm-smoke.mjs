@@ -7,6 +7,8 @@ import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { WebSocketServer } from 'ws';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const root = resolve('.');
 const temp = await mkdtemp(join(tmpdir(), 'api-mocks-ws-vm-'));
@@ -14,6 +16,8 @@ const dart = process.env.DART ?? 'dart';
 const children = [];
 const servers = [];
 const clients = [];
+const mcpClients = [];
+const mcpServers = [];
 const results = [];
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(test, label, timeout = 10000) {
@@ -27,7 +31,7 @@ async function until(test, label, timeout = 10000) {
 try {
   await build({
     stdin: {
-      contents: `export {WsVmInjector} from ${JSON.stringify(join(root, 'src/vm/websocket.ts'))};export {VmServiceClient} from ${JSON.stringify(join(root, 'src/vm/client.ts'))};export {VmNetworkProfiler} from ${JSON.stringify(join(root, 'src/vm/profiler.ts'))};`,
+      contents: `export {WsVmInjector} from ${JSON.stringify(join(root, 'src/vm/websocket.ts'))};export {VmServiceClient} from ${JSON.stringify(join(root, 'src/vm/client.ts'))};export {VmNetworkProfiler} from ${JSON.stringify(join(root, 'src/vm/profiler.ts'))};export {McpSessionServer} from ${JSON.stringify(join(root, 'src/mcp/server.ts'))};export {McpNetworkController} from ${JSON.stringify(join(root, 'src/mcp/network.ts'))};`,
       resolveDir: root,
     },
     outfile: join(temp, 'runtime.cjs'),
@@ -35,9 +39,15 @@ try {
     platform: 'node',
     format: 'cjs',
   });
-  const { WsVmInjector, VmServiceClient, VmNetworkProfiler } = createRequire(import.meta.url)(
-    join(temp, 'runtime.cjs'),
-  );
+  await build({
+    entryPoints: [join(root, 'src/mcp/bridge.ts')],
+    outfile: join(temp, 'bridge.cjs'),
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+  });
+  const { WsVmInjector, VmServiceClient, VmNetworkProfiler, McpSessionServer, McpNetworkController } =
+    createRequire(import.meta.url)(join(temp, 'runtime.cjs'));
   execFileSync(
     'openssl',
     [
@@ -211,6 +221,8 @@ Future<void> main(List<String> args) async {
     const connection = connections[0];
     assert.equal(connection.capture, 'attached', JSON.stringify(warnings));
     assert.equal(connection.url, undefined, '接入前握手未知时不猜 URL');
+    await assert.rejects(injector.send(connection.id, 'mock-disabled'), /未确认/);
+    assert.ok(!received.includes('mock-disabled'), 'Mock关闭不允许手动发送');
     const rule = (id, direction, contains, action) => ({
       id,
       name: id,
@@ -239,13 +251,101 @@ Future<void> main(List<String> args) async {
     await injector.push(connection.id, 'synthetic-push');
     await until(() => app.some((m) => m.received === 'synthetic-push'), '模拟推送');
     assert.ok(!received.includes('synthetic-push'), '模拟推送不发给服务器');
+    await injector.send(connection.id, JSON.stringify({ topic: 'assets', data: { balance: 100 } }));
+    await until(
+      () => received.includes('{"topic":"assets","data":{"balance":100}}'),
+      '真实连接手动发送 topic/data',
+    );
+    await injector.send(connection.id, 'replace-manual');
+    await until(() => received.filter((m) => m === 'out-modified').length === 2, '手动发送经过出站替换规则');
+    await injector.send(connection.id, 'drop-manual');
+    await until(
+      () =>
+        messages.some(
+          (m) => m.original === 'drop-manual' && m.outcome === 'dropped' && m.ruleId === 'out-drop',
+        ),
+      '手动发送记录规则丢弃',
+    );
+    assert.ok(!received.includes('drop-manual'), '手动发送丢弃后未到服务端');
+    await assert.rejects(injector.send(connection.id, '中文'.repeat(200)), /1024 字节/);
+    await assert.rejects(injector.send('stale-connection', 'no-send'), /未接入/);
+    // Exercise the actual SDK stdio -> authenticated IPC -> controller -> Dart path.
+    const registryRoot = join(temp, secure ? 'mcp-wss' : 'mcp-ws');
+    const network = new McpNetworkController({
+      injectWs: (id, text, signal) => injector.push(id, text, signal),
+      sendWs: (id, text, signal) => injector.send(id, text, signal),
+      messages: async (query) => ({
+        items: messages.filter((m) => m.connectionId === query.connectionId),
+        total: messages.length,
+      }),
+    });
+    const mcpServer = new McpSessionServer({
+      registryRoot,
+      workspace: temp,
+      sessionId: 'ws-runtime',
+      name: 'WS runtime smoke',
+      describe: () => ({ vmConnected: true }),
+      call: (tool, args, context) => network.execute(tool, args, context.signal),
+    });
+    mcpServers.push(mcpServer);
+    await mcpServer.start();
+    const mcpClient = new Client({ name: 'ws-runtime-smoke', version: '1.0.0' });
+    mcpClients.push(mcpClient);
+    await mcpClient.connect(
+      new StdioClientTransport({
+        command: process.execPath,
+        args: [join(temp, 'bridge.cjs'), '--registry', registryRoot, '--workspace', temp],
+        stderr: 'pipe',
+      }),
+    );
+    const sessions = await mcpClient.callTool({ name: 'list_sessions', arguments: {} });
+    assert.ok(!sessions.isError, '真实 MCP 会话发现');
+    const inboundText = '{"topic":"asset.updated","data":{"balance":200}}';
+    const injected = await mcpClient.callTool({
+      name: 'inject_ws_message',
+      arguments: {
+        sessionId: 'ws-runtime',
+        connectionId: connection.id,
+        topic: 'asset.updated',
+        data: { balance: 200 },
+      },
+    });
+    assert.equal(injected.structuredContent.direction, 'inbound');
+    await until(() => app.some((m) => m.received === inboundText), 'MCP topic/data 注入 App');
+    assert.ok(!received.includes(inboundText), 'MCP 注入不发给服务端');
+    const outboundText = '{"topic":"asset.subscribe","data":{"account":"demo"}}';
+    const submitted = await mcpClient.callTool({
+      name: 'send_ws_message',
+      arguments: {
+        sessionId: 'ws-runtime',
+        connectionId: connection.id,
+        topic: 'asset.subscribe',
+        data: { account: 'demo' },
+      },
+    });
+    assert.equal(submitted.structuredContent.submitted, true);
+    assert.equal(submitted.structuredContent.direction, 'outbound');
+    await until(() => received.includes(outboundText), 'MCP topic/data 发往真实服务端');
+    await until(() => messages.some((m) => m.original === outboundText), 'MCP 手动发送可追溯记录');
+    const recorded = await mcpClient.callTool({
+      name: 'get_ws_messages',
+      arguments: { sessionId: 'ws-runtime', connectionId: connection.id, includeBodies: true },
+    });
+    assert.ok(
+      recorded.structuredContent.items.some((m) => m.original === inboundText && m.outcome === 'synthetic'),
+    );
+    assert.ok(
+      recorded.structuredContent.items.some((m) => m.original === outboundText && m.direction === 'outbound'),
+    );
+    await mcpClient.close();
+    await mcpServer.stop();
     send({ stream: ['stream-one', 'replace-stream', 'drop-stream', 'stream-two'] });
     await until(() => app.some((m) => m.streamDone), 'addStream 完成');
     await until(() => received.includes('stream-two'), 'addStream 修改和丢弃');
     assert.ok(!received.includes('replace-stream'));
     assert.ok(!received.includes('drop-stream'));
     send({ utf8: 'replace-utf8' });
-    await until(() => received.filter((m) => m === 'out-modified').length === 3, 'addUtf8Text 修改');
+    await until(() => received.filter((m) => m === 'out-modified').length === 4, 'addUtf8Text 修改');
     send({ send: [1, 2, 3] });
     peer.send(Buffer.from([4, 5, 6]));
     await until(() => received.some((m) => Array.isArray(m) && m.join(',') === '1,2,3'), '出站二进制直通');
@@ -280,6 +380,7 @@ Future<void> main(List<String> args) async {
     );
     await until(() => omitted >= 400, '有界队列遗漏计数');
     await injector.detach();
+    await assert.rejects(injector.send(connection.id, 'stale-after-detach'), /未接入/);
     send({ send: 'replace-restored' });
     peer.send('replace-restored-in');
     await until(
@@ -395,6 +496,8 @@ Future<void> main(List<String> args) async {
     ),
   );
 } finally {
+  for (const client of mcpClients) await client.close().catch(() => {});
+  for (const server of mcpServers) await server.stop().catch(() => {});
   for (const client of clients) await Promise.resolve(client.disconnect()).catch(() => {});
   for (const child of children) child.kill();
   for (const server of servers.reverse()) await new Promise((r) => server.close(() => r()));

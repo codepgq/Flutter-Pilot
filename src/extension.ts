@@ -370,6 +370,8 @@ class Workbench {
         domain === 'http' ? this.vm.setCaptureEnabled(enabled) : this.vm.websocket.setCaptureEnabled(enabled),
       setMock: (domain, enabled) =>
         domain === 'http' ? this.vm.setMockEnabled(enabled) : this.vm.websocket.setMockEnabled(enabled),
+      injectWs: (connectionId, text, signal) => this.vm.websocket.push(connectionId, text, signal),
+      sendWs: (connectionId, text, signal) => this.vm.websocket.send(connectionId, text, signal),
     });
     this.vm.client.on('disconnected', () => {
       this.ui.invalidate();
@@ -1082,7 +1084,7 @@ class Workbench {
                 return result;
               }
               try {
-                return await this.mcpNetwork.execute(tool, args);
+                return await this.mcpNetwork.execute(tool, args, context.signal);
               } finally {
                 this.push();
               }

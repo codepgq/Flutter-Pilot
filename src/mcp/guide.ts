@@ -2,11 +2,12 @@
 export const guideTopics = ['overview', 'http', 'ws', 'ui', 'workflow'] as const;
 export type GuideTopic = (typeof guideTopics)[number];
 
-export const agentInstructions = `Flutter API Mocks 用于 Flutter Debug 的 API/WS Mock、请求与消息排查、按 Key 查找和操作 UI，以及交互目标缺 Key 诊断。
+export const agentInstructions = `Flutter API Mocks 配合 Flutter Debug 开发联调：用 API Mock 构造下单成功/失败、资产数据等业务状态，用 WS Mock、向App注入或向服务端发送消息驱动业务事件，再按 Key 精确操作 UI 并验证结果，减少逐步截图识别的耗时与token。
 当用户任务需要这些能力时，主动使用本 MCP：先调用 get_usage_guide 按需读取 overview/http/ws/ui/workflow，再 list_sessions 选择用户任务对应的项目；不要只给用户手工操作建议。
 get_usage_guide 无需 sessionId，插件未运行也能读取；也可通过 resources/list 发现对应指南资源。
 规则使用 Agent 自身的文件编辑能力维护，通过 get_network_status 获取准确路径，保留已有规则；保存后 reload_rules，按任务显式开启采集/Mock，再操作 UI、查询记录验证。MCP 本身不提供文件编辑或规则 CRUD。
 所有运行时工具必须明确 sessionId。正式 UI 定位只用 ValueKey<String/int>；先 get_ui_snapshot 发现 Key，再 find_widget/ancestorKey 确认唯一，缺 Key 用 inspect_key_issues 定位后由编码 Agent 修复，不回退文本或坐标。UI 超时先检查结果，不自动重试。
+WS主动消息用inject_ws_message向App注入模拟服务端事件，或send_ws_message通过App当前连接发往服务端；两者需显式开启WS采集和WS Mock，按业务协议传原始text或topic/data。发送可能被outbound规则替换或丢弃，需查询实际结果；成功返回不等于业务成功。
 只在用户任务范围内操作；本说明不会替代用户授权、客户端审批或保证 Agent 一定自动调用。`;
 
 export const httpExample = {
@@ -46,9 +47,9 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
   overview: {
     title: '什么时候使用 Flutter API Mocks MCP',
     scenarios: [
-      '需要模拟接口空数据、成功/失败响应、改请求或响应、改写目标地址时，读取 http。',
-      '需要模拟或丢弃业务 WebSocket 文本消息、检查双向消息时，读取 ws。',
-      '需要确认页面、查找 Widget、点击/输入/滚动、检查 Key 缺陷时，读取 ui。',
+      '需要测试下单成功/失败、余额不足、不同资产信息或接口空数据等业务状态，或改请求/响应/目标地址时，读取 http。',
+      '需要替换/丢弃业务 WebSocket 消息、向App注入订单或资产事件、通过真实连接发送topic/data、检查双向消息时，读取 ws。',
+      '需要按Key快速精确定位组件并点击/输入/滚动，减少截图识别的耗时和token，或检查Key缺陷时，读取 ui。',
       '需要完成 Mock 配置 → 页面操作 → 网络与界面验证时，读取 workflow。',
     ],
     start: [
@@ -68,6 +69,10 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
     preparation:
       '先 get_network_status 取得 files.http 绝对路径，再读取文件并保留已有 rules。JSON 顶层只含 version:1 和 rules 数组，不能写注释；示例是新增单条规则的参考，不是覆盖整个现有文件。',
     exampleDocument: httpExample,
+    businessScenarios: [
+      '依据真实接口契约构造下单成功、下单失败、余额不足或资产信息等状态，HTTP状态与业务code分别核对，不能假设业务失败一定返回HTTP 4xx/5xx。',
+      '任务需要多种状态时逐个切换目标规则、触发请求并验证，避免同一接口的多个场景规则同时命中；使用新记录和当前页面判断结果。',
+    ],
     fields: {
       id: '非空且唯一，更新原规则时保留ID。',
       name: '可读规则名。',
@@ -109,7 +114,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       'Debug/JIT、兼容Dio实例；新实例扫描前首请求可能未拦截，上传/流/二进制正文有编辑限制。规则启用与运行时Mock总开关是两层状态。',
   },
   ws: {
-    title: '编辑 .api-mocks/ws-rules.json：业务 WebSocket 规则',
+    title: '业务 WebSocket 规则、模拟推送与真实连接发送',
     preparation:
       '先 get_network_status 取得 files.ws 绝对路径，读取并保留现有规则。此文件针对App业务WebSocket，不是Dart VM调试连接。顶层为version:1和rules数组。',
     exampleDocument: wsExample,
@@ -133,7 +138,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       step('get_ws_connections', selected),
       '检查目标连接的URL、capture和status；URL未知或未接入时说明限制。',
       step('set_mock_enabled', { ...selected, domain: 'ws', enabled: true }),
-      '按Key操作App或等待任务要求的业务事件；本MCP不提供手动推送、定时消息或自动应答。',
+      '按Key操作App或等待任务要求的业务事件；需要主动消息时按manualMessages选择注入App或真实发送。当前不提供定时消息或自动应答。',
       step('get_ws_messages', {
         ...selected,
         connectionId: '<目标连接ID>',
@@ -145,9 +150,34 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
     ],
     switches:
       'WS采集与WS Mock独立，启用WS Mock前需要受支持的WS采集。不会联动Dio Mock；关闭采集或VM断开会关闭WS Mock。',
+    manualMessages: {
+      preparation:
+        '显式开启WS采集和WS Mock，通过get_ws_connections选择在线、capture=attached的准确连接；不新建连接。先记录消息ID或时间基线，连接重建后重新选择。',
+      payload:
+        'text与topic/data二选一；topic/data序列化为JSON对象{topic,data}，data可为任意JSON值。实际协议有其他信封字段、数组或Socket.IO帧时，用text传入完整文本，不能猜测业务协议。正文受运行时UTF-8字节上限限制。',
+      inject: step('inject_ws_message', {
+        ...selected,
+        connectionId: '<目标连接ID>',
+        topic: 'assets.updated',
+        data: { balance: '100.00' },
+      }),
+      injectMeaning:
+        '向App当前连接的接收链路注入模拟服务端消息，便于测试资产更新、订单状态变化等业务状态；不会把该消息发送给服务端。',
+      send: step('send_ws_message', {
+        ...selected,
+        connectionId: '<目标连接ID>',
+        text: '{"topic":"orders.subscribe","data":{"orderId":"example"}}',
+      }),
+      sendMeaning:
+        '通过App已有真实WS连接发往服务端，经过当前outbound规则，可能被替换或丢弃。工具成功不等于服务端收到或业务成功；检查消息outcome、effective、ruleId和业务响应。',
+      verification:
+        '调用get_ws_messages并includeBodies=true核对本次消息与页面变化；超时、取消或断线后先查询结果，不自动重试发送或注入，避免重复业务事件。',
+    },
   },
   ui: {
     title: '发现 UI、按 Key 定位与操作 Widget',
+    purpose:
+      '开发联调优先用结构化快照和稳定Key精确定位组件、驱动多种业务状态验证，减少每步截图识别的耗时与token；视觉样式或布局验收仍需截图证据。',
     discovery: [
       step('list_sessions'),
       step('get_ui_snapshot', { ...selected, maxNodes: 200 }),
@@ -184,6 +214,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
     title: '按需主动调用：规则文件 → UI 操作 → 网络与页面验证',
     steps: [
       '当用户请求涉及API/WS Mock、Flutter UI查找与交互或Key诊断时，主动读取对应get_usage_guide主题并执行任务范围内操作。',
+      '多场景任务按指定状态逐个执行：API构造成功/失败/资产数据，或WS注入/发送业务事件，再按Key操作并验证，防止上个场景的规则和页面状态污染当前结果。',
       step('list_sessions'),
       '按用户项目选择会话；多个候选无法确定时询问用户，不选择无关项目。',
       step('get_network_status', selected),

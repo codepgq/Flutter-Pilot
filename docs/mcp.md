@@ -2,6 +2,8 @@
 
 MCP 让 Claude Code CLI、Codex CLI 和 Codex App 复用插件已经连接的 Dart VM，在 Flutter Debug 应用中按 Key 定位、点击、输入和滚动，并读取 HTTP／WebSocket 记录验证结果。接入无需在应用中添加 Driver、测试入口或 helper。插件仍需在受信任的 macOS 本地 Cursor／VS Code 工作区中运行。
 
+主要用于开发联调和多业务状态验证：API Mock 构造下单成功、失败、余额不足或不同资产数据，WS Mock 与主动消息驱动订单/资产事件，再通过 Key 精确操作目标组件。结构化快照和 Key 避免日常交互反复截图识别，减少耗时与 token；视觉样式与布局验收仍应补充截图。多状态任务按场景逐个切换并分别验证，防止规则和页面状态互相干扰。
+
 ## 开启与适配
 
 1. 用项目原来的入口启动 Flutter Debug 应用，在 **连接与诊断** 确认 VM 已连接。
@@ -38,15 +40,17 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 { "topic": "http" }
 ```
 
-| topic | 内容 |
-| --- | --- |
-| `overview`（默认） | 能力场景、首次调用、规则文件和运行前提 |
-| `http` | `rules.json` 的字段、完整合法示例、请求／响应修改、转发及验证流程 |
-| `ws` | `ws-rules.json` 的 URL、方向、文本匹配、替换／丢弃及双向消息验证 |
-| `ui` | 快照发现真实 Key、父范围查找、点击／输入／滚动／等待、Key 诊断与修复 |
-| `workflow` | 编辑规则 → 重载 → 显式开启采集／Mock → 操作 UI → 查询网络及页面结果 |
+| topic              | 内容                                                                 |
+| ------------------ | -------------------------------------------------------------------- |
+| `overview`（默认） | 能力场景、首次调用、规则文件和运行前提                               |
+| `http`             | `rules.json` 的字段、完整合法示例、请求／响应修改、转发及验证流程    |
+| `ws`               | `ws-rules.json` 的 URL、方向、文本匹配、替换／丢弃及双向消息验证     |
+| `ui`               | 快照发现真实 Key、父范围查找、点击／输入／滚动／等待、Key 诊断与修复 |
+| `workflow`         | 编辑规则 → 重载 → 显式开启采集／Mock → 操作 UI → 查询网络及页面结果  |
 
 同一份指南还可通过 `resources/list` 发现，URI 为 `flutter-api-mocks://guides/<topic>`，使用 `resources/read` 读取。工具入口兼容只使用 MCP tools 的 Agent，资源入口方便支持参考资料的客户端；两者返回相同内容。
+
+支持 MCP Prompts 的客户端还可以通过 `prompts/list` 发现、通过 `prompts/get` 选用四个任务模板：`http_mock`、`websocket_mock`、`flutter_ui` 和 `mock_workflow`。每个模板都可传入可选的 `task` 文本，描述具体目标；模板可在 IDE 离线时读取，不会自行执行工具。模板引导 Agent 读取相应指南并选择项目会话。客户端如何展示或使用 Prompts 由客户端决定，提供模板本身不保证 Agent 主动调用工具；初始化说明和工具描述仍用于能力发现。
 
 指南明确由 Agent 文件工具增量编辑规则，先通过 `get_network_status` 获取准确路径并保留已有规则。HTTP JSON 正文必须序列化为字符串；WS 规则针对业务连接，连接临时规则不能写入持久文件。保存后调用 `reload_rules`，检查各域加载与同步结果，再显式控制开关并验证本次新记录。UI 先用快照发现 Key，再确认唯一目标；没有 Key 时诊断并补业务源码，不回退文本定位。
 
@@ -68,24 +72,58 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 
 同一会话的 UI 操作串行执行，多个 Agent 的一次手势不会穿插。多个工具调用组成的业务流程不持有跨调用锁。等待和滚动均有上限；操作超时可能已经触发业务，Agent 应先查询界面或网络结果，不能自动重试点击。
 
+## WebSocket 主动消息
+
+先显式开启 WS 采集和 WS Mock，再调用 `get_ws_connections` 选择在线且 `capture=attached` 的准确连接。两个工具均复用 App 现有连接，不新建 WebSocket：
+
+- `inject_ws_message`：向 App 接收链路注入模拟服务端事件，用于构造订单状态、资产更新等页面状态，不发给服务端。
+- `send_ws_message`：经 App 当前真实连接发往服务端，适合发送指定订阅或测试消息；当前 outbound 规则仍会生效，消息可能被替换或丢弃。
+
+公共参数是 `sessionId`、`connectionId`；正文选择 `text` 或 `topic` + `data`，两种方式互斥。`topic` + `data` 会序列化为 JSON 对象 `{"topic":"...","data":...}`，`data` 可以是任意 JSON 值；项目采用其他字段、数组信封或 Socket.IO 帧时，使用 `text` 提供符合真实协议的完整文本。正文受运行时 UTF-8 字节上限限制。
+
+例如，调用 `inject_ws_message` 的参数如下，业务 topic 与字段应根据目标项目调整：
+
+```json
+{
+  "sessionId": "从 list_sessions 获取",
+  "connectionId": "从 get_ws_connections 获取",
+  "topic": "assets.updated",
+  "data": { "balance": "100.00" }
+}
+```
+
+通过 `send_ws_message` 发送原始文本的参数示例：
+
+```json
+{
+  "sessionId": "从 list_sessions 获取",
+  "connectionId": "从 get_ws_connections 获取",
+  "text": "{\"topic\":\"orders.subscribe\",\"data\":{\"orderId\":\"example\"}}"
+}
+```
+
+调用前记录消息 ID 或时间基线，调用后使用 `get_ws_messages` 并传 `includeBodies=true` 核对新消息的方向、`original`、`effective`、`outcome` 和 `ruleId`，再验证页面或服务端业务响应。工具成功不等于服务端已收到或业务处理成功。连接重建后重新选择连接；超时、取消或断线后先查结果，避免自动重试造成重复业务事件。当前不提供定时消息或自动应答。
+
 ## 工具列表
 
-| 工具                                       | 用途                                            |
-| ------------------------------------------ | ----------------------------------------------- |
-| `get_usage_guide`                          | 按主题读取规则编辑、UI 定位和验证指南，无需在线 IDE |
-| `list_sessions`                            | 获取已开启 MCP 的项目和能力                     |
-| `get_ui_snapshot`                          | 获取有界的已挂载 UI 结构                        |
-| `find_widget`                              | 按 Key 查询目标                                 |
-| `tap` / `enter_text` / `scroll`            | 点击、替换输入内容、滚动                        |
-| `wait_for_widget`                          | 等待出现、消失或可操作                          |
-| `inspect_key_issues`                       | 诊断当前界面交互目标的 Key                      |
-| `get_network_status`                       | 查询采集／Mock／规则加载状态和文件位置          |
-| `get_requests` / `get_request`             | 分页查询 HTTP 记录与详情                        |
-| `get_ws_connections` / `get_ws_messages`   | 查询 WS 连接和消息；`includeBodies` 请求正文    |
-| `reload_rules`                             | 重新读取、校验并同步 `http`、`ws` 或 `all` 规则 |
-| `set_capture_enabled` / `set_mock_enabled` | 显式控制指定 `http`／`ws` 域的开关              |
+| 工具                                       | 用途                                                  |
+| ------------------------------------------ | ----------------------------------------------------- |
+| `get_usage_guide`                          | 按主题读取规则编辑、UI 定位和验证指南，无需在线 IDE   |
+| `list_sessions`                            | 获取已开启 MCP 的项目和能力                           |
+| `get_ui_snapshot`                          | 获取有界的已挂载 UI 结构                              |
+| `find_widget`                              | 按 Key 查询目标                                       |
+| `tap` / `enter_text` / `scroll`            | 点击、替换输入内容、滚动                              |
+| `wait_for_widget`                          | 等待出现、消失或可操作                                |
+| `inspect_key_issues`                       | 诊断当前界面交互目标的 Key                            |
+| `get_network_status`                       | 查询采集／Mock／规则加载状态和文件位置                |
+| `get_requests` / `get_request`             | 分页查询 HTTP 记录与详情                              |
+| `get_ws_connections` / `get_ws_messages`   | 查询 WS 连接和消息；`includeBodies` 请求正文          |
+| `inject_ws_message`                        | 向 App 注入模拟服务端消息，支持原始文本或 topic/data  |
+| `send_ws_message`                          | 经 App 真实 WS 连接发送消息，受当前 outbound 规则影响 |
+| `reload_rules`                             | 重新读取、校验并同步 `http`、`ws` 或 `all` 规则       |
+| `set_capture_enabled` / `set_mock_enabled` | 显式控制指定 `http`／`ws` 域的开关                    |
 
-除 `get_usage_guide`、`list_sessions` 外，工具均需 `sessionId`。正式参数及边界以客户端发现的工具 schema 为准。MCP 不提供任意 Dart 求值、规则增删改或 WS 手动推送工具。
+除 `get_usage_guide`、`list_sessions` 外，工具均需 `sessionId`。正式参数及边界以客户端发现的工具 schema 为准。MCP 不提供任意 Dart 求值或规则增删改工具。
 
 ## Agent 操作示例
 

@@ -1,5 +1,12 @@
 # 验收记录
 
+## MCP Prompts 与双向 WS 主动消息（2026-11-09）
+
+- 324 项 Vitest（26 个文件）、TypeScript / Webview 类型检查、Prettier、构建和 diff 检查通过。标准 SDK stdio 验证 4 个 Prompts 的发现与读取、19 个工具的发现、双向消息参数、错误处理和指南示例；覆盖原始 text 与 topic/data 互斥、JSON 值、UTF-8 序列化上限及队列取消。
+- `npm run test:ws` 在 Dart 3.13.7 / macOS arm64 的隔离 Debug VM 完成真实 WS 和 WSS 验证：SDK stdio → 认证 IPC → 网络控制器 → Dart 运行时；`inject_ws_message` 的 topic/data 仅进入 App，`send_ws_message` 经 App 既有 socket 到达真实服务端，消息记录可查询。出站 replace/drop、Mock 关闭、未知/失效连接、超限正文和卸载后旧连接拒绝均通过。
+- 两种传输各产生 120 条记录，压力场景各 400 条预期队列遗漏，无运行时警告。报告：[双向 WS 验证结果](../artifacts/ws-mcp-bidirectional-report.json)。复现命令：`npm run test:ws`。
+- 本次未进行 Flutter 设备或 IDE GUI 验收，未操作用户 App、安装扩展或修改真实 Agent 配置。工具返回成功表示本地提交，不代表服务端收到或业务成功；仍需结合本次消息与页面/业务响应验证。
+
 ## MCP Agent 指南增量（2026-11-09）
 
 - 316项 Vitest（26个文件）通过，含新增11项：指南HTTP/WS示例使用生产校验器验证，每条工具调用示例使用真实schema验证；真实MCP SDK stdio验证初始化说明、17工具发现、5份指南工具/资源内容一致，IDE离线或registry不可用仍能读取；无运行时转发，非法主题和任意文件URI拒绝。
