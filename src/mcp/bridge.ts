@@ -28,7 +28,7 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
   const connectionId = randomUUID();
   const announced = new Map<string, SessionDescriptor>();
   const server = new Server(
-    { name: 'flutter-api-mocks', version: '0.0.4' },
+    { name: 'flutter-api-mocks', version: '0.0.5' },
     {
       capabilities: { tools: {}, resources: {}, prompts: {} },
       instructions: agentInstructions,

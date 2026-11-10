@@ -102,7 +102,9 @@ async function open(page: Page, wsOverrides = {}, overrides = {}) {
 
 test('WS 独立采集与 Mock 控制，断线及代理模式阻止推送', async ({ page }) => {
   await open(page, { captureEnabled: false, mockEnabled: false, status: 'off' });
-  await expect(page.getByRole('heading', { name: '连接之后，看见每条消息' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'WebSocket', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '重新发现连接' })).not.toBeVisible();
+  await expect(page.getByRole('region', { name: 'WebSocket 消息', exact: true })).toBeVisible();
   await expect(page.getByRole('switch', { name: 'WS Mock', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: '开启 WS 采集', exact: true }).click();
   expect(await messages(page)).toContainEqual({ action: 'ws.capture', payload: { enabled: true } });
@@ -110,6 +112,7 @@ test('WS 独立采集与 Mock 控制，断线及代理模式阻止推送', async
   await page.getByRole('switch', { name: 'WS Mock', exact: true }).click();
   expect(await messages(page)).toContainEqual({ action: 'ws.mock', payload: { enabled: true } });
   await state(page);
+  await page.getByText('采集设置与说明', { exact: true }).click();
   await page.getByRole('button', { name: '重新发现连接' }).click();
   await page.getByRole('button', { name: '关闭 WS 采集' }).click();
   expect(await messages(page)).toEqual(

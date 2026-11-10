@@ -32,8 +32,11 @@ export function McpPanel({
       <section className="card" aria-label="MCP 服务">
         <div className="mcp-heading">
           <div>
-            <h2>MCP</h2>
-            <p>让 Agent 按 Key 操作 Flutter UI，并使用 API 与 WebSocket 记录验证结果。</p>
+            <h2>MCP 服务</h2>
+            <span className="muted">
+              {mcp?.running ? '桥接运行中' : '桥接未开启'} · VM{' '}
+              {state.vm?.status === 'connected' ? '已连接' : '未连接'}
+            </span>
           </div>
           <button
             className="rule-switch"
@@ -49,33 +52,36 @@ export function McpPanel({
             </span>
           </button>
         </div>
-        <dl className="mcp-facts">
-          <div>
-            <dt>桥接服务</dt>
-            <dd>{mcp?.running ? '运行中' : '未开启'}</dd>
-          </div>
-          <div>
-            <dt>Dart VM</dt>
-            <dd>{state.vm?.status === 'connected' ? '已连接' : '未连接'}</dd>
-          </div>
-          <div>
-            <dt>UI 能力</dt>
-            <dd>{mcp?.ui.supported ? '运行时探测通过 · 实验性' : (mcp?.ui.reason ?? '尚未探测')}</dd>
-          </div>
-          <div>
-            <dt>Node.js</dt>
-            <dd>{mcp?.nodePath ?? '适配时检测 Node.js 20+'}</dd>
-          </div>
-        </dl>
-        <p className="muted">
-          开启 MCP 后继续由插件维护 VM 连接。关闭工作台可继续使用；采集与 Mock 开关独立控制。
-        </p>
-        <button
-          disabled={state.busy || !mcp?.running || state.vm?.status !== 'connected'}
-          onClick={() => send('mcp.probe')}
-        >
-          探测 UI 能力
-        </button>
+        <details className="secondary-details">
+          <summary>服务诊断与 UI 探测</summary>
+          <dl className="mcp-facts">
+            <div>
+              <dt>桥接服务</dt>
+              <dd>{mcp?.running ? '运行中' : '未开启'}</dd>
+            </div>
+            <div>
+              <dt>Dart VM</dt>
+              <dd>{state.vm?.status === 'connected' ? '已连接' : '未连接'}</dd>
+            </div>
+            <div>
+              <dt>UI 能力</dt>
+              <dd>{mcp?.ui.supported ? '运行时探测通过 · 实验性' : (mcp?.ui.reason ?? '尚未探测')}</dd>
+            </div>
+            <div>
+              <dt>Node.js</dt>
+              <dd>{mcp?.nodePath ?? '适配时检测 Node.js 20+'}</dd>
+            </div>
+          </dl>
+          <p className="muted">
+            开启 MCP 后继续由插件维护 VM 连接。关闭工作台可继续使用；采集与 Mock 开关独立控制。
+          </p>
+          <button
+            disabled={state.busy || !mcp?.running || state.vm?.status !== 'connected'}
+            onClick={() => send('mcp.probe')}
+          >
+            探测 UI 能力
+          </button>
+        </details>
         {mcp?.error && (
           <p className="mcp-error" role="alert">
             {mcp.error}
@@ -115,10 +121,7 @@ export function McpPanel({
                   {item?.connected ? '已连接 · MCP 握手通过' : (statuses[item?.status ?? ''] ?? '待检测')}
                 </span>
               </div>
-              {item?.configPath && <code className="mcp-path">{item.configPath}</code>}
-              {!!item?.shared && <p className="muted">Codex CLI 与 App 共用此配置，适配一次即可。</p>}
               {item?.message && <p>{item.message}</p>}
-              {item?.effectiveMessage && <p className="muted">{item.effectiveMessage}</p>}
               {item?.difference && item.status === 'conflict' && (
                 <p className="muted">
                   配置差异：启动程序{item.difference.commandMatches ? '一致' : '不同'}，启动参数
@@ -142,26 +145,34 @@ export function McpPanel({
                     修复本插件配置
                   </button>
                 )}
-                <button disabled={state.busy} onClick={() => send('mcp.inspect', { scope })}>
-                  重新检测
-                </button>
-                {item?.configured && (
-                  <button disabled={state.busy} onClick={() => send('mcp.remove', payload)}>
-                    移除适配
-                  </button>
-                )}
-                {item?.configPath && (
-                  <button disabled={state.busy} onClick={() => send('mcp.config.open', payload)}>
-                    查看配置
-                  </button>
-                )}
+                <details className="secondary-details mcp-config-details">
+                  <summary>配置与维护</summary>
+                  {item?.configPath && <code className="mcp-path">{item.configPath}</code>}
+                  {!!item?.shared && <p className="muted">Codex CLI 与 App 共用此配置，适配一次即可。</p>}
+                  {item?.effectiveMessage && <p className="muted">{item.effectiveMessage}</p>}
+                  <div className="mcp-actions">
+                    <button disabled={state.busy} onClick={() => send('mcp.inspect', { scope })}>
+                      重新检测
+                    </button>
+                    {item?.configured && (
+                      <button disabled={state.busy} onClick={() => send('mcp.remove', payload)}>
+                        移除适配
+                      </button>
+                    )}
+                    {item?.configPath && (
+                      <button disabled={state.busy} onClick={() => send('mcp.config.open', payload)}>
+                        查看配置
+                      </button>
+                    )}
+                  </div>
+                </details>
               </div>
             </article>
           );
         })}
       </section>
-      <section className="card" aria-label="MCP 使用说明">
-        <h3>Agent 工作流程</h3>
+      <details className="card secondary-details" aria-label="MCP 使用说明">
+        <summary>使用说明与 Agent 工作流程</summary>
         <p>
           Agent 连接后会收到能力与使用场景说明；需要 Mock、排查网络或操作 Flutter UI 时，先调用{' '}
           <code>get_usage_guide</code> 读取对应指南。
@@ -201,7 +212,7 @@ export function McpPanel({
             ))}
           </ul>
         ) : null}
-      </section>
+      </details>
     </div>
   );
 }

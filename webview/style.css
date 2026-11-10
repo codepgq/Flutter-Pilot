@@ -151,7 +151,7 @@ p {
   margin: 0;
 }
 h2 {
-  font-size: 23px;
+  font-size: 17px;
   letter-spacing: -0.5px;
   font-weight: 650;
 }
@@ -233,7 +233,7 @@ details > pre {
 .app {
   max-width: 1800px;
   margin: 0 auto;
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
 }
@@ -241,7 +241,9 @@ details > pre {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 26px 30px 23px;
+  padding: 6px 16px;
+  min-height: 44px;
+  flex-shrink: 0;
   border-bottom: 1px solid var(--line);
   gap: 20px;
 }
@@ -261,7 +263,7 @@ details > pre {
   color: var(--focus);
 }
 h1 {
-  font-size: 21px;
+  font-size: 15px;
   font-weight: 650;
   letter-spacing: -0.7px;
 }
@@ -284,7 +286,8 @@ h1 span {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 12px;
+  margin-left: auto;
 }
 .status-pill {
   display: flex;
@@ -359,15 +362,17 @@ h1 span {
 }
 .nav-tabs {
   display: flex;
-  gap: 20px;
-  padding: 0 30px;
+  gap: 16px;
+  padding: 0 16px;
+  flex-shrink: 0;
+  overflow-x: auto;
   border-bottom: 1px solid var(--line);
 }
 .nav-tabs > button {
   border: none;
   border-radius: 0;
   background: none;
-  padding: 15px 3px;
+  padding: 8px 3px;
   color: var(--muted);
   position: relative;
   gap: 8px;
@@ -403,7 +408,8 @@ h1 span {
 }
 main {
   flex: 1;
-  min-height: 550px;
+  min-height: 0;
+  overflow: auto;
 }
 footer {
   display: flex;
@@ -427,14 +433,14 @@ footer {
 .connection-page,
 .rules-page,
 .breakpoints-page {
-  padding: 30px;
+  padding: 14px 16px;
 }
 .page-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  margin: 3px 0 26px;
+  margin: 0 0 12px;
 }
 .page-title p {
   margin-top: 8px;
@@ -463,10 +469,10 @@ footer {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
 }
 .project-binding {
-  margin: 24px 30px 0;
+  margin: 0 16px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -491,7 +497,7 @@ footer {
   overflow-wrap: anywhere;
 }
 .connection-modes button {
-  padding: 12px 16px;
+  padding: 6px 10px;
 }
 .connection-modes button[aria-pressed='true'] {
   border-color: var(--focus);
@@ -593,13 +599,13 @@ footer {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 9px;
-  padding: 21px;
+  padding: 14px;
 }
 .card-heading {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 .card-heading h3 {
   flex: 1;
@@ -935,7 +941,7 @@ footer {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 18px 20px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--line);
 }
 .search-field {
@@ -994,8 +1000,8 @@ footer {
 .history-layout {
   display: grid;
   grid-template-columns: 210px 270px minmax(0, 1fr);
-  min-height: 550px;
-  height: calc(100vh - 332px);
+  min-height: 260px;
+  flex: 1;
 }
 .api-sidebar,
 .request-list {
@@ -1012,7 +1018,7 @@ footer {
   display: flex;
   gap: 12px;
   align-items: center;
-  padding: 10px 16px;
+  padding: 4px 16px;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
@@ -1917,10 +1923,11 @@ footer {
 }
 @media (max-width: 760px) {
   .project-binding {
-    margin: 18px 18px 0;
+    margin: 0 12px 12px;
   }
   .app-header {
-    padding: 18px;
+    padding: 6px 12px;
+    gap: 10px;
   }
   .context-bar {
     padding: 9px 18px;
@@ -1930,8 +1937,8 @@ footer {
     gap: 10px;
   }
   .nav-tabs {
-    padding: 0 18px;
-    gap: 15px;
+    padding: 0 12px;
+    gap: 12px;
     overflow: auto;
   }
   .nav-tabs > button {
@@ -1945,7 +1952,7 @@ footer {
   .connection-page,
   .rules-page,
   .breakpoints-page {
-    padding: 22px 18px;
+    padding: 12px;
   }
   .setup-grid,
   .run-card {
@@ -1955,7 +1962,7 @@ footer {
     grid-column: auto;
   }
   .status-pill {
-    display: none;
+    font-size: 10px;
   }
   .header-actions {
     gap: 8px;
@@ -1975,11 +1982,11 @@ footer {
     max-height: max(550px, calc(100vh - 320px));
   }
   .history-toolbar {
-    padding: 12px;
+    padding: 8px 12px;
   }
   .history-toolbar .search-field {
-    min-width: 100%;
-    flex-basis: 100%;
+    min-width: 100px;
+    flex-basis: 0;
   }
   .history-toolbar > select {
     flex: 1;
@@ -2616,4 +2623,246 @@ footer {
 }
 .vm-mock-card .card-actions {
   margin: 12px 0 0;
+}
+
+/* Shared content-first workbench chrome. */
+[hidden] {
+  display: none !important;
+}
+.header-project {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+.brand {
+  flex-shrink: 0;
+  gap: 7px;
+}
+.workspace-menu {
+  position: relative;
+}
+.workspace-menu > summary {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.workspace-menu-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: min(300px, calc(100vw - 24px));
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px #0003;
+  font-size: 12px;
+}
+.workspace-menu-panel > span,
+.workspace-menu-panel > strong {
+  overflow-wrap: anywhere;
+}
+.compact-disclosure > summary {
+  padding: 5px 0;
+}
+.compact-disclosure > p {
+  font-size: 12px;
+  margin: 6px 0 10px;
+}
+.project-binding .card-actions {
+  margin: 6px 0;
+}
+.project-binding-heading {
+  margin: 8px 0;
+}
+.global-notice {
+  padding: 0 16px;
+  background: var(--subtle);
+  flex-shrink: 0;
+}
+.global-notice > summary {
+  font-size: 11px;
+  padding: 4px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.global-notice .notice {
+  margin: 0 0 8px;
+}
+.history-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.history-toolbar,
+.history-viewbar,
+.advanced-filters {
+  flex-shrink: 0;
+}
+.advanced-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.advanced-filters > input {
+  width: 80px;
+}
+.advanced-filters > select {
+  max-width: 160px;
+}
+.advanced-filters label {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.advanced-filters input,
+.advanced-filters select,
+.advanced-filters button {
+  font-size: 11px;
+}
+.rule-presets {
+  margin-bottom: 8px;
+}
+.rule-presets .rule-templates {
+  margin: 8px 0;
+}
+.breakpoint-help {
+  margin: 8px 16px 0;
+}
+@media (max-width: 760px) {
+  .history-layout {
+    flex: none;
+    min-height: 260px;
+  }
+  .header-project {
+    display: none;
+  }
+  .history-toolbar {
+    flex-wrap: nowrap;
+  }
+  .history-toolbar > select {
+    max-width: 100px;
+    flex: none;
+  }
+  .advanced-filters {
+    padding: 8px 12px;
+  }
+  .page-title.compact {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+}
+
+.mcp-page {
+  padding: 14px 16px;
+  gap: 12px;
+}
+.mcp-agents {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.mcp-agents > .mcp-heading,
+.mcp-agents > p {
+  grid-column: 1 / -1;
+}
+.mcp-agents > p {
+  margin: 0;
+  font-size: 12px;
+}
+.mcp-actions {
+  margin-top: 8px;
+}
+.mcp-config-details {
+  width: 100%;
+}
+.secondary-details > summary {
+  padding: 5px 0;
+}
+.secondary-content {
+  display: grid;
+  gap: 8px;
+  padding: 8px 0;
+}
+.secondary-content > button {
+  justify-self: start;
+}
+.ws-page {
+  padding: 14px 16px;
+  gap: 10px;
+}
+.ws-controls {
+  padding: 10px 12px;
+}
+.ws-control-actions {
+  gap: 10px;
+}
+.ws-control-actions > h2 {
+  font-size: 15px;
+}
+.ws-capture-details {
+  margin-left: auto;
+}
+.ws-capture-details[open] {
+  flex-basis: 100%;
+}
+.compact {
+  margin-bottom: 12px;
+}
+.compact h2 {
+  font-size: 17px;
+}
+.vm-statistics {
+  margin-top: 10px;
+  gap: 8px 20px;
+}
+.vm-statistics b {
+  font-size: 14px;
+}
+.vm-active-connection {
+  padding: 8px 10px;
+  margin: 8px 0;
+}
+.rule-search {
+  margin-bottom: 10px;
+}
+.rule-card {
+  padding: 12px;
+}
+@media (max-width: 1000px) {
+  .mcp-agents {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 760px) {
+  .mcp-page,
+  .ws-page {
+    padding: 12px;
+  }
+  .ws-controls {
+    padding: 10px;
+  }
+  .ws-capture-details {
+    margin-left: 0;
+  }
+  .ws-control-actions .status-pill {
+    display: flex;
+  }
+  .brand h1 {
+    font-size: 14px;
+  }
 }

@@ -147,23 +147,17 @@ export function WebSocketPanel({
   };
   return (
     <div className="ws-page">
-      <div className="page-title compact ws-title">
-        <div>
-          <div className="eyebrow">WEBSOCKET · 实验功能</div>
-          <h2>连接之后，看见每条消息</h2>
-          <p>独立采集业务 WebSocket，按需修改消息或向 App 模拟推送。</p>
-        </div>
-        <span className={`status-pill ${state.captureEnabled && connected ? 'online' : ''}`}>
-          <i />
-          {state.status === 'unsupported'
-            ? '当前运行时不支持'
-            : state.captureEnabled && connected
-              ? 'WS 采集中'
-              : 'WS 采集未开启'}
-        </span>
-      </div>
       <section className="card ws-controls" aria-label="WebSocket 采集控制">
         <div className="ws-control-actions">
+          <h2>WebSocket</h2>
+          <span className={`status-pill ${state.captureEnabled && connected ? 'online' : ''}`}>
+            <i />
+            {state.status === 'unsupported'
+              ? '当前运行时不支持'
+              : state.captureEnabled && connected
+                ? 'WS 采集中'
+                : 'WS 采集未开启'}
+          </span>
           <button
             className={state.captureEnabled ? '' : 'primary'}
             disabled={busy || (!state.captureEnabled && !canCapture)}
@@ -184,18 +178,27 @@ export function WebSocketPanel({
             </span>
             WS Mock
           </button>
-          <button disabled={busy || !canCapture || !state.captureEnabled} onClick={() => send('ws.rescan')}>
-            重新发现连接
-          </button>
+          <details className="secondary-details ws-capture-details">
+            <summary>采集设置与说明</summary>
+            <div className="secondary-content">
+              <button
+                disabled={busy || !canCapture || !state.captureEnabled}
+                onClick={() => send('ws.rescan')}
+              >
+                重新发现连接
+              </button>
+              <p>采集会安装实验性运行时处理器，无需改源码。WS Mock 独立开启，关闭工作台后继续运行。</p>
+              <small>仅接入受支持的 dart:io 客户端连接；新连接在扫描后接入，接入前消息无法补抓或修改。</small>
+            </div>
+          </details>
         </div>
-        <p>
-          {!vmMode
-            ? 'WS 消息功能需要 VM 接入，请先在“连接与诊断”切换到 VM 模式。'
-            : !connected
-              ? '先在“连接与诊断”连接运行中的 Flutter Debug VM，再手动开启 WS 采集。'
-              : '采集会安装实验性运行时处理器，无需改源码。WS Mock 独立开启，关闭工作台后继续运行。'}
-        </p>
-        <small>仅接入受支持的 dart:io 客户端连接；新连接在扫描后接入，接入前消息无法补抓或修改。</small>
+        {(!vmMode || !connected) && (
+          <p>
+            {!vmMode
+              ? 'WS 消息功能需要 VM 接入，请先在“连接与诊断”切换到 VM 模式。'
+              : '先在“连接与诊断”连接运行中的 Flutter Debug VM，再手动开启 WS 采集。'}
+          </p>
+        )}
       </section>
       {(state.error || state.ruleSyncError) && (
         <div className="notice" role="alert">

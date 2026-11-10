@@ -358,16 +358,14 @@ function App() {
     <div className="app">
       <header className="app-header">
         <div className="brand">
-          <div className="brand-mark">
-            <Icon name="radar" size={24} />
-          </div>
+          <Icon name="radar" size={18} />
           <div>
-            <h1>
-              API Mocks <span>FLUTTER</span>
-            </h1>
-            <p>你的接口调试工作台</p>
+            <h1>API Mocks</h1>
           </div>
         </div>
+        <span className="header-project" title={state.workspace}>
+          {state.project?.name || state.workspace.split('/').filter(Boolean).at(-1) || '当前工作区'}
+        </span>
         <div className="header-actions">
           <span className={`status-pill ${running ? 'online' : ''}`}>
             <i />
@@ -385,50 +383,45 @@ function App() {
                     ? '引擎已就绪'
                     : '代理未启动'}
           </span>
-          <Button
-            action={vmMode ? (running ? 'vm.disconnect' : undefined) : running ? 'stop' : 'start'}
-            onClick={vmMode && !running ? () => setTab('connection') : undefined}
-            primary={!running}
-            disabled={state.busy || (vmMode && state.vm?.status === 'connecting')}
-          >
-            <Icon name={running ? 'stop' : 'play'} size={14} />
-            {vmMode
-              ? running
-                ? '断开 VM'
-                : state.vm?.status === 'connecting'
-                  ? '连接中…'
-                  : '连接 VM'
-              : running
-                ? '停止代理'
-                : '启动代理'}
-          </Button>
+          <details className="workspace-menu">
+            <summary>工作区与连接</summary>
+            <div className="workspace-menu-panel">
+              <strong>
+                {state.project?.name || state.workspace.split('/').filter(Boolean).at(-1) || '当前工作区'}
+              </strong>
+              <span className="mono">
+                {vmMode
+                  ? `VM · ${running ? (state.vm?.endpoint ?? '已连接') : state.vm?.status === 'connecting' ? '连接中' : '未连接'}`
+                  : `${state.connectionHost}:${state.engine.proxyPort ?? 8080}`}
+              </span>
+              <span>
+                {enabled} 条规则启用 · {state.pending.length} 个等待断点
+              </span>
+              <Button
+                action={vmMode ? (running ? 'vm.disconnect' : undefined) : running ? 'stop' : 'start'}
+                onClick={vmMode && !running ? () => setTab('connection') : undefined}
+                primary={!running}
+                disabled={state.busy || (vmMode && state.vm?.status === 'connecting')}
+              >
+                <Icon name={running ? 'stop' : 'play'} size={14} />
+                {vmMode
+                  ? running
+                    ? '断开 VM'
+                    : state.vm?.status === 'connecting'
+                      ? '连接中…'
+                      : '连接 VM'
+                  : running
+                    ? '停止代理'
+                    : '启动代理'}
+              </Button>
+              <span>{running ? '后台记录中 · 关闭工作台继续记录' : '本地存储 · 仅用于开发调试'}</span>
+              <button onClick={() => send('settings.open')}>
+                设置 <Icon name="external" size={12} />
+              </button>
+            </div>
+          </details>
         </div>
       </header>
-      <div className="context-bar">
-        <div>
-          <span className="context-dot" />
-          <span className="context-project" title={state.workspace}>
-            {state.project?.name || state.workspace.split('/').filter(Boolean).at(-1) || '当前工作区'}
-          </span>
-          <span className="divider">/</span>
-          <span className="mono">
-            {vmMode
-              ? `VM · ${running ? (state.vm?.endpoint ?? '已连接') : state.vm?.status === 'connecting' ? '连接中' : '未连接'}`
-              : `${state.connectionHost}:${state.engine.proxyPort ?? 8080}`}
-          </span>
-        </div>
-        <div>
-          <span>
-            <b>{enabled}</b> 条规则启用
-          </span>
-          <span>
-            <b>{state.pending.length}</b> 个等待断点
-          </span>
-          <button className="text-button" onClick={() => send('settings.open')}>
-            设置 <Icon name="external" size={12} />
-          </button>
-        </div>
-      </div>
       <nav className="nav-tabs">
         {nav.map((n) => (
           <button key={n.id} className={tab === n.id ? 'active' : ''} onClick={() => setTab(n.id)}>
@@ -448,34 +441,42 @@ function App() {
           </button>
         </div>
       )}
-      {state.ruleSyncError && <div className="notice global-notice">{state.ruleSyncError}</div>}
+      {state.ruleSyncError && (
+        <details className="global-notice">
+          <summary title={state.ruleSyncError}>规则状态 · {state.ruleSyncError}</summary>
+          <div className="notice">{state.ruleSyncError}</div>
+        </details>
+      )}
       <main>
         {tab === 'connection' && (
           <>
+            <Connection state={state} preview={preview} />
             {state.project && (
-              <section className="card project-binding" aria-label="当前绑定项目">
-                <div className="project-binding-heading">
-                  <strong>{state.project.name}</strong>
-                  <span className="tag">当前项目</span>
-                  <div className="card-actions">
-                    <Button onClick={() => send('project.open', { kind: 'config' })} disabled={state.busy}>
-                      项目配置
-                    </Button>
-                    <Button onClick={() => send('project.open', { kind: 'rules' })} disabled={state.busy}>
-                      规则文件
-                    </Button>
-                    <Button action="project.reload" disabled={state.busy}>
-                      读取项目文件
-                    </Button>
+              <section className="project-binding" aria-label="当前绑定项目">
+                <details className="compact-disclosure">
+                  <summary>项目配置与规则文件</summary>
+                  <div className="project-binding-heading">
+                    <strong>{state.project.name}</strong>
+                    <span className="tag">当前项目</span>
+                    <div className="card-actions">
+                      <Button onClick={() => send('project.open', { kind: 'config' })} disabled={state.busy}>
+                        项目配置
+                      </Button>
+                      <Button onClick={() => send('project.open', { kind: 'rules' })} disabled={state.busy}>
+                        规则文件
+                      </Button>
+                      <Button action="project.reload" disabled={state.busy}>
+                        读取项目文件
+                      </Button>
+                    </div>
                   </div>
-                </div>
-                <code className="project-uuid" title={state.project.id}>
-                  UUID · {state.project.id}
-                </code>
+                  <code className="project-uuid" title={state.project.id}>
+                    UUID · {state.project.id}
+                  </code>
+                </details>
                 {state.project.notice && <small role="status">{state.project.notice}</small>}
               </section>
             )}
-            <Connection state={state} preview={preview} />
           </>
         )}
         {tab === 'mcp' && <McpPanel state={state} send={send} />}
@@ -493,26 +494,18 @@ function App() {
         {tab === 'breakpoints' && (
           <>
             {vmMode && (
-              <div className="notice">
-                VM 模式暂不支持手动断点。自动 Mock 和双向修改请开启实验性 Dio Mock；手动暂停请使用代理模式。
-              </div>
+              <details className="compact-disclosure breakpoint-help">
+                <summary>VM 模式 · 手动断点需使用代理</summary>
+                <p>
+                  VM 模式暂不支持手动断点。自动 Mock 和双向修改请开启实验性 Dio
+                  Mock；手动暂停请使用代理模式。工作台关闭后自动跳过人工暂停，继续后台记录和自动规则。
+                </p>
+              </details>
             )}
             <Breakpoints pending={state.pending} />
           </>
         )}
       </main>
-      <footer>
-        <span className="footer-brand">
-          FLUTTER API MOCKS <span>v0.0.3</span>
-        </span>
-        <span>
-          {running
-            ? vmMode
-              ? 'VM 后台记录中 · 关闭工作台继续'
-              : '后台记录中 · 关闭工作台继续记录'
-            : '本地存储 · 仅用于开发调试'}
-        </span>
-      </footer>
     </div>
   );
 }
@@ -633,53 +626,51 @@ function VmConnection({ state }: { state: WorkbenchState }) {
             {connected ? '已连接' : connecting ? '连接中' : '未连接'}
           </span>
         </div>
-        <p>
-          使用原来的 Flutter Debug 启动项运行或附加应用，自动发现本次 VM 地址；也可手动填写。
-          无需修改项目代码、安装 CA 或启动代理。
-        </p>
-        <VmDiscovery state={state} />
         {connected && (
           <div className="vm-active-connection" role="status" aria-label="VM 已连接">
             <Icon name="plug" size={18} />
             <strong>已连接 · {vm.endpoint ?? 'Dart VM Service'}</strong>
             <span>后台记录中</span>
-          </div>
-        )}
-        <label>
-          VM WebSocket 地址
-          <input
-            aria-label="VM WebSocket 地址"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder={connected ? '已连接，断开后可输入新的地址' : 'ws://127.0.0.1:端口/认证路径/ws'}
-            value={url}
-            disabled={state.busy || connected || connecting}
-            onChange={(event) => setUrl(event.target.value)}
-          />
-        </label>
-        <div className="card-actions">
-          {connected ? (
             <Button action="vm.disconnect" disabled={state.busy}>
               断开连接
             </Button>
-          ) : (
-            <Button
-              primary
-              disabled={state.busy || connecting || !url.trim()}
-              onClick={() => {
-                send('vm.connect', { url: url.trim() });
-                setUrl('');
-              }}
-            >
-              {connecting ? '连接中…' : '连接并记录'}
-            </Button>
+          </div>
+        )}
+        <details className="compact-disclosure" open={!connected}>
+          <summary>调试会话与手动地址</summary>
+          <VmDiscovery state={state} />
+          <label>
+            VM WebSocket 地址
+            <input
+              aria-label="VM WebSocket 地址"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={connected ? '已连接，断开后可输入新的地址' : 'ws://127.0.0.1:端口/认证路径/ws'}
+              value={url}
+              disabled={state.busy || connected || connecting}
+              onChange={(event) => setUrl(event.target.value)}
+            />
+          </label>
+          {!connected && (
+            <div className="card-actions">
+              <Button
+                primary
+                disabled={state.busy || connecting || !url.trim()}
+                onClick={() => {
+                  send('vm.connect', { url: url.trim() });
+                  setUrl('');
+                }}
+              >
+                {connecting ? '连接中…' : '连接并记录'}
+              </Button>
+            </div>
           )}
-        </div>
-        <small className="muted">
-          地址可能含调试凭证，仅用于本次连接，不写入设置或日志。Hot Restart 后会重新发现 Isolate；VM
-          端口变化后请重新连接。
-        </small>
+          <small className="muted">
+            使用原 Flutter Debug 启动项运行或附加应用，无需修改代码、安装 CA
+            或启动代理。地址含调试凭证，仅用于本次连接；端口变化后请重新连接。
+          </small>
+        </details>
         <div className="vm-statistics">
           <span>
             <b>{vm?.isolates ?? 0}</b> 个可采集 Isolate
@@ -741,11 +732,14 @@ function VmConnection({ state }: { state: WorkbenchState }) {
           {warning}
         </div>
       ))}
-      <div className="notice">
-        VM 与代理历史分开保存，规则共用。VM 内置采集覆盖受支持的 dart:io HTTP
-        请求；原生插件、WebView、自定义网络适配器和 Release 不在覆盖承诺内。Mock 在 Dio
-        数据层执行，其他拦截器仍可能继续处理结果。
-      </div>
+      <details className="compact-disclosure">
+        <summary>VM 采集范围与使用说明</summary>
+        <p>
+          VM 与代理历史分开保存，规则共用。VM 内置采集覆盖受支持的 dart:io HTTP
+          请求；原生插件、WebView、自定义网络适配器和 Release 不在覆盖承诺内。Mock 在 Dio
+          数据层执行，其他拦截器仍可能继续处理结果。
+        </p>
+      </details>
     </>
   );
 }
@@ -771,9 +765,7 @@ function Connection({
       <div className="connection-page">
         <div className="page-title">
           <div>
-            <div className="eyebrow">VM SERVICE · 0.0.3</div>
-            <h2>连接 Flutter VM，零源码记录 API</h2>
-            <p>推荐通过 VM WS 接入，无需改源码或证书；连接后先记录，按需开启运行时 Dio Mock。</p>
+            <h2>连接与诊断</h2>
           </div>
         </div>
         <ConnectionMode state={state} />
@@ -784,11 +776,7 @@ function Connection({
     <div className="connection-page">
       <div className="page-title">
         <div>
-          <div className="eyebrow">GET CONNECTED</div>
-          <h2>让接口调试，从连接开始</h2>
-          <p>
-            备用接入：VM 无法满足当前网络场景，或需要手动断点时使用代理；按向导配置引擎、证书和开发辅助代码。
-          </p>
+          <h2>连接与诊断</h2>
         </div>
         <span className="platform-badge">macOS · Android / iOS</span>
       </div>
@@ -986,6 +974,7 @@ function Connection({
 }
 function History({ state, selected }: { state: WorkbenchState; selected?: HistoryEntry }) {
   const [query, setQuery] = useState<HistoryQuery>({});
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [group, setGroup] = useState('');
   const [detailTab, setDetailTab] = useState<'request' | 'response' | 'diff' | 'info'>('response');
   const [offset, setOffset] = useState(0);
@@ -1050,6 +1039,26 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
             <option key={m}>{m}</option>
           ))}
         </select>
+        <button
+          aria-expanded={filtersOpen}
+          aria-controls="history-filters"
+          onClick={() => setFiltersOpen(!filtersOpen)}
+        >
+          <Icon name="rules" size={14} />
+          筛选
+          {[query.status, query.mocked, query.ruleId, query.from, query.to].filter((v) => v !== undefined)
+            .length > 0 && (
+            <span className="count accent">
+              {
+                [query.status, query.mocked, query.ruleId, query.from, query.to].filter(
+                  (v) => v !== undefined,
+                ).length
+              }
+            </span>
+          )}
+        </button>
+      </div>
+      <div className="advanced-filters" id="history-filters" hidden={!filtersOpen}>
         <input
           className="status-filter"
           aria-label="筛选状态码"
@@ -1079,12 +1088,6 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
             </option>
           ))}
         </select>
-        <Button action="history.clear" danger disabled={!state.history.total}>
-          清空
-        </Button>
-      </div>
-      <details className="time-filter">
-        <summary>时间范围</summary>
         <label>
           开始
           <input
@@ -1103,7 +1106,10 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
             onChange={(e) => update({ to: e.target.value ? new Date(e.target.value).getTime() : undefined })}
           />
         </label>
-      </details>
+        <Button action="history.clear" danger disabled={!state.history.total}>
+          清空历史
+        </Button>
+      </div>
       <div className="history-viewbar">
         <button
           aria-expanded={!catalogCollapsed}
@@ -1499,39 +1505,48 @@ function Rules({
     <div className="rules-page">
       <div className="page-title compact">
         <div>
-          <div className="eyebrow">MOCK RULES</div>
-          <h2>把接口场景，留在手边</h2>
-          <p>按原始请求匹配，每阶段执行优先级最高的首条规则。</p>
+          <h2>
+            Mock 规则 <span className="count">{state.rules.length}</span>
+          </h2>
         </div>
         <div className="toolbar-actions">
-          <Button action="rules.import">导入</Button>
-          <Button action="rules.export">导出</Button>
+          <details className="workspace-menu">
+            <summary>更多操作</summary>
+            <div className="workspace-menu-panel">
+              <Button action="rules.import">导入</Button>
+              <Button action="rules.export">导出</Button>
+            </div>
+          </details>
           <Button primary onClick={() => setEdit(newRule('mock'))}>
             <Icon name="plus" size={15} />
             新建规则
           </Button>
         </div>
       </div>
-      <div className="rule-templates">
-        {Object.entries(kindLabels).map(([kind, label]) => (
-          <button key={kind} onClick={() => setEdit(newRule(kind))}>
-            <Icon
-              name={
-                kind === 'mock'
-                  ? 'box'
-                  : kind === 'breakpoint'
-                    ? 'pause'
-                    : kind === 'redirect'
-                      ? 'arrowRight'
-                      : 'rules'
-              }
-              size={18}
-            />
-            <span>{label}</span>
-            <Icon name="plus" size={14} />
-          </button>
-        ))}
-      </div>
+      <details className="compact-disclosure rule-presets">
+        <summary>规则模板与说明</summary>
+        <p>按原始请求匹配，每阶段执行优先级最高的首条规则。</p>
+        <div className="rule-templates">
+          {Object.entries(kindLabels).map(([kind, label]) => (
+            <button key={kind} onClick={() => setEdit(newRule(kind))}>
+              <Icon
+                name={
+                  kind === 'mock'
+                    ? 'box'
+                    : kind === 'breakpoint'
+                      ? 'pause'
+                      : kind === 'redirect'
+                        ? 'arrowRight'
+                        : 'rules'
+                }
+                size={18}
+              />
+              <span>{label}</span>
+              <Icon name="plus" size={14} />
+            </button>
+          ))}
+        </div>
+      </details>
       <div className="search-field rule-search">
         <Icon name="search" size={16} />
         <input
@@ -2018,12 +2033,14 @@ function Breakpoints({ pending }: { pending: PendingBreakpoint[] }) {
     <div className="breakpoints-page">
       <div className="page-title compact">
         <div>
-          <div className="eyebrow">BREAKPOINTS</div>
-          <h2>暂停一下，调整后继续</h2>
-          <p>工作台打开时可处理手动断点；关闭后自动跳过人工暂停，继续后台记录和自动规则。</p>
+          <h2>断点队列</h2>
         </div>
         <span className="tag warm">{pending.length} 个等待处理</span>
       </div>
+      <details className="compact-disclosure breakpoint-instructions">
+        <summary>断点使用说明</summary>
+        <p>工作台打开时可处理手动断点；关闭后自动跳过人工暂停，继续后台记录和自动规则。</p>
+      </details>
       {pending.length ? (
         <div className="breakpoint-layout">
           <aside>

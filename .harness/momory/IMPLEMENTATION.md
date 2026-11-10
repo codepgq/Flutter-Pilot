@@ -182,3 +182,16 @@
 - 按用户确认保留连接页位置，复用规则列表button[role=switch]的滑块样式，去掉多段技术说明和重复标题；保留实验性标记、一句说明，重新发现按钮仅开启时显示。vm.mock消息和禁用条件不变。
 - 类型检查、构建、格式/diff检查及27项工作台UI回归通过；扩展现有用例验证鼠标/Space切换、繁忙/断线禁用、390px布局及卡片高度，合成窄屏截图artifacts/dio-mock-switch-narrow.png已目视检查。
 - 用户随后要求安装到Cursor：0.0.3 VSIX重新构建并CLI --force覆盖安装成功；扩展、Webview JS/CSS与两份Dart模板均与VSIX及构建SHA-256一致，清单除安装元数据外一致。报告artifacts/dio-mock-ui-install-report.json。未强制Reload Window，未提交本次UI改动。
+
+## 六个 Tab 内容优先布局（2026-11-10）
+
+- React/CSS 调整共用紧凑顶部，内容区使用剩余窗口高度并独立滚动；覆盖连接、HTTP 历史、WebSocket、Mock 规则、断点和 MCP。
+- 历史高级条件展开/收起保留查询；规则模板、导入导出、项目文件、WS 采集说明、MCP 维护与说明折叠。VM 已连接收起地址输入，错误/冲突及手动开启语义保留。
+- 类型检查、构建、修改文件 Prettier、git diff --check 和36项 Playwright通过；新增1280px/390px六Tab内容位置、主区域无横向溢出及筛选保留检查，合成数据截图位于 artifacts/compact-*.png。已目视检查截图；本轮未启动IDE GUI、未安装或提交。
+
+## 0.0.5 打包与 Cursor 安装（2026-11-10）
+
+- 用户要求发布新版本、commit并安装Cursor，补丁版本递增0.0.5。manifest、lockfile、MCP serverInfo、包名、README/CHANGELOG及验收说明已同步。
+- 324项Vitest、36项Playwright（布局轮）、类型检查、全仓格式检查与构建通过。本轮不重复设备/IDE GUI验收。
+- Cursor CLI --force安装成功，CLI已列出0.0.5；包内25项文件与当前源码/构建及安装目录逐项一致，manifest除Cursor元数据外一致。构建与安装桥接分别通过SDK stdio：0.0.5、19工具、4 Prompts、5资源、离线指南读取。报告artifacts/v0.0.5-install-report.json。
+- 当前在main，无远端；提交本轮布局和版本改动，不推送。未启动IDE GUI、未访问钥匙串、未强制重载窗口，用户方便时执行Developer: Reload Window加载新版。

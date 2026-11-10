@@ -51,6 +51,12 @@ async function load(page: any, override = {}) {
 test('MCP defaults to project scope and emits explicit adapter/enable controls', async ({ page }) => {
   await load(page);
   await expect(page.getByLabel('适配范围')).toHaveValue('project');
+  await expect(page.getByRole('button', { name: '探测 UI 能力' })).not.toBeVisible();
+  await expect(page.getByText('topic: workflow', { exact: true })).not.toBeVisible();
+  await page.getByText('服务诊断与 UI 探测', { exact: true }).click();
+  await expect(page.getByRole('button', { name: '探测 UI 能力' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '探测 UI 能力' })).toBeDisabled();
+  await page.getByText('服务诊断与 UI 探测', { exact: true }).click();
   const toggle = page.getByRole('switch', { name: '开启 MCP' });
   await expect(toggle).toHaveAttribute('aria-checked', 'false');
   await toggle.click();
@@ -83,7 +89,15 @@ test('configured status does not imply loaded and conflicts require explicit rep
       ],
     },
   });
-  await expect(page.getByRole('article', { name: 'Claude Code CLI' })).toContainText('待客户端连接');
+  const claude = page.getByRole('article', { name: 'Claude Code CLI' });
+  await expect(claude).toContainText('待客户端连接');
+  await expect(claude.getByRole('button', { name: '移除适配' })).not.toBeVisible();
+  await claude.getByText('配置与维护', { exact: true }).click();
+  await claude.getByRole('button', { name: '查看配置' }).click();
+  expect(await page.evaluate(() => (window as any).__messages)).toContainEqual({
+    action: 'mcp.config.open',
+    payload: { agent: 'claude', scope: 'project' },
+  });
   await page
     .getByRole('article', { name: 'Codex CLI', exact: true })
     .getByRole('button', { name: '修复本插件配置' })

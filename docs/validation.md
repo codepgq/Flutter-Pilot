@@ -225,3 +225,10 @@ VM 连接默认仅采集，用户主动开启运行时 Mock 后才安装拦截�
 本轮未验收 Android、iOS 真机、其他 SDK / Dart 扩展版本、Web、Profile / Release 或 Remote SSH。外部终端独立运行不属于自动发现范围；本轮验证的是在 IDE 附加后发现。版本和分支沿用 0.0.3，未提交、合并或覆盖安装。
 
 用户随后要求覆盖安装并提交。最新 0.0.3 VSIX 解包后再次通过 Cursor 隔离 VM 消息链路验证，退出 0；使用 Cursor CLI `--force` 安装成功。安装后的扩展、Webview JS/CSS 和两份 Dart 模板均与包内 SHA-256 一致，扩展清单除 Cursor 注入的 `__metadata` 外一致。未自动重载用户当前窗口，需在方便时执行 **Developer: Reload Window** 加载新版；未合并分支。
+
+## 0.0.5 内容优先布局（2026-11-10）
+
+- 覆盖连接与诊断、API 与历史、WebSocket、Mock 规则、断点队列、MCP 全部六个 Tab。共用顶部压缩，连接与设置、项目文件、规则模板及诊断维护按需展开；历史内容区使用剩余窗口高度。
+- 324 项 Vitest、36 项 Playwright、TypeScript / Webview 类型检查、全仓格式检查通过。UI 覆盖 1280px / 390px 的内容位置和主区域无横向溢出，高级筛选收起后保留条件、False 值筛选计数及导入入口均通过。
+- 使用合成数据，已目视检查截图；未重新执行真实 Flutter 设备或 IDE GUI 验收。已有运行时能力的验收边界沿用之前记录。
+- 本地 VSIX 为 `artifacts/flutter-api-mocks-0.0.5.vsix`；通过 Cursor CLI 安装，包与安装目录一致性及离线 MCP 握手结果记录在 `artifacts/v0.0.5-install-report.json`。不自动重载用户窗口；在方便时执行 **Developer: Reload Window** 加载新版。
