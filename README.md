@@ -1,5 +1,7 @@
 # Flutter Pilot
 
+<img src="resources/flutter-pilot-icon.png" width="96" height="96" alt="Flutter Pilot 导航罗盘图标">
+
 **Flutter 运行时调试与 Agent 联调工作台**，面向 **VS Code 和 Cursor**。支持通过 **Flutter VM WebSocket 零源码记录 API、实验性运行时 Dio Mock**，也保留 HTTP/HTTPS 代理、双向修改、转发、手动断点和请求历史。
 
 配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key 精确操作页面，减少逐步截图识别的耗时与 token 消耗。
@@ -131,7 +133,7 @@ cursor --install-extension artifacts/flutter-pilot-0.0.7.vsix --force
 
 命令在仓库根目录执行，并要求对应 IDE 的 CLI 可用。安装后执行 **Developer: Reload Window / 重新加载窗口**。
 
-插件显示名称为 **Flutter Pilot**，扩展 ID 为 `flutter-pilot.flutter-pilot`。重新加载后通过命令面板搜索 **Flutter Pilot: 打开工作台**，或点击状态栏 **Flutter Pilot**；入口不依赖单独的侧栏图标。
+插件显示名称为 **Flutter Pilot**，扩展 ID 为 `flutter-pilot.flutter-pilot`。重新加载后通过命令面板搜索 **Flutter Pilot: 打开工作台**，或点击状态栏 **Flutter Pilot**。也可点击活动栏的 **Flutter Pilot** 图标，在侧栏点击 **打开工作台**。如果图标藏在活动栏的“更多”列表中，找到 **Flutter Pilot** 并点击图钉固定；固定状态与位置由 IDE 保存。
 
 打开项目或工作台不会静默下载引擎。以下自动启动说明仅适用于代理模式：已安装或显式配置兼容引擎后，默认在受信任的本地 Flutter 工作区打开时自动启动，无需打开面板。首次仍需完成引擎安装、设备连接及 Flutter 接入；未经过代理的请求无法被记录。
 

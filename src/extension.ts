@@ -135,6 +135,12 @@ export async function activate(context: vscode.ExtensionContext) {
       ),
     );
   command('flutterPilot.open', open);
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider('flutterPilot.launcher', {
+      getTreeItem: (item: vscode.TreeItem) => item,
+      getChildren: () => [],
+    }),
+  );
   command('flutterPilot.start', async () => {
     const session = await open();
     await session?.start();

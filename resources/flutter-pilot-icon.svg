@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Flutter Pilot</title>
+  <defs>
+    <linearGradient id="background" x1="24" y1="12" x2="232" y2="256" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#163b66"/>
+      <stop offset="1" stop-color="#071a32"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="64" y1="48" x2="192" y2="210" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#57dcf5"/>
+      <stop offset="1" stop-color="#278bdb"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#background)"/>
+  <circle cx="128" cy="128" r="83" fill="none" stroke="url(#ring)" stroke-width="10"/>
+  <path d="M128 45v13m70 70h13m-83 70v13M45 128h13" fill="none" stroke="#65dff4" stroke-width="7" stroke-linecap="round"/>
+  <path d="m179 77-35 67-67 35 35-67Z" fill="#18c6de"/>
+  <path d="m179 77-35 67-32-32Z" fill="#effcff"/>
+</svg>

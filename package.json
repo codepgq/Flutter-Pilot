@@ -1,6 +1,7 @@
 {
   "name": "flutter-pilot",
   "displayName": "Flutter Pilot",
+  "icon": "resources/flutter-pilot-icon.png",
   "description": "Flutter 运行时调试与 Agent 联调工作台：HTTP/WebSocket 采集与 Mock、UI 精确操作、热重载和 MCP。",
   "version": "0.0.7",
   "publisher": "flutter-pilot",
@@ -36,6 +37,39 @@
     "virtualWorkspaces": false
   },
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "flutterPilot",
+          "title": "Flutter Pilot",
+          "icon": "resources/flutter-pilot-activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "flutterPilot": [
+        {
+          "id": "flutterPilot.launcher",
+          "name": "工作台",
+          "visibility": "visible"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "flutterPilot.launcher",
+        "contents": "Flutter 运行时调试与 Agent 联调工作台。\n[打开工作台](command:flutterPilot.open)\n请在受信任的本地 Flutter 工作区中使用。"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "flutterPilot.open",
+          "when": "view == flutterPilot.launcher",
+          "group": "navigation"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "flutterPilot.open",

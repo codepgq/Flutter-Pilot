@@ -1,5 +1,16 @@
 # Flutter Pilot 项目记忆
 
+## 活动栏与图标交付授权（2026-11-11）
+
+- 用户要求为 Cursor 安装最新版并 commit/push，授权交付已验证的活动栏入口与导航罗盘图标。
+- 保持版本 0.0.7，使用独立 activitybar VSIX 通过 Cursor CLI 覆盖安装，校验安装内容后提交到 main 并常规推送 origin/main；不发布商店、不强制重载 IDE、不修改用户固定布局。
+
+## 活动栏入口确认（2026-11-11）
+
+- 用户要求 Flutter Pilot 出现在 Cursor 活动栏可固定列表，头脑风暴后选定“新增活动栏入口，侧栏按钮打开现有工作台”。
+- 用 viewsContainers.activitybar + 原生空树视图/viewsWelcome 提供图标、打开按钮及标题栏快捷操作，复用 flutterPilot.open；打开侧栏不自动打开工作台、不额外启动代理或开启 Mock。
+- 固定位置与可见性由 IDE 管理，不改用户布局存储；沿用不启动 IDE GUI、不强制重载约定。用户随后确认插件 Icon 使用蓝青色“导航罗盘＋指针”、无文字，并配同形单色活动栏版本。
+
 ## GitHub 远端与推送授权（2026-11-11）
 
 - 用户指定远端 https://github.com/codepgq/Flutter-Pilot.git，并要求将当前项目推送至 origin/main，授权提交此前已验证的 Flutter Pilot 更名及安装记录，覆盖此前本轮不提交限制。

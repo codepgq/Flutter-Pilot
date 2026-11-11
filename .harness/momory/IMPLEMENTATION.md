@@ -1,5 +1,11 @@
 # 实现与验证结论
 
+## 活动栏入口与插件图标（2026-11-11）
+
+- 用户确认原生活动栏入口＋侧栏“打开工作台”按钮，使用 viewsContainers.activitybar、空 TreeDataProvider 和 viewsWelcome；标题栏快捷按钮复用 flutterPilot.open，无额外代理或 Mock 开关操作。
+- 按用户确认的蓝青色导航罗盘＋指针设计，新增 resources/flutter-pilot-icon.svg、256px PNG 及单色 flutter-pilot-activity.svg，扩展 manifest 引用对应图标；SVG 为手工矢量源文件，通过浏览器导出 PNG 并检查预览。
+- 类型、格式及 357 项 Vitest 通过。使用独立包 artifacts/flutter-pilot-0.0.7-activitybar.vsix，保持版本 0.0.7；通过 CLI 更新 Cursor，28 个安装文件与 VSIX 一致，报告 artifacts/flutter-pilot-activitybar-install-report.json。不启动 IDE GUI、不强制重载、不更改固定布局。
+
 ## Flutter Pilot 完整更名（2026-11-11）
 
 - 用户确认直接切换、不兼容旧配置。显示名 Flutter Pilot，扩展 ID flutter-pilot.flutter-pilot，MCP flutter-pilot，命令/设置 flutterPilot，项目目录 .flutter-pilot，代理参数 FLUTTER_PILOT_PROXY；桥接根目录、规则导出、helper、VM事件及示例同时更新。

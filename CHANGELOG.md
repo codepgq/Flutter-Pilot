@@ -1,7 +1,9 @@
 # Changelog
 
-## 未发布 — Flutter Pilot 更名（2026-11-11）
+## 未发布 — 活动栏入口与 Flutter Pilot 更名（2026-11-11）
 
+- 新增蓝青色导航罗盘与指针品牌图标：扩展列表使用 PNG，活动栏使用同形单色 SVG，保留可编辑矢量源文件。
+- 新增 Flutter Pilot 独立活动栏入口，侧栏提供“打开工作台”按钮和标题栏快捷操作；复用现有工作台，可通过 IDE 的更多列表或活动栏菜单固定图标。
 - 插件、工作台、命令、设置、MCP 服务、指南资源、文档及安装包统一使用 Flutter Pilot。技术标识为 `flutter-pilot` / `flutterPilot`，扩展 ID 为 `flutter-pilot.flutter-pilot`，项目目录为 `.flutter-pilot/`。
 - 按直接切换方案实施：不兼容或自动迁移旧名称下的配置与规则，需重新配置项目并适配 MCP；旧扩展应先停用或卸载。
 - 下方历史版本说明中的路径按当前命名展示；历史验收报告和原始安装包名称以 [验收记录](docs/validation.md) 为准。

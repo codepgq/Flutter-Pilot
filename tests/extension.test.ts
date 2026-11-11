@@ -102,6 +102,7 @@ vi.mock('vscode', async () => {
       },
     },
     window: {
+      registerTreeDataProvider: () => ({ dispose() {} }),
       createOutputChannel: () => ({ appendLine() {}, dispose() {} }),
       createStatusBarItem: () => ({ show() {}, dispose() {} }),
       showErrorMessage: vi.fn(),
