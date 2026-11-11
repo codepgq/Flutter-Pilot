@@ -1,5 +1,26 @@
 # 实现与验证结论
 
+## 0.0.8 发布与规则卡片紧凑布局（2026-11-11）
+
+- 用户确认两行规则卡片，首行名称、类型、优先级与操作，第二行方法/URL；桌面约 64px、390px 窄窗口约 87px，长地址省略并提供完整 title，保留开关和全部操作。截图 artifacts/rules-compact-{1280,680,390}.png 已检查。
+- manifest、lockfile、MCP serverInfo、README、CHANGELOG 和 VSIX 包名统一 0.0.8，包含 API 转发与历史列表增量。
+- 类型、格式、388 项 Vitest、42 项 Playwright、40 项 Python（含真实代理）及 22 项真实 Dart/Dio VM 检查通过。
+- Cursor CLI 安装成功，28 个安装文件与 VSIX 逐项一致（manifest 排除 Cursor 元数据）；报告 artifacts/v0.0.8-install-report.json。不强制重载用户窗口；用户方便时 Reload Window 加载新版。
+
+## API 转发路径与私有接口凭证（2026-11-11）
+
+- redirect.url 支持 /path 与完整 HTTP/HTTPS URL，代理及 VM 一致：路径默认保留原查询串，显式 ? 覆盖或清空；完整 URL 全量替换。真实发送并保留方法、正文和鉴权头，跨源仅调整 Host；request.url 原行为保留。
+- 表单、MCP 指南和 README 同步，校验拒绝协议相对地址、反斜杠、fragment、空白控制字符及内嵌凭证。真实 HTTP 服务验证跨源 Authorization/Cookie/Proxy-Authorization、正文、方法、原请求响应规则匹配、重复及编码查询参数。
+- 类型检查、构建、387 项全量 Vitest 通过，随后增加查询参数含 @ 的校验回归，model 41 项通过；40 项 Python 测试（含 21 项真实代理集成）、真实 Dart/Dio VM smoke 与新增表单 Playwright 通过。首次表单测试使用旧 dist 失败，构建后通过。
+- 未打包安装或提交；需要加载新版扩展后才会在用户 IDE 生效。业务签名如包含原 URL，保留签名头不代表新 URL 能通过服务端签名校验。
+
+## HTTP 历史清空入口与紧凑列表（2026-11-11）
+
+- 将高级筛选中的清空入口移至排序说明旁，常驻“清空记录”；复用 history.clear 确认流程，提示清空当前项目全部 HTTP 历史（包含筛选外记录），保留独立 API 目录及 Mock 规则。筛选结果为空仍可操作，繁忙时禁用。
+- 请求行合并方法、路径与状态，保持域名、时间与耗时，共三行；路径和域名省略并提供悬停信息，固定内容高度不随长路径增长，禁止 flex 纵向压缩。
+- 构建、类型/格式及 diff 检查通过；42 项扩展测试、40 项 Playwright UI 测试通过，覆盖取消/确认清空、清除详情、空筛选及繁忙状态、1280px/390px 布局。合成截图 artifacts/history-compact-{1280,390}.png 已目视检查，每条约 67px，桌面窗口完整展示至少 8 条。
+- 本轮仅修改与验证代码，未提交、打包安装或重载用户 Cursor；版本保持 0.0.7。
+
 ## 活动栏入口与插件图标（2026-11-11）
 
 - 用户确认原生活动栏入口＋侧栏“打开工作台”按钮，使用 viewsContainers.activitybar、空 TreeDataProvider 和 viewsWelcome；标题栏快捷按钮复用 flutterPilot.open，无额外代理或 Mock 开关操作。

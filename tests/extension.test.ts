@@ -447,6 +447,31 @@ describe('后台采集与独立API目录控制', () => {
     });
     await vi.waitFor(() => expect(engine.stops).toBe(1));
   });
+  it('取消清空不删除，确认后清空全部历史并清除详情，保留目录与规则', async () => {
+    await open();
+    const engine = fake.engines[0];
+    const selected = () =>
+      fake.panels
+        .at(-1)
+        .webview.messages.filter((m: any) => m.type === 'state' && 'selected' in m)
+        .at(-1)?.selected;
+    await message('history.select', { id: 'selected-history' });
+    expect(selected()?.id).toBe('selected-history');
+    await message('history.clear');
+    expect(engine.calls.some((c: any) => c.method === 'history.clear')).toBe(false);
+    expect(selected()?.id).toBe('selected-history');
+    const rules = latest().state.rules;
+    await message('history.query', { search: 'filtered', offset: 30 });
+    fake.confirm = '清空历史';
+    const before = engine.calls.length;
+    await message('history.clear');
+    expect(engine.calls.slice(before)).toContainEqual({ method: 'history.clear', params: {} });
+    expect(selected()).toBeNull();
+    expect(latest().state.rules).toEqual(rules);
+    expect(
+      engine.calls.slice(before).some((c: any) => c.method === 'api.clear' || c.method === 'api.delete'),
+    ).toBe(false);
+  });
 });
 
 describe('自动记录前提与退出保护', () => {

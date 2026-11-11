@@ -62,7 +62,7 @@ def validate_rules(document):
         if "redirect" in rule:
             if not isinstance(rule["redirect"], dict):
                 raise ValueError("redirect 必须为对象")
-            validate_url(rule["redirect"].get("url"))
+            validate_redirect_url(rule["redirect"].get("url"))
         if "mock" in rule:
             mock = rule["mock"]
             if not isinstance(mock, dict):
@@ -112,6 +112,25 @@ def validate_url(value):
             raise ValueError()
     except ValueError:
         raise ValueError("目标地址必须为不含凭证的完整 HTTP/HTTPS URL")
+
+
+def validate_redirect_url(value):
+    if not isinstance(value, str) or not value or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value) or "\\" in value or "#" in value:
+        raise ValueError("转发地址必须为不含空白、控制字符、反斜杠和片段的路径或 HTTP/HTTPS URL")
+    if value.startswith("/"):
+        if value.startswith("//"):
+            raise ValueError("转发路径不能以 // 开头")
+        return
+    validate_url(value)
+
+
+def resolve_redirect_url(value, current):
+    validate_redirect_url(value)
+    if not value.startswith("/"):
+        return value
+    original = urlsplit(current)
+    query = "" if "?" in value or not original.query else "?" + original.query
+    return original.scheme + "://" + original.netloc + value + query
 
 
 def matches(rule, snapshot):

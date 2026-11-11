@@ -315,18 +315,46 @@ class ProxyIntegrationTests(unittest.TestCase):
         self.assertEqual(Origin.calls, [])
         self.assertTrue(self.latest()["mocked"])
 
-    def test_redirect_strips_origin_credentials_and_matches_original_path(self):
-        target = "http://localhost:%s/redirected" % self.origin.server_port
-        rule = self.rule(match={"path": "/original"}, redirect={"url": target}, request={"headers": {"X-Target": "test"}}, response={"status": 202})
+    def test_redirect_preserves_credentials_and_matches_original_path(self):
+        target = "http://localhost:%s/redirected?target=1" % self.origin.server_port
+        rule = self.rule(match={"path": "/original"}, redirect={"url": target}, response={"status": 202})
         self.sync([rule])
-        status, _, body = self.request("/original", headers={"Authorization": "Bearer original", "Cookie": "sid=original"})
+        headers = {"Authorization": "Bearer original", "Cookie": "sid=original", "Proxy-Authorization": "Bearer proxy", "X-Private-Token": "private", "Content-Type": "application/json"}
+        status, _, body = self.request("/original?old=1", method="POST", body=b'{"private":true}', headers=headers)
         self.assertEqual(status, 202)
         call = json.loads(body)
-        self.assertEqual(call["path"], "/redirected")
+        self.assertEqual(call["path"], "/redirected?target=1")
+        self.assertEqual(call["method"], "POST")
+        self.assertEqual(call["body"], '{"private":true}')
+        for key, value in headers.items():
+            self.assertEqual(call["headers"][key], value)
+        self.assertEqual(call["headers"]["Host"], "localhost:%s" % self.origin.server_port)
+        self.assertEqual(len(Origin.calls), 1)
+        self.assertEqual(self.latest()["targetUrl"], target)
+        self.assertFalse(self.latest()["mocked"])
+
+    def test_redirect_path_preserves_private_request_and_raw_query(self):
+        headers = {"Authorization": "Bearer original", "Cookie": "sid=original", "X-Private-Token": "private", "Content-Type": "application/json"}
+        for target, expected in (("/private/new%2Fpart", "/private/new%2Fpart?a=1&a=2&token=x%2Fy+z"), ("/private/new?b=%2F&b=2", "/private/new?b=%2F&b=2"), ("/private/new?", "/private/new")):
+            with self.subTest(target=target):
+                self.sync([self.rule(redirect={"url": target})])
+                status, _, body = self.request("/original?a=1&a=2&token=x%2Fy+z", method="POST", body=b'{"private":true}', headers=headers)
+                call = json.loads(body)
+                self.assertEqual(status, 200)
+                self.assertEqual(call["path"].rstrip("?"), expected)
+                self.assertEqual(call["method"], "POST")
+                self.assertEqual(call["body"], '{"private":true}')
+                for key, value in headers.items():
+                    self.assertEqual(call["headers"][key], value)
+                self.assertEqual(call["headers"]["Host"], "127.0.0.1:%s" % self.origin.server_port)
+                self.assertFalse(self.latest()["mocked"])
+
+    def test_request_url_still_strips_cross_origin_credentials(self):
+        self.sync([self.rule(request={"url": "http://localhost:%s/target" % self.origin.server_port})])
+        _, _, body = self.request(headers={"Authorization": "Bearer original", "Cookie": "sid=original"})
+        call = json.loads(body)
         self.assertNotIn("Authorization", call["headers"])
         self.assertNotIn("Cookie", call["headers"])
-        self.assertEqual(call["headers"]["X-Target"], "test")
-        self.assertEqual(self.latest()["targetUrl"], target)
 
     def test_error_response_can_be_changed_to_success(self):
         self.sync([self.rule(response={"status": 200, "body": '{"recovered":true}'})])

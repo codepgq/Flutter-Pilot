@@ -1110,9 +1110,6 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
             onChange={(e) => update({ to: e.target.value ? new Date(e.target.value).getTime() : undefined })}
           />
         </label>
-        <Button action="history.clear" danger disabled={!state.history.total}>
-          清空历史
-        </Button>
       </div>
       <div className="history-viewbar">
         <button
@@ -1144,7 +1141,17 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
             <Icon name="close" size={12} />
           </button>
         )}
-        <span className="sort-indicator">最新在前 · 按请求时间倒序</span>
+        <div className="history-view-actions">
+          <Button
+            action="history.clear"
+            danger
+            disabled={state.busy}
+            title="清空当前项目的全部 HTTP 请求历史（包含筛选外记录），保留 API 目录和 Mock 规则"
+          >
+            清空记录
+          </Button>
+          <span className="sort-indicator">最新在前 · 按请求时间倒序</span>
+        </div>
       </div>
       <div
         className={`history-layout ${catalogCollapsed ? 'catalog-collapsed' : ''} ${detailFocused ? 'detail-focused' : ''}`}
@@ -1232,8 +1239,9 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
                 aria-pressed={selected?.id === h.id}
                 onClick={() => send('history.select', { id: h.id })}
               >
-                <div>
+                <div className="request-summary">
                   <Method method={h.method} />
+                  <strong title={h.url}>{h.path}</strong>
                   <span
                     className={`http-status ${h.error || (h.response?.status ?? (h as unknown as { status?: number }).status ?? 0) >= 400 ? 'failed' : ''}`}
                   >
@@ -1243,8 +1251,7 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
                   </span>
                   {h.mocked && <span className="mock-badge">MOCK</span>}
                 </div>
-                <strong title={h.url}>{h.path}</strong>
-                <small>{h.host}</small>
+                <small title={h.host}>{h.host}</small>
                 <div className="request-meta">
                   <time
                     dateTime={new Date(h.startedAt).toISOString()}
@@ -1584,18 +1591,18 @@ function Rules({
                 </button>
                 <div className="rule-card-content">
                   <div>
-                    <strong>{r.name}</strong>
+                    <strong title={r.name}>{r.name}</strong>
                     <span className="tag">{kindLabels[kindOf(r)]}</span>
+                    <span className="priority">优先级 {r.priority}</span>
                     {r.breakpoint && (r.breakpoint.request || r.breakpoint.response) && (
                       <span className="tag warm">断点</span>
                     )}
                   </div>
-                  <code>
+                  <code title={`${r.match.method || 'ANY'} ${r.match.host || '*'}${r.match.path || '/*'}`}>
                     <Method method={r.match.method || 'ANY'} /> {r.match.host || '*'}
                     {r.match.path || '/*'}
                   </code>
                 </div>
-                <span className="priority">优先级 {r.priority}</span>
                 <div className="rule-card-actions">
                   <Button
                     disabled={i === 0}
@@ -1881,17 +1888,17 @@ function RuleEditor({ rule, onClose, busy }: { rule: Rule; onClose: () => void; 
               {kind === 'redirect' && (
                 <>
                   <label>
-                    目标完整地址
+                    目标路径或完整地址
                     <input
                       aria-label="目标地址"
-                      placeholder="http://127.0.0.1:3000/api/orders"
+                      placeholder="/api/orders 或 https://api.example.com/api/orders"
                       value={draft.redirect?.url ?? ''}
                       onChange={(e) => change({ redirect: { url: e.target.value } })}
                     />
                   </label>
                   <div className="notice">
-                    保留原请求方法和正文。跨站转发默认移除 Authorization 和 Cookie；目标凭证可在完整 JSON 的
-                    request.headers 中配置。
+                    输入 /path 只替换路径，保留原查询参数；带 ? 时替换查询参数。完整 URL 替换整个地址。
+                    发送真实请求，保留方法、正文及 Authorization、Cookie 等请求头；Host 随目标更新。
                   </div>
                 </>
               )}

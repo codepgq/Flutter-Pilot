@@ -6,9 +6,11 @@
 
 配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key 精确操作页面，减少逐步截图识别的耗时与 token 消耗。
 
-当前版本为 **0.0.7**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+当前版本为 **0.0.8**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
 
-**0.0.7 补齐 MCP 全能力提示词**：21 个工具均有同名独立 Prompt，包括 `hot_reload` / `hot_restart`；保留四个场景模板，共 25 个。每个工具提示词提供操作步骤和生产参数定义，新增能力漏写模板会被检查发现。
+**0.0.8 更新**：修正 API 转发的路径与完整 URL 处理，保留鉴权信息；新增常驻 HTTP 历史清空按钮与紧凑三行列表，统一 Flutter Pilot 品牌和活动栏入口。
+
+**MCP 全能力提示词**：21 个工具均有同名独立 Prompt，包括 `hot_reload` / `hot_restart`；保留四个场景模板，共 25 个。每个工具提示词提供操作步骤和生产参数定义，新增能力漏写模板会被检查发现。
 
 **0.0.6 修复 Cursor 设置卡死和已有 VM 会话补查恢复**：打开工作台会重新补查先前已运行的 Flutter Debug 会话；新增 MCP `hot_reload` / `hot_restart`，精确控制当前 VM 绑定的 IDE 调试会话。
 
@@ -117,7 +119,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 
 ### 从 VSIX 安装
 
-1. 获取 `flutter-pilot-0.0.7.vsix`。从源码构建见下方步骤。
+1. 获取 `flutter-pilot-0.0.8.vsix`。从源码构建见下方步骤。
 2. 在 VS Code 或 Cursor 扩展面板右上角菜单选择 **Install from VSIX… / 从 VSIX 安装…**。
 3. 选择安装包，按 IDE 提示重新加载窗口。
 4. 打开包含 `pubspec.yaml` 的 Flutter 项目根目录，并信任工作区。
@@ -127,7 +129,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 安装当前 Flutter Pilot 包，例如：
 
 ```sh
-cursor --install-extension artifacts/flutter-pilot-0.0.7.vsix --force
+cursor --install-extension artifacts/flutter-pilot-0.0.8.vsix --force
 # VS Code 使用 code --install-extension 同一文件 --force
 ```
 
@@ -150,7 +152,7 @@ npm test
 npm run package
 ```
 
-产物为 `artifacts/flutter-pilot-0.0.7.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
+产物为 `artifacts/flutter-pilot-0.0.8.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
 
 ### 使用已有引擎
 
@@ -316,7 +318,7 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 目录累计次数不是当前历史条数，清空历史后可以看到“目录仍在、记录为空”。可手动删除不再需要的目录项，该操作不删除请求历史或规则；未来同一 API 再次被当前模式采集时，会重新发现并从新的目录计数开始。旧版现存历史会在首次升级时迁移为目录，迁移只执行一次，避免手动删除的目录在重启后重新出现。
 
-顶部保留搜索和方法筛选；点击 **筛选** 可按状态码、时间、Mock 状态或命中规则筛选，以及清空历史。收起筛选保留当前条件，并显示已启用的高级条件数量。搜索覆盖主机、路径、原始 / 目标 URL、备注和标签。详情显示原始、自动规则后、最终三阶段快照、耗时、目标 URL、规则和错误信息。
+顶部保留搜索和方法筛选；排序说明旁的 **清空记录** 在确认后清空当前项目的全部 HTTP 历史（包含筛选外记录），保留 API 目录和 Mock 规则。请求列表采用紧凑三行布局，长路径省略，悬停显示完整 URL。点击 **筛选** 可按状态码、时间、Mock 状态或命中规则筛选。收起筛选保留当前条件，并显示已启用的高级条件数量。搜索覆盖主机、路径、原始 / 目标 URL、备注和标签。详情显示原始、自动规则后、最终三阶段快照、耗时、目标 URL、规则和错误信息。
 
 历史事实保持不变；备注、标签可以编辑，记录可以删除或清空。要修改记录中的请求或响应内容，使用 **生成 Mock** 或 **更多规则** 创建草稿。草稿默认禁用，检查后再启用。清空历史不会删除 API 目录、规则或 CA。
 
@@ -345,7 +347,7 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 | `priority` | 整数，值越大优先级越高 |
 | `match` | 匹配原始请求；空对象表示匹配所有请求 |
 | `request` | 修改方法、URL、头部、查询参数或正文 |
-| `redirect` | `{ "url": "完整目标URL" }` |
+| `redirect` | `{ "url": "/目标路径 或 完整HTTP/HTTPS URL" }` |
 | `mock` | `{ "status": 200, "headers": {}, "body": "正文字符串" }` |
 | `response` | 修改状态码、头部或正文 |
 | `breakpoint` | 选择请求 / 响应阶段及可选等待秒数 |
@@ -383,8 +385,9 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 - `body` 必须是字符串。JSON 正文先序列化，例如 `"body":"{\"ok\":true}"`；不是 JSON Merge Patch。
 - 省略 `body` 保留原正文，空字符串表示清空；表单的 **替换正文** 开关控制这一点。
 - `request.headers`、`request.query`、`response.headers` 中字符串值表示设置，`null` 表示删除，未列出的键保留。
-- `redirect.url` 和 `request.url` 都是完整地址替换，不自动拼接原路径或查询参数。同一规则同时存在时，`redirect.url` 作为目标，再应用 `request.query`。
-- 跨 origin（协议、主机或端口变化）默认移除 `Authorization`、`Cookie`、`Proxy-Authorization`；同一规则的 `request.headers` 可以显式设置目标凭证。
+- `redirect.url` 支持 `/path` 或完整 HTTP/HTTPS URL。仅路径时保留原协议、域名、端口和查询参数；路径带 `?` 时替换查询参数（末尾 `?` 表示清空）。完整 URL 替换整个地址，不继承原查询参数。
+- `redirect` 保留 `Authorization`、`Cookie`、`Proxy-Authorization` 等请求头，跨站时 Host 随目标更新。同一规则的 `request.headers` 仍可显式修改请求头。
+- `request.url` 仍为完整地址替换，跨 origin 默认移除上述凭证头。同一规则同时存在时，以 `redirect.url` 为目标，再应用 `request.query`。
 - 转发保留请求方法和正文，不向应用生成额外的 301 / 302。
 - 本地 Mock 响应仍经过响应规则，代理模式还支持响应断点；修改 4xx / 5xx 状态会影响 Dio 最终按成功还是错误交付，具体也取决于应用的 `validateStatus` 配置。
 
@@ -615,7 +618,7 @@ adb -s YOUR_ANDROID_SERIAL reverse --remove tcp:8080
 | 规则已保存但未生效 | 查看当前模式日志；VM 检查 Mock 开关、已接入 Dio 数并重新发现 / 同步，代理初始化 / 重启引擎后同步 |
 | 只改请求头后正文不对 | 确认未开启“替换正文”；空字符串正文会清空内容 |
 | 断点提前消失 | 应用自己的超时或取消可能早于插件倒计时；也检查是否停止代理、关闭面板或控制断连 |
-| 转发后鉴权失败 | 跨站默认删除旧站凭证；按需在同规则 request.headers 中配置目标凭证；业务签名需项目自行处理 |
+| 转发后鉴权失败 | redirect 保留鉴权头；若鉴权签名包含原路径或域名，需由业务侧按目标重新签名 |
 | 撤销提示保留文件 | 接入后源码已被修改，需人工合并；若 `.dart_tool` 记录被清理也要手动移除接入 |
 | 停止后应用无法联网 | 去掉启动参数并重启应用，或移除设备系统代理，已创建客户端不会自动恢复直连 |
 | API 目录有条目但没有请求历史 | 目录独立保留，对应历史可能已过期或清空；再次请求后会出现新记录 |
@@ -708,7 +711,7 @@ python3 tool/device_smoke.py --mitmdump /absolute/path/to/mitmdump --ios YOUR_SI
 
 ```sh
 npm run package
-shasum -a 256 artifacts/flutter-pilot-0.0.7.vsix
+shasum -a 256 artifacts/flutter-pilot-0.0.8.vsix
 ```
 
 VSIX 包含扩展构建产物、VM 注入模板、代理 addon、引擎清单及文档，不包含 Node 开发依赖、Flutter 示例构建结果或真实证书。首次引擎下载单独发生。源码中的 README 修改后，应重新打包，安装包内的文档才会更新。

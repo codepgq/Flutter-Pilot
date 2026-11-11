@@ -87,7 +87,8 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       mock: '直接返回响应，status为200..599，headers为字符串字典，body必须是字符串；JSON正文先序列化，不可直接放对象。',
       request: '可修改method/url/headers/query/body；headers和query以null删除项，正文为字符串。',
       response: '可修改status/headers/body；正文为字符串。',
-      redirect: '格式为 {url:"https://..."}，改写目标地址，不是HTTP301/302；不能与mock同时存在。',
+      redirect:
+        '格式为 {url:"/path"} 或 {url:"https://..."}。/path保留原站点和查询参数，带?时替换查询参数；完整URL替换整个地址。真实发送并保留方法、正文及Authorization/Cookie等请求头，Host随目标更新；不是HTTP301/302，不能与mock同时存在。',
       breakpoint: 'VM模式不支持人工断点；不要用它构建MCP的VM操作流程。',
     },
     variants: {

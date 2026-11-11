@@ -53,6 +53,8 @@ const server = createServer(async (req, res) => {
       body,
       authorization: req.headers.authorization ?? null,
       cookie: req.headers.cookie ?? null,
+      proxyAuthorization: req.headers['proxy-authorization'] ?? null,
+      host: req.headers.host,
       marker: req.headers['x-marker'] ?? null,
       existing: req.headers['x-existing'] ?? null,
     }),
@@ -339,20 +341,62 @@ try {
   ];
   await injector.sync(isolateId, rules);
   result = await command({
-    url: base + '/redirect',
+    url: base + '/redirect?discard=1',
     method: 'POST',
     body: { redirectBody: true },
-    headers: { authorization: 'synthetic-source-secret', cookie: 'test-cookie=1' },
+    headers: {
+      authorization: 'synthetic-source-secret',
+      cookie: 'test-cookie=1',
+      'proxy-authorization': 'synthetic-proxy-secret',
+      host: 'old.invalid',
+    },
   });
   assert.deepEqual(result.data, { matchedOriginal: true });
   const entry = histories.at(-1);
-  assert.equal(entry.originalResponse.body.includes('"authorization":null'), true);
-  assert.equal(entry.originalResponse.body.includes('"cookie":null'), true);
   assert.equal(entry.targetUrl.endsWith('/target'), true);
   const forwarded = JSON.parse(entry.originalResponse.body);
+  assert.equal(forwarded.authorization, 'synthetic-source-secret');
+  assert.equal(forwarded.cookie, 'test-cookie=1');
+  assert.equal(forwarded.proxyAuthorization, 'synthetic-proxy-secret');
+  assert.equal(forwarded.host, `localhost:${port}`);
+  assert.equal(forwarded.path, '/target');
+  assert.equal(forwarded.marker, 'forwarded');
   assert.equal(forwarded.method, 'POST');
   assert.equal(forwarded.body, '{"redirectBody":true}');
-  console.log('PASS redirect strips cross-origin credentials + response matches original request');
+  console.log('PASS redirect preserves cross-origin credentials + response matches original request');
+  for (const [target, expected] of [
+    ['/private/new%2Fitem', '/private/new%2Fitem?a=1&a=2&signed=x%2Fy+z'],
+    ['/private/new?own=2&own=3', '/private/new?own=2&own=3'],
+    ['/private/new?', '/private/new?'],
+    [base + '/private/absolute?own=1', '/private/absolute?own=1'],
+  ]) {
+    await injector.sync(isolateId, [
+      rule('private-path', { match: { path: '/private/old' }, redirect: { url: target } }),
+    ]);
+    const beforeHits = hits;
+    result = await command({
+      url: base + '/private/old?a=1&a=2&signed=x%2Fy+z',
+      method: 'PATCH',
+      body: 'unchanged-private-body',
+      headers: {
+        authorization: 'Bearer synthetic-private',
+        cookie: 'session=synthetic',
+        'x-marker': 'keep',
+        'content-type': 'text/plain',
+      },
+    });
+    assert.equal(result.status, 200);
+    assert.equal(result.data.path, expected);
+    assert.equal(result.data.upstream, true);
+    assert.equal(result.data.authorization, 'Bearer synthetic-private');
+    assert.equal(result.data.cookie, 'session=synthetic');
+    assert.equal(result.data.marker, 'keep');
+    assert.equal(result.data.method, 'PATCH');
+    assert.equal(result.data.body, 'unchanged-private-body');
+    assert.equal(hits, beforeHits + 1);
+    assert.equal(histories.at(-1).mocked, false);
+  }
+  console.log('PASS private path and complete URL redirects preserve real requests and query semantics');
   rules = [
     rule('badmock', {
       mock: { status: 503, headers: { 'content-type': 'application/json' }, body: '{"maintenance":true}' },
@@ -451,7 +495,7 @@ try {
       result: 'passed',
       dioInstances: 3,
       events: histories.length,
-      checks: 21,
+      checks: 22,
       upstreamHits: hits,
     }),
   );

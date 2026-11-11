@@ -1568,7 +1568,7 @@ class Workbench {
         case 'history.clear': {
           this.requireHistory();
           const answer = await vscode.window.showWarningMessage(
-            '清空当前工作区所有请求历史？Mock 规则会保留。',
+            '清空当前项目的全部 HTTP 请求历史（包含筛选外记录）？API 目录和 Mock 规则会保留。',
             { modal: true },
             '清空历史',
           );

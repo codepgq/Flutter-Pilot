@@ -89,13 +89,16 @@
     }
     return text;
   }
-  void patchRequest(dynamic options, dynamic patch) {
+  void patchRequest(dynamic options, dynamic patch, {bool redirect = false}) {
     final editable = body(options.data, options.contentType)['editable'] == true;
     if (patch.containsKey('url')) {
       final before = options.uri;
-      final after = Uri.parse(patch['url']);
+      final target = patch['url'] as String;
+      final after = redirect && target.startsWith('/')
+        ? Uri.parse('${before.scheme}://${before.authority}$target${!target.contains('?') && before.hasQuery ? '?' + before.query : ''}')
+        : Uri.parse(target);
       if (before.scheme != after.scheme || before.host != after.host || before.port != after.port) {
-        options.headers.removeWhere((dynamic key, dynamic value) => ['authorization', 'cookie', 'proxy-authorization', 'host'].contains(key.toString().toLowerCase()));
+        options.headers.removeWhere((dynamic key, dynamic value) => (redirect ? ['host'] : ['authorization', 'cookie', 'proxy-authorization', 'host']).contains(key.toString().toLowerCase()));
       }
       options.baseUrl = '';
       options.path = after.toString();
@@ -185,7 +188,7 @@
             flow['requestRuleId'] = rule['id'];
             final patch = Map<String, dynamic>.from(rule['request'] ?? {});
             if (rule.containsKey('redirect')) patch['url'] = rule['redirect']['url'];
-            patchRequest(options, patch);
+            patchRequest(options, patch, redirect: rule.containsKey('redirect'));
           }
           flow['automaticRequest'] = request(options); flow['request'] = request(options); flow['targetUrl'] = options.uri.toString();
           if (rule != null && rule.containsKey('mock')) {

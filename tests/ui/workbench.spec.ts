@@ -146,6 +146,30 @@ test('规则启停只显示 switch，支持鼠标和键盘，繁忙时禁用', a
   await state(page, { busy: true });
   await expect(toggle).toBeDisabled();
 });
+test('规则卡片紧凑布局与长地址在桌面和窄窗口可用', async ({ page }) => {
+  await page.goto('/');
+  await state(page, {
+    rules: [
+      {
+        ...rule,
+        name: '当前账号模拟为 Market Maker',
+        match: { ...rule.match, path: '/api/v1/user/info/' + 'long-path/'.repeat(20) },
+      },
+      { ...rule, id: 'second', name: 'PD配置重定向至临时接口' },
+    ],
+  });
+  await page.getByRole('button', { name: 'Mock 规则' }).click();
+  for (const width of [1280, 680, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const card = page.locator('.rule-card').first();
+    const bounds = await card.boundingBox();
+    expect(bounds!.height).toBeLessThanOrEqual(width === 390 ? 125 : 85);
+    await expect(card.getByRole('button', { name: '编辑', exact: true })).toBeVisible();
+    expect(await card.locator('code').getAttribute('title')).toContain('long-path/');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+    await page.screenshot({ path: `artifacts/rules-compact-${width}.png`, fullPage: true });
+  }
+});
 test('连接引导、代理控制与局域网开关', async ({ page }) => {
   await page.goto('/');
   await state(page);
@@ -157,6 +181,23 @@ test('连接引导、代理控制与局域网开关', async ({ page }) => {
   await page.getByRole('switch').click();
   expect(await messages(page)).toContainEqual({ action: 'setLan', payload: { enabled: true } });
   await page.screenshot({ path: 'artifacts/workbench-connection.png', fullPage: true });
+});
+test('转发规则支持路径及完整 URL 并说明凭证保留', async ({ page }) => {
+  await page.goto('/');
+  await state(page);
+  await page.getByRole('button', { name: 'Mock 规则' }).click();
+  for (const target of ['/api/private/new', 'https://target.example.test/private?x=1']) {
+    await page.getByRole('button', { name: '新建规则' }).click();
+    await page.getByLabel('规则名称', { exact: true }).fill('私有接口转发');
+    await page.getByLabel('规则动作', { exact: true }).selectOption('redirect');
+    await page.getByLabel('目标地址', { exact: true }).fill(target);
+    await expect(page.getByText('发送真实请求，保留方法、正文及', { exact: false })).toBeVisible();
+    await page.getByRole('button', { name: '保存规则' }).click();
+    expect(await messages(page)).toContainEqual({
+      action: 'rules.save',
+      payload: { rule: expect.objectContaining({ redirect: { url: target } }) },
+    });
+  }
 });
 test('规则表单校验、JSON编辑与 CRUD 消息', async ({ page }) => {
   await page.goto('/');
@@ -324,6 +365,62 @@ test('请求历史为空仍保留独立 API 目录与累计调用统计', async 
       payload: { method: 'GET', host: 'api.example.test', path: '/v1/orders', offset: 0 },
     });
 });
+
+test('清空记录常驻排序栏，筛选结果为空仍可清空全部历史，繁忙时禁用', async ({ page }) => {
+  await page.goto('/');
+  await state(page);
+  await page.getByRole('button', { name: 'API 与历史' }).click();
+  const clear = page.getByRole('button', { name: '清空记录', exact: true });
+  await expect(clear).toBeVisible();
+  await expect(page.getByLabel('筛选状态码')).not.toBeVisible();
+  await expect(clear).toHaveAttribute('title', /全部 HTTP.*包含筛选外记录.*保留 API 目录和 Mock 规则/);
+  await page.getByRole('textbox', { name: '搜索请求', exact: true }).fill('no-matching-records');
+  await state(page, { history: { items: [], total: 0 } });
+  await clear.click();
+  expect(await messages(page)).toContainEqual({ action: 'history.clear', payload: {} });
+  await expect(page.getByRole('button', { name: /^查看 API / })).toHaveCount(1);
+  await state(page, { busy: true });
+  await expect(clear).toBeDisabled();
+});
+
+for (const width of [1280, 390]) {
+  test(`请求记录在 ${width}px 下保持紧凑三行，长路径不增加行高`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/');
+    const records = Array.from({ length: 12 }, (_, i) => ({
+      ...entry,
+      id: `compact-${i}`,
+      path: `/webapp/common/${'very-long-path/'.repeat(i === 0 ? 20 : 1)}${i}.png`,
+      host: 'exio-cms-dev.oss-ap-southeast-1.aliyuncs.com',
+      startedAt: entry.startedAt - i * 1000,
+    }));
+    await state(page, { history: { items: records, total: records.length } }, entry);
+    await page.getByRole('button', { name: 'API 与历史' }).click();
+    await page.getByRole('button', { name: '收起 API 目录', exact: true }).click();
+    const rows = page.locator('.request-row');
+    await expect(rows).toHaveCount(12);
+    const first = await rows.nth(0).boundingBox();
+    const second = await rows.nth(1).boundingBox();
+    expect(first!.height).toBeLessThanOrEqual(68);
+    expect(first!.height).toBe(second!.height);
+    await expect(rows.nth(0).locator('strong')).toHaveAttribute('title', entry.url);
+    expect(
+      await rows
+        .nth(0)
+        .locator('strong')
+        .evaluate((el) => el.scrollWidth > el.clientWidth),
+    ).toBe(true);
+    const pane = await page.locator('.request-list').boundingBox();
+    const eighth = await rows.nth(7).boundingBox();
+    if (width === 1280) expect(eighth!.y + eighth!.height).toBeLessThanOrEqual(pane!.y + pane!.height);
+    expect(await page.locator('.request-list').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expect(page.getByRole('button', { name: '清空记录', exact: true })).toBeVisible();
+    await rows.nth(0).click();
+    expect(await messages(page)).toContainEqual({ action: 'history.select', payload: { id: 'compact-0' } });
+    await page.screenshot({ path: `artifacts/history-compact-${width}.png`, fullPage: true });
+  });
+}
 
 test('目录删除不触发选中或删除历史，确认移除后清除分组过滤', async ({ page }) => {
   await page.goto('/');

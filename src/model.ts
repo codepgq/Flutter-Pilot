@@ -200,6 +200,20 @@ function url(value: unknown, label: string) {
     `${label} 仅支持不含内嵌凭证的 HTTP/HTTPS 地址`,
   );
 }
+function redirectUrl(value: unknown) {
+  assert(
+    typeof value === 'string' && value.length > 0 && !/[\s\x00-\x1f\x7f\\#]/.test(value),
+    'redirect.url 必须为不含空白、控制字符、反斜杠或 fragment 的路径或 HTTP/HTTPS 地址',
+  );
+  if (value.startsWith('/')) {
+    assert(!value.startsWith('//'), 'redirect.url 路径必须以单个 / 开头');
+    return;
+  }
+  assert(/^https?:\/\/[^/]+/i.test(value), 'redirect.url 必须为 /path 或完整 HTTP/HTTPS 地址');
+  const authority = value.slice(value.indexOf('://') + 3).split(/[/?]/)[0];
+  assert(!authority.includes('@'), 'redirect.url 不能包含内嵌凭证');
+  url(value, 'redirect.url');
+}
 function status(value: unknown) {
   assert(
     typeof value === 'number' && Number.isInteger(value) && value >= 200 && value <= 599,
@@ -254,7 +268,7 @@ export function validateRuleDocument(input: unknown): RuleDocument {
     if (item.redirect !== undefined) {
       assert(object(item.redirect), 'redirect 必须为对象');
       fields(item.redirect, ['url'], 'redirect');
-      url(item.redirect.url, 'redirect.url');
+      redirectUrl(item.redirect.url);
     }
     if (item.mock !== undefined) {
       assert(object(item.mock), 'mock 必须为对象');

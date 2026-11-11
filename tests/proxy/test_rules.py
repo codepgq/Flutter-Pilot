@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "proxy"))
-from rules import matches, select_rule, validate_rules
+from rules import matches, resolve_redirect_url, select_rule, validate_rules
 
 
 class RuleTests(unittest.TestCase):
@@ -42,6 +42,26 @@ class RuleTests(unittest.TestCase):
         result = validate_rules({"version": 1, "rules": [self.rule]})
         result[0]["mock"]["body"] = "changed"
         self.assertEqual(self.rule["mock"]["body"], "{}")
+
+    def test_redirect_resolves_paths_without_losing_query_encoding(self):
+        current = "https://api.example.com:8443/old?a=1&a=2&token=x%2Fy+z"
+        cases = [
+            ("/private/new", "https://api.example.com:8443/private/new?a=1&a=2&token=x%2Fy+z"),
+            ("/private/new?b=%2F&b=2", "https://api.example.com:8443/private/new?b=%2F&b=2"),
+            ("/private/new?", "https://api.example.com:8443/private/new?"),
+            ("http://other.test/new", "http://other.test/new"),
+        ]
+        for target, expected in cases:
+            with self.subTest(target=target):
+                rule = dict(self.rule, redirect={"url": target})
+                rule.pop("mock")
+                validate_rules({"version": 1, "rules": [rule]})
+                self.assertEqual(resolve_redirect_url(target, current), expected)
+
+    def test_redirect_rejects_ambiguous_targets(self):
+        for target in ("", "relative/path", "//other.test/path", "/a\\b", "/a b", "/a#fragment", "/a\x00b", "/a\x7fb", "https://other.test/a#fragment", "file:///tmp/a"):
+            with self.subTest(target=target), self.assertRaises(ValueError):
+                resolve_redirect_url(target, self.snapshot["url"])
 
     def test_invalid_documents_are_rejected_before_sync(self):
         mutations = [

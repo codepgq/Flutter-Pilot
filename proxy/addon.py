@@ -21,7 +21,7 @@ from mitmproxy import ctx, http
 
 # mitmdump -s does not guarantee that an addon's siblings are importable.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from rules import select_rule, validate_rules, validate_url
+from rules import resolve_redirect_url, select_rule, validate_rules, validate_url
 from storage import HistoryStore
 
 PROTOCOL_VERSION = 1
@@ -358,8 +358,8 @@ class FlutterPilotAddon:
             entry["requestRuleId"] = rule["id"]
             patch = copy.deepcopy(rule.get("request", {}))
             if "redirect" in rule:
-                patch["url"] = rule["redirect"]["url"]
-            self._apply_patch(flow, "request", patch, automatic=True)
+                patch["url"] = resolve_redirect_url(rule["redirect"]["url"], flow.request.url)
+            self._apply_patch(flow, "request", patch, automatic=True, preserve_credentials="redirect" in rule)
             if "mock" in rule:
                 mock = rule["mock"]
                 headers = dict(mock.get("headers", {}))
@@ -416,7 +416,7 @@ class FlutterPilotAddon:
             if key in entry:
                 entry[key].update(content)
 
-    def _apply_patch(self, flow, stage, patch, automatic=False):
+    def _apply_patch(self, flow, stage, patch, automatic=False, preserve_credentials=False):
         message = flow.request if stage == "request" else flow.response
         if message is None or not patch:
             return
@@ -440,8 +440,9 @@ class FlutterPilotAddon:
                 before_origin = (before.scheme, before.hostname, before.port or (443 if before.scheme == "https" else 80))
                 after_origin = (after.scheme, after.hostname, after.port or (443 if after.scheme == "https" else 80))
                 if before_origin != after_origin:
-                    for key in ("authorization", "cookie", "proxy-authorization"):
-                        message.headers.pop(key, None)
+                    if not preserve_credentials:
+                        for key in ("authorization", "cookie", "proxy-authorization"):
+                            message.headers.pop(key, None)
                     message.headers["host"] = after.netloc
             if "method" in patch:
                 message.method = patch["method"].upper()

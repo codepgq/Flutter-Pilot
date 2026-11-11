@@ -13,6 +13,52 @@ const rule = (): Rule => ({
   mock: { status: 200, headers: { 'content-type': 'application/json' }, body: '{"orders":[]}' },
 });
 describe('规则文件与历史草稿', () => {
+  const redirectDocument = (url: unknown) => {
+    const { mock: _mock, ...base } = rule();
+    return { version: 1, rules: [{ ...base, redirect: { url } }] };
+  };
+  it.each([
+    '/',
+    '/api/private/new',
+    '/api/a%2Fb?tag=one&tag=two&value=a%2Bb',
+    '/api/private/new?',
+    'https://api.example.test/api/private/new',
+    'http://localhost:8080/new?x=1',
+    'https://[::1]:8443/new',
+    'https://api.example.test?email=a@b',
+  ])('接受路径或完整重定向地址且原样保留：%s', (target) => {
+    expect(validateRuleDocument(redirectDocument(target)).rules[0].redirect?.url).toBe(target);
+  });
+  it.each([
+    '',
+    null,
+    1,
+    'relative/path',
+    '?x=1',
+    '//other.test/path',
+    '/\\other.test/path',
+    '/path#fragment',
+    '/path#',
+    '/path with space',
+    '/path\nnext',
+    '/path\u0000',
+    '/path\u007f',
+    'https://other.test/path#fragment',
+    'https://other.test/\\path',
+    'https://user:secret@other.test/path',
+    'https://@other.test/path',
+    'https:///other.test/path',
+    'https://',
+    'https://other.test:99999/path',
+    'file:///etc/passwd',
+  ])('拒绝无效重定向地址：%j', (target) => {
+    expect(() => validateRuleDocument(redirectDocument(target))).toThrow();
+  });
+  it('request.url 仍要求完整地址', () => {
+    expect(() =>
+      validateRuleDocument({ version: 1, rules: [{ ...rule(), request: { url: '/new' } }] }),
+    ).toThrow();
+  });
   it('验证完整文件且不保留调用方对象引用', () => {
     const r = rule();
     const d = validateRuleDocument({ version: 1, rules: [r] });
