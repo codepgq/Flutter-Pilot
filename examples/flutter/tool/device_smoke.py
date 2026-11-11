@@ -17,14 +17,14 @@ spec=importlib.util.spec_from_file_location('proxy_control',ROOT/'tests/proxy/te
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 artifact_root=ROOT/'examples/flutter/.dart_tool'
 artifact_root.mkdir(parents=True,exist_ok=True)
-folder=Path(tempfile.mkdtemp(prefix='api-mocks-device-smoke-',dir=artifact_root))
+folder=Path(tempfile.mkdtemp(prefix='flutter-pilot-device-smoke-',dir=artifact_root))
 print('ARTIFACT_DIR',folder,flush=True)
 control=m.Control()
 with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
 origin=http.server.ThreadingHTTPServer(('127.0.0.1',0),m.Origin)
 threading.Thread(target=origin.serve_forever,daemon=True).start()
 log=(folder/'engine.log').open('w')
-env=dict(os.environ,API_MOCK_CONTROL_PORT=str(control.port),API_MOCK_CONTROL_TOKEN=control.token,API_MOCK_STORAGE=str(folder/'storage'),API_MOCK_SETTINGS=json.dumps({'maxBodyBytes':1048576,'breakpointTimeout':60}))
+env=dict(os.environ,FLUTTER_PILOT_CONTROL_PORT=str(control.port),FLUTTER_PILOT_CONTROL_TOKEN=control.token,FLUTTER_PILOT_STORAGE=str(folder/'storage'),FLUTTER_PILOT_SETTINGS=json.dumps({'maxBodyBytes':1048576,'breakpointTimeout':60}))
 engine=subprocess.Popen([str(Path(args.mitmdump).expanduser().resolve()),'-q','-s',str(ROOT/'proxy/addon.py'),'--listen-host','127.0.0.1','--listen-port',str(port),'--set','confdir='+str(folder/'ca'),'--set','connection_strategy=lazy','--set','http2=false','--set','flow_detail=0'],env=env,stdout=log,stderr=subprocess.STDOUT)
 example=ROOT/'examples/flutter'
 smoke=example/'lib/proxy_smoke.dart'
@@ -38,8 +38,8 @@ try:
     if not control.connected.wait(45):raise RuntimeError('Engine failed: '+(folder/'engine.log').read_text())
     health=control.rpc('health');print('PROXY',json.dumps(health),flush=True)
     rules=[
-      {'id':'device-mock','name':'Device HTTPS mock','enabled':True,'priority':100,'match':{'host':'api-mocks.test','path':'/ping'},'mock':{'status':200,'headers':{'content-type':'application/json'},'body':'{"mocked":true}'},'response':{'headers':{'x-response-modified':'yes'}}},
-      {'id':'device-redirect','name':'Device request redirect modify','enabled':True,'priority':100,'match':{'host':'api-mocks.test','path':'/echo'},'request':{'body':'{"modified":true}','headers':{'x-request-modified':'yes','content-type':'application/json'}},'redirect':{'url':'http://127.0.0.1:'+str(origin.server_port)+'/echo'},'response':{'status':202,'headers':{'x-response-modified':'yes'}}},
+      {'id':'device-mock','name':'Device HTTPS mock','enabled':True,'priority':100,'match':{'host':'flutter-pilot.test','path':'/ping'},'mock':{'status':200,'headers':{'content-type':'application/json'},'body':'{"mocked":true}'},'response':{'headers':{'x-response-modified':'yes'}}},
+      {'id':'device-redirect','name':'Device request redirect modify','enabled':True,'priority':100,'match':{'host':'flutter-pilot.test','path':'/echo'},'request':{'body':'{"modified":true}','headers':{'x-request-modified':'yes','content-type':'application/json'}},'redirect':{'url':'http://127.0.0.1:'+str(origin.server_port)+'/echo'},'response':{'status':202,'headers':{'x-response-modified':'yes'}}},
     ]
     print('SYNC',control.rpc('rules.sync',{'version':1,'rules':rules}),flush=True)
     subprocess.run(['node','-e',"require('esbuild').buildSync({entryPoints:['src/setup.ts'],bundle:true,platform:'node',format:'cjs',outfile:process.argv[1]})",str(bundle)],cwd=ROOT,check=True)
@@ -50,29 +50,29 @@ try:
     smoke.write_text('''import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'api_mocks_debug.dart';
+import 'flutter_pilot_debug.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MaterialApp(home: Scaffold(body: Center(child: Text('API Mocks HTTPS smoke')))));
+  runApp(const MaterialApp(home: Scaffold(body: Center(child: Text('Flutter Pilot HTTPS smoke')))));
   final dio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 20), receiveTimeout: const Duration(seconds: 30)));
   try {
-    await configureApiMocks(dio);
+    await configureFlutterPilot(dio);
     for (final scheme in ['http','https']) {
-      final response = await dio.get<Map<String,dynamic>>('$scheme://api-mocks.test/ping');
+      final response = await dio.get<Map<String,dynamic>>('$scheme://flutter-pilot.test/ping');
       if(response.statusCode != 200 || response.data?['mocked'] != true || response.headers.value('x-response-modified') != 'yes') throw StateError('Mock failed: $scheme ${response.data}');
-      debugPrint('API_MOCK_SMOKE_STEP $scheme mock OK');
+      debugPrint('FLUTTER_PILOT_SMOKE_STEP $scheme mock OK');
     }
-    final echo = await dio.post<Map<String,dynamic>>('https://api-mocks.test/echo', data: {'original':true}, options: Options(headers:{'authorization':'Bearer SHOULD_NOT_LEAK','cookie':'session=SHOULD_NOT_LEAK'}));
+    final echo = await dio.post<Map<String,dynamic>>('https://flutter-pilot.test/echo', data: {'original':true}, options: Options(headers:{'authorization':'Bearer SHOULD_NOT_LEAK','cookie':'session=SHOULD_NOT_LEAK'}));
     if(echo.statusCode!=202 || echo.data?['body']!='{"modified":true}' || echo.headers.value('x-response-modified')!='yes') throw StateError('Redirect/request/response modify failed: ${echo.statusCode} ${echo.data}');
     final echoedHeaders = echo.data?['headers'] as Map<String,dynamic>;
     if(echoedHeaders.keys.any((key)=> ['authorization','cookie'].contains(key.toLowerCase()))) throw StateError('Credentials leaked');
-    debugPrint('API_MOCK_SMOKE_STEP HTTPS redirect request/response modify credentials OK');
+    debugPrint('FLUTTER_PILOT_SMOKE_STEP HTTPS redirect request/response modify credentials OK');
     final upstream = await dio.get<String>('https://example.com/');
     if(upstream.statusCode!=200 || !upstream.data!.contains('Example Domain')) throw StateError('Upstream HTTPS failed: ${upstream.statusCode}');
-    debugPrint('API_MOCK_SMOKE_STEP upstream HTTPS OK');
-    debugPrint('API_MOCK_SMOKE_OK ${Platform.operatingSystem}');
+    debugPrint('FLUTTER_PILOT_SMOKE_STEP upstream HTTPS OK');
+    debugPrint('FLUTTER_PILOT_SMOKE_OK ${Platform.operatingSystem}');
   } catch(error,stack) {
-    debugPrint('API_MOCK_SMOKE_FAILED ${Platform.operatingSystem} $error');
+    debugPrint('FLUTTER_PILOT_SMOKE_FAILED ${Platform.operatingSystem} $error');
     debugPrint('$stack');
   } finally { dio.close(force:true); }
 }
@@ -90,7 +90,7 @@ Future<void> main() async {
     if args.android:targets.append((args.android,'android-physical'))
     for device,label in targets:
       print('RUNNING',label,flush=True)
-      p=subprocess.Popen(['flutter','run','-d',device,'-t','lib/proxy_smoke.dart','--no-pub','--dart-define=API_MOCK_PROXY=127.0.0.1:'+str(port)],cwd=example,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1)
+      p=subprocess.Popen(['flutter','run','-d',device,'-t','lib/proxy_smoke.dart','--no-pub','--dart-define=FLUTTER_PILOT_PROXY=127.0.0.1:'+str(port)],cwd=example,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1)
       runners.append(p)
       lines=queue.Queue()
       def read_lines(process,q):
@@ -106,8 +106,8 @@ Future<void> main() async {
           continue
         if line is None:break
         output.append(line);print(label+': '+line,end='',flush=True)
-        if 'API_MOCK_SMOKE_OK' in line:passed=True;break
-        if 'API_MOCK_SMOKE_FAILED' in line:break
+        if 'FLUTTER_PILOT_SMOKE_OK' in line:passed=True;break
+        if 'FLUTTER_PILOT_SMOKE_FAILED' in line:break
       (folder/(label+'.log')).write_text(''.join(output))
       results.append({'target':label,'passed':passed})
       try:p.stdin.write('q\n');p.stdin.flush();p.wait(timeout=20)

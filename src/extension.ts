@@ -50,16 +50,16 @@ function updateStatus() {
   const list = [...sessions.values()];
   const running = list.filter((session) => session.recording);
   status.text = running.length
-    ? `$(record) API Mocks · ${running.length} 记录中`
-    : '$(radio-tower) API Mocks';
+    ? `$(record) Flutter Pilot · ${running.length} 记录中`
+    : '$(radio-tower) Flutter Pilot';
   status.tooltip = running.length
     ? running.map((session) => session.summary).join('\n') + '\n点击打开工作台；关闭工作台仍继续记录。'
-    : '打开 Flutter API 工作台；连接当前项目的 Flutter VM WS 开始记录。';
+    : '打开 Flutter Pilot 工作台；连接当前项目的 Flutter VM WS 开始记录。';
 }
 export async function activate(context: vscode.ExtensionContext) {
   shuttingDown = false;
   const epoch = ++lifecycle;
-  output = vscode.window.createOutputChannel('Flutter API Mocks');
+  output = vscode.window.createOutputChannel('Flutter Pilot');
   context.subscriptions.push(output);
   // Register debug listeners before any asynchronous workspace initialization.
   vmDiscovery = new VmDiscovery(createVscodeDiscoveryHost(vscode));
@@ -69,7 +69,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
   );
   context.subscriptions.push(
-    vscode.workspace.registerTextDocumentContentProvider('api-mocks-preview', {
+    vscode.workspace.registerTextDocumentContentProvider('flutter-pilot-preview', {
       provideTextDocumentContent: (uri) => previewDocuments.get(uri.toString()) ?? '',
     }),
   );
@@ -119,7 +119,7 @@ export async function activate(context: vscode.ExtensionContext) {
         : (
             await vscode.window.showQuickPick(
               folders.map((f) => ({ label: f.name, description: f.uri.fsPath, folder: f })),
-              { title: '选择本次 API Mock 工作区' },
+              { title: '选择本次 Flutter Pilot 工作区' },
             )
           )?.folder;
     if (!folder || shuttingDown) return;
@@ -134,18 +134,18 @@ export async function activate(context: vscode.ExtensionContext) {
         fn().catch((error) => vscode.window.showErrorMessage(messageOf(error))),
       ),
     );
-  command('flutterApiMocks.open', open);
-  command('flutterApiMocks.start', async () => {
+  command('flutterPilot.open', open);
+  command('flutterPilot.start', async () => {
     const session = await open();
     await session?.start();
   });
-  command('flutterApiMocks.stop', async () => {
+  command('flutterPilot.stop', async () => {
     // With no panel, stop every background workspace; a selected panel targets its own workspace.
     if (active?.hasPanel) await active.stop();
     else await Promise.all([...sessions.values()].map((session) => session.stop()));
   });
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 40);
-  status.command = 'flutterApiMocks.open';
+  status.command = 'flutterPilot.open';
   updateStatus();
   status.show();
   context.subscriptions.push(status);
@@ -195,11 +195,11 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
       for (const session of sessions.values())
-        if (event.affectsConfiguration('flutterApiMocks.autoStart', session.workspaceUri)) {
+        if (event.affectsConfiguration('flutterPilot.autoStart', session.workspaceUri)) {
           void session.applyAutoStart().catch((error) => session.report(error));
         }
       for (const session of sessions.values())
-        if (event.affectsConfiguration('flutterApiMocks.autoConnectVm', session.workspaceUri))
+        if (event.affectsConfiguration('flutterPilot.autoConnectVm', session.workspaceUri))
           session.updateVmAutoConnect();
     }),
   );
@@ -235,7 +235,7 @@ class Workbench {
   private mcpServer?: McpSessionServer;
   private readonly mcpSessionId = randomUUID();
   private readonly bridgeRoot =
-    process.env.API_MOCKS_MCP_ROOT ?? join(homedir(), '.flutter-api-mocks', 'mcp');
+    process.env.FLUTTER_PILOT_MCP_ROOT ?? join(homedir(), '.flutter-pilot', 'mcp');
   private mcpGeneration = 0;
   private readonly mcpClients = new Map<
     string,
@@ -459,18 +459,13 @@ class Workbench {
       this.panel.reveal();
       return;
     }
-    const panel = vscode.window.createWebviewPanel(
-      'flutterApiMocks',
-      'Flutter API Mocks',
-      vscode.ViewColumn.One,
-      {
-        enableScripts: true,
-        // Open settings in the renderer: its editor instance must not be serialized back over RPC.
-        enableCommandUris: ['workbench.action.openSettings'],
-        retainContextWhenHidden: true,
-        localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')],
-      },
-    );
+    const panel = vscode.window.createWebviewPanel('flutterPilot', 'Flutter Pilot', vscode.ViewColumn.One, {
+      enableScripts: true,
+      // Open settings in the renderer: its editor instance must not be serialized back over RPC.
+      enableCommandUris: ['workbench.action.openSettings'],
+      retainContextWhenHidden: true,
+      localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')],
+    });
     this.panel = panel;
     this.sentSelected = undefined;
     this.sentPreview = undefined;
@@ -522,7 +517,7 @@ class Workbench {
     return next;
   }
   private config() {
-    const base = vscode.workspace.getConfiguration('flutterApiMocks', this.folder.uri);
+    const base = vscode.workspace.getConfiguration('flutterPilot', this.folder.uri);
     return {
       get: <T>(key: string, fallback?: T): T => {
         if (Object.prototype.hasOwnProperty.call(this.projectSettings, key))
@@ -822,7 +817,7 @@ class Workbench {
     }
     await this.cleanupReverses();
     this.pending.clear();
-    this.log('代理已停止。设备仍配置代理时，请移除代理配置或不携带 API_MOCK_PROXY 参数重启应用。');
+    this.log('代理已停止。设备仍配置代理时，请移除代理配置或不携带 FLUTTER_PILOT_PROXY 参数重启应用。');
   }
   private async cleanupReverses() {
     const entries = this.ownedReverses.splice(0);
@@ -1021,7 +1016,7 @@ class Workbench {
     const node = await detectNodeRuntime(this.mcpState.nodePath);
     if (!node) throw new Error('未找到 Node.js 20+，请安装后重新适配');
     this.mcpState.nodePath = node;
-    const client = new McpClient({ name: 'flutter-api-mocks-selftest', version: '1.0.0' });
+    const client = new McpClient({ name: 'flutter-pilot-selftest', version: '1.0.0' });
     const transport = new StdioClientTransport({
       command: node,
       args: [
@@ -1445,7 +1440,9 @@ class Workbench {
           this.connectionHost = '127.0.0.1';
           if (!this.connectionDevices.includes(id)) this.connectionDevices.push(id);
           await this.saveConnection();
-          this.log(`Android USB 已连接。运行 Flutter 时添加 --dart-define=API_MOCK_PROXY=127.0.0.1:${port}`);
+          this.log(
+            `Android USB 已连接。运行 Flutter 时添加 --dart-define=FLUTTER_PILOT_PROXY=127.0.0.1:${port}`,
+          );
           break;
         }
         case 'rules.save': {
@@ -1499,7 +1496,7 @@ class Workbench {
         }
         case 'rules.export': {
           const uri = await vscode.window.showSaveDialog({
-            defaultUri: vscode.Uri.file(join(this.folder.uri.fsPath, 'api-mocks.rules.json')),
+            defaultUri: vscode.Uri.file(join(this.folder.uri.fsPath, 'flutter-pilot.rules.json')),
             filters: { 'API Mock 规则': ['json'] },
           });
           if (uri)
@@ -1608,11 +1605,11 @@ class Workbench {
           this.preview = await setup.prepareSetup(this.folder.uri.fsPath, candidate, pem);
           for (const file of this.preview.files) {
             const before = vscode.Uri.from({
-              scheme: 'api-mocks-preview',
+              scheme: 'flutter-pilot-preview',
               path: `/${this.preview.id}/before/${file.path.split('/').at(-1)}`,
             });
             const after = vscode.Uri.from({
-              scheme: 'api-mocks-preview',
+              scheme: 'flutter-pilot-preview',
               path: `/${this.preview.id}/after/${file.path.split('/').at(-1)}`,
             });
             previewDocuments.set(before.toString(), file.before ?? '');
@@ -1621,7 +1618,7 @@ class Workbench {
               'vscode.diff',
               before,
               after,
-              `API Mocks 接入预览 · ${file.path.split('/').at(-1)}`,
+              `Flutter Pilot 接入预览 · ${file.path.split('/').at(-1)}`,
             );
           }
           break;
@@ -1672,7 +1669,7 @@ class Workbench {
     const css = this.panel!.webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css'),
     );
-    return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';style-src ${this.panel!.webview.cspSource};script-src 'nonce-${nonce}';font-src ${this.panel!.webview.cspSource};img-src ${this.panel!.webview.cspSource} data:;"><link rel="stylesheet" href="${css}"><title>Flutter API Mocks</title></head><body><div id="root"></div><script nonce="${nonce}" src="${script}"></script></body></html>`;
+    return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';style-src ${this.panel!.webview.cspSource};script-src 'nonce-${nonce}';font-src ${this.panel!.webview.cspSource};img-src ${this.panel!.webview.cspSource} data:;"><link rel="stylesheet" href="${css}"><title>Flutter Pilot</title></head><body><div id="root"></div><script nonce="${nonce}" src="${script}"></script></body></html>`;
   }
   async dispose() {
     if (this.disposed) return;

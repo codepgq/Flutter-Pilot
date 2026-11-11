@@ -14,7 +14,7 @@ const root = resolve('.');
 const flutter = process.env.FLUTTER ?? 'flutter';
 const device = process.env.VM_FLUTTER_DEVICE;
 if (!device) throw new Error('设置 VM_FLUTTER_DEVICE 为已启动的 iOS 模拟器 ID');
-const temp = await mkdtemp(join(tmpdir(), 'api-mocks-vm-flutter-'));
+const temp = await mkdtemp(join(tmpdir(), 'flutter-pilot-vm-flutter-'));
 await build({
   entryPoints: ['src/vm/session.ts'],
   outfile: join(temp, 'session.cjs'),
@@ -196,7 +196,7 @@ try {
   let rules = [
     rule(
       'vm-mock',
-      { host: 'vm.api-mocks.invalid', path: '/mock' },
+      { host: 'vm.flutter-pilot.invalid', path: '/mock' },
       { mock: { status: 200, headers: { 'content-type': 'application/json' }, body: '{"mocked":true}' } },
     ),
   ];
@@ -204,7 +204,7 @@ try {
   await session.setMockEnabled(true);
   assert.ok(session.state.instances >= 1);
   const previousHits = hits;
-  result = await request('https://vm.api-mocks.invalid/mock');
+  result = await request('https://vm.flutter-pilot.invalid/mock');
   assert.equal(result.status, 200);
   assert.deepEqual(result.data, { mocked: true });
   assert.equal(hits, previousHits);

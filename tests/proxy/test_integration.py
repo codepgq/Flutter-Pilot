@@ -145,7 +145,7 @@ class Origin(http.server.BaseHTTPRequestHandler):
 class ProxyIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.temp = tempfile.TemporaryDirectory(prefix="api-mocks-integration-")
+        cls.temp = tempfile.TemporaryDirectory(prefix="flutter-pilot-integration-")
         cls.folder = Path(cls.temp.name)
         cls.control = Control()
         cls.origin = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Origin)
@@ -163,7 +163,7 @@ class ProxyIntegrationTests(unittest.TestCase):
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             cls.port = sock.getsockname()[1]
-        env = dict(os.environ, API_MOCK_CONTROL_PORT=str(cls.control.port), API_MOCK_CONTROL_TOKEN=cls.control.token, API_MOCK_STORAGE=str(cls.folder / "storage"), API_MOCK_SETTINGS=json.dumps({"maxBodyBytes": 1024 * 1024}), API_MOCK_START_PAUSED="1")
+        env = dict(os.environ, FLUTTER_PILOT_CONTROL_PORT=str(cls.control.port), FLUTTER_PILOT_CONTROL_TOKEN=cls.control.token, FLUTTER_PILOT_STORAGE=str(cls.folder / "storage"), FLUTTER_PILOT_SETTINGS=json.dumps({"maxBodyBytes": 1024 * 1024}), FLUTTER_PILOT_START_PAUSED="1")
         addon = Path(__file__).resolve().parents[2] / "proxy" / "addon.py"
         cls.log = (cls.folder / "engine.log").open("w+")
         cls.process = subprocess.Popen([os.environ["MITMDUMP"], "-s", str(addon), "--listen-host", "127.0.0.1", "--listen-port", str(cls.port), "--set", "confdir=" + str(cls.folder / "ca"), "--set", "connection_strategy=lazy", "--set", "server=false", "--set", "http2=false", "--set", "termlog_verbosity=error", "--set", "flow_detail=0", "--set", "ssl_verify_upstream_trusted_ca=" + str(cls.cert)], env=env, stdout=cls.log, stderr=subprocess.STDOUT)

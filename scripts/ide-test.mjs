@@ -5,15 +5,15 @@ import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 const root = resolve('.');
-const engine = process.env.API_MOCK_TEST_ENGINE;
-if (!engine) throw new Error('设置 API_MOCK_TEST_ENGINE 为 mitmdump 绝对路径');
-const kind = process.env.API_MOCK_TEST_IDE || 'vscode';
+const engine = process.env.FLUTTER_PILOT_TEST_ENGINE;
+if (!engine) throw new Error('设置 FLUTTER_PILOT_TEST_ENGINE 为 mitmdump 绝对路径');
+const kind = process.env.FLUTTER_PILOT_TEST_IDE || 'vscode';
 const executable =
   kind === 'cursor'
     ? '/Applications/Cursor.app/Contents/MacOS/Cursor'
     : '/Applications/Visual Studio Code.app/Contents/MacOS/Code';
 await access(executable);
-const temp = await mkdtemp(join(tmpdir(), `api-mocks-${kind}-test-`));
+const temp = await mkdtemp(join(tmpdir(), `flutter-pilot-${kind}-test-`));
 const user = join(temp, 'user');
 const workspace = join(temp, 'flutter-workspace');
 await mkdir(join(user, 'User'), { recursive: true });
@@ -29,8 +29,8 @@ await writeFile(
     'workbench.startupEditor': 'none',
     'update.mode': 'none',
     'extensions.ignoreRecommendations': true,
-    'flutterApiMocks.enginePath': engine,
-    'flutterApiMocks.proxyPort': 18080,
+    'flutterPilot.enginePath': engine,
+    'flutterPilot.proxyPort': 18080,
   }),
 );
 // Seed only the legacy location: activation must migrate these project files.
@@ -38,7 +38,7 @@ const legacyStorage = join(
   user,
   'User',
   'globalStorage',
-  'api-mocks.flutter-api-mocks',
+  'flutter-pilot.flutter-pilot',
   'workspaces',
   createHash('sha256').update(pathToFileURL(workspace).toString()).digest('hex').slice(0, 24),
 );
@@ -54,7 +54,7 @@ await writeFile(
         name: 'IDE HTTPS smoke',
         enabled: true,
         priority: 10,
-        match: { host: 'ide.api-mocks.test', path: '/ping' },
+        match: { host: 'ide.flutter-pilot.test', path: '/ping' },
         mock: { status: 200, headers: { 'content-type': 'application/json' }, body: '{"ide":true}' },
         breakpoint: { request: true, response: true, timeout: 60 },
       },
@@ -63,9 +63,9 @@ await writeFile(
 );
 await runTests({
   vscodeExecutablePath: executable,
-  extensionDevelopmentPath: process.env.API_MOCK_TEST_EXTENSION_PATH || root,
+  extensionDevelopmentPath: process.env.FLUTTER_PILOT_TEST_EXTENSION_PATH || root,
   extensionTestsPath: join(root, 'tests', 'ide', 'smoke.cjs'),
-  extensionTestsEnv: { API_MOCK_TEST_LEGACY_STORAGE: legacyStorage },
+  extensionTestsEnv: { FLUTTER_PILOT_TEST_LEGACY_STORAGE: legacyStorage },
   launchArgs: [
     workspace,
     '--user-data-dir',

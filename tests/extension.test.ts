@@ -202,7 +202,7 @@ const rule = {
   mock: { status: 200, headers: {}, body: '{}' },
 };
 async function open() {
-  await fake.commands.get('flutterApiMocks.open')?.();
+  await fake.commands.get('flutterPilot.open')?.();
   return fake.panels.at(-1);
 }
 async function message(action: string, payload: unknown = {}) {
@@ -225,10 +225,10 @@ function legacyStorage(workspace = fake.workspace) {
   return join(fake.storage, 'workspaces', workspaceHash(workspace));
 }
 function projectFile(workspace = fake.workspace) {
-  return join(workspace, '.api-mocks', 'project.json');
+  return join(workspace, '.flutter-pilot', 'project.json');
 }
 function rulesFile(workspace = fake.workspace) {
-  return join(workspace, '.api-mocks', 'rules.json');
+  return join(workspace, '.flutter-pilot', 'rules.json');
 }
 async function readProject(workspace = fake.workspace) {
   return JSON.parse(await readFile(projectFile(workspace), 'utf8'));
@@ -258,11 +258,11 @@ async function activateCurrent() {
   } as any);
 }
 beforeEach(async () => {
-  directory = await mkdtemp(join(tmpdir(), 'api-mocks-extension-'));
+  directory = await mkdtemp(join(tmpdir(), 'flutter-pilot-extension-'));
   fake.workspace = join(directory, 'project');
   fake.extraWorkspace = '';
   fake.storage = join(directory, 'storage');
-  process.env.API_MOCKS_MCP_ROOT = join(directory, 'bridge');
+  process.env.FLUTTER_PILOT_MCP_ROOT = join(directory, 'bridge');
   fake.commands.clear();
   fake.executedCommands = [];
   fake.panels = [];
@@ -294,7 +294,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await deactivate();
   await rm(directory, { recursive: true, force: true });
-  delete process.env.API_MOCKS_MCP_ROOT;
+  delete process.env.FLUTTER_PILOT_MCP_ROOT;
 });
 describe('扩展与工作台整合', () => {
   it('仅放行原生设置链接，旧设置消息不能再触发编辑器返回值的跨进程序列化', async () => {
@@ -317,7 +317,7 @@ describe('扩展与工作台整合', () => {
       tool: 'get_network_status',
       args: { sessionId: descriptor.sessionId },
     })) as any;
-    expect(result.files.http).toMatch(/\/project\/\.api-mocks\/rules\.json$/);
+    expect(result.files.http).toMatch(/\/project\/\.flutter-pilot\/rules\.json$/);
     expect(result.http.mockEnabled).toBe(false);
     const panel = fake.panels.at(-1);
     panel.dispose();
@@ -333,10 +333,10 @@ describe('扩展与工作台整合', () => {
     expect(engine.calls.some((c: any) => c.method === 'proxy.start')).toBe(true);
     await open();
     expect(latest().state.proxyActive).toBe(true);
-    await fake.commands.get('flutterApiMocks.start')?.();
+    await fake.commands.get('flutterPilot.start')?.();
     expect(engine.calls.some((c: any) => c.method === 'proxy.start')).toBe(true);
     expect(latest().state.proxyActive).toBe(true);
-    await fake.commands.get('flutterApiMocks.stop')?.();
+    await fake.commands.get('flutterPilot.stop')?.();
     expect(engine.calls.some((c: any) => c.method === 'proxy.stop')).toBe(true);
     expect(latest().state.proxyActive).toBe(false);
     expect(engine.stops).toBe(0);
@@ -832,7 +832,7 @@ describe('VM 连接模式扩展整合', () => {
   it('新工作区默认 VM，即使已有可用代理引擎也不启动代理', async () => {
     await deactivate();
     await rm(join(legacyStorage(), 'connection.json'));
-    await rm(join(fake.workspace, '.api-mocks'), { recursive: true });
+    await rm(join(fake.workspace, '.flutter-pilot'), { recursive: true });
     fake.engines = [];
     await activateCurrent();
     await open();
@@ -844,7 +844,7 @@ describe('VM 连接模式扩展整合', () => {
 
   it('旧版不含 mode 的代理设置继续使用代理，显式 VM 选择优先', async () => {
     await deactivate();
-    await rm(join(fake.workspace, '.api-mocks'), { recursive: true });
+    await rm(join(fake.workspace, '.flutter-pilot'), { recursive: true });
     await rm(join(legacyStorage(), 'project-binding.json'));
     await writeFile(join(legacyStorage(), 'connection.json'), JSON.stringify({ port: 8080 }));
     fake.engines = [];
@@ -1022,8 +1022,8 @@ describe('项目文件与工作区绑定整合', () => {
     expect(latest().state.project).toMatchObject({
       id: config.projectId,
       name: 'project',
-      configPath: expect.stringContaining('/.api-mocks/project.json'),
-      rulesPath: expect.stringContaining('/.api-mocks/rules.json'),
+      configPath: expect.stringContaining('/.flutter-pilot/project.json'),
+      rulesPath: expect.stringContaining('/.flutter-pilot/rules.json'),
     });
     expect(fake.engines[0].starts[0].storagePath).toBe(await privateStorage());
     await deactivate();
@@ -1050,9 +1050,9 @@ describe('项目文件与工作区绑定整合', () => {
     await open();
     await message('project.open', { kind: 'config' });
     await message('project.open', { kind: 'rules' });
-    expect(fake.shownDocuments.map((file) => file.slice(file.indexOf('/.api-mocks/')))).toEqual([
-      '/.api-mocks/project.json',
-      '/.api-mocks/rules.json',
+    expect(fake.shownDocuments.map((file) => file.slice(file.indexOf('/.flutter-pilot/')))).toEqual([
+      '/.flutter-pilot/project.json',
+      '/.flutter-pilot/rules.json',
     ]);
   });
 
@@ -1115,7 +1115,7 @@ describe('项目文件与工作区绑定整合', () => {
     await deactivate();
     const config = await readProject();
     fake.extraWorkspace = join(directory, 'copy');
-    await mkdir(join(fake.extraWorkspace, '.api-mocks'), { recursive: true });
+    await mkdir(join(fake.extraWorkspace, '.flutter-pilot'), { recursive: true });
     await writeFile(
       join(fake.extraWorkspace, 'pubspec.yaml'),
       'dependencies:\n  flutter:\n    sdk: flutter\n',

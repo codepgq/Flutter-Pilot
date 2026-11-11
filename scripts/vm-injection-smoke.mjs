@@ -12,7 +12,7 @@ const root = resolve('.');
 const dart = process.env.DART ?? 'dart';
 const packageConfig =
   process.env.VM_PACKAGE_CONFIG ?? join(root, 'examples/flutter/.dart_tool/package_config.json');
-const temp = await mkdtemp(join(tmpdir(), 'api-mocks-vm-injection-'));
+const temp = await mkdtemp(join(tmpdir(), 'flutter-pilot-vm-injection-'));
 await build({
   entryPoints: ['src/vm/injection.ts'],
   outfile: join(temp, 'injector.cjs'),

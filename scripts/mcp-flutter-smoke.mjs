@@ -14,7 +14,7 @@ const root = resolve('.');
 const flutter = process.env.FLUTTER ?? 'flutter';
 const device = process.env.VM_FLUTTER_DEVICE;
 if (!device) throw new Error('设置 VM_FLUTTER_DEVICE 为测试模拟器 ID');
-const temp = process.env.UI_FIXTURE_DIR ?? (await mkdtemp(join(tmpdir(), 'api-mocks-ui-')));
+const temp = process.env.UI_FIXTURE_DIR ?? (await mkdtemp(join(tmpdir(), 'flutter-pilot-ui-')));
 const run = (args) =>
   new Promise((resolve, reject) => {
     const child = spawn(flutter, args, { stdio: 'pipe' });
@@ -25,7 +25,7 @@ const run = (args) =>
     child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(output.slice(-4000)))));
   });
 if (!process.env.UI_FIXTURE_DIR)
-  await run(['create', '--platforms=ios', '--project-name=api_mocks_ui_fixture', temp]);
+  await run(['create', '--platforms=ios', '--project-name=flutter_pilot_ui_fixture', temp]);
 await run(['pub', 'add', '--offline', '--directory', temp, 'dio:^5.9.0']);
 const source = join(temp, 'lib/main.dart');
 await writeFile(
@@ -156,10 +156,10 @@ try {
   await waitFor(() => uri && started);
   await vm.connect(uri, []);
   check((await ui.probe()).supported, 'VM UI capability');
-  const store = new RuleStore(join(temp, '.api-mocks'));
+  const store = new RuleStore(join(temp, '.flutter-pilot'));
   const network = new McpNetworkController({
     httpRulesPath: store.file,
-    wsRulesPath: join(temp, '.api-mocks/ws-rules.json'),
+    wsRulesPath: join(temp, '.flutter-pilot/ws-rules.json'),
     readHttpRules: async () => (await store.load()).rules,
     readWsRules: async () => [],
     applyHttpRules: async (rules) => {

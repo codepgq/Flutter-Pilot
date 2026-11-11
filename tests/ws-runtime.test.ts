@@ -94,7 +94,7 @@ describe('WebSocket VM runtime boundaries', () => {
     rpc.emit('notification', {
       params: {
         event: {
-          extensionKind: 'api_mocks.vm.ws',
+          extensionKind: 'flutter_pilot.vm.ws',
           extensionData: { session: 'other', messages: [{ original: 'secret' }] },
         },
       },
@@ -126,7 +126,7 @@ describe('WebSocket VM runtime boundaries', () => {
     rpc.emit('notification', {
       params: {
         event: {
-          extensionKind: 'api_mocks.vm.ws',
+          extensionKind: 'flutter_pilot.vm.ws',
           extensionData: {
             session,
             omitted: 2,

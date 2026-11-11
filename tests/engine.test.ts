@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 
 async function fixture(): Promise<EngineStartOptions> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'api-mocks-engine-test-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'flutter-pilot-engine-test-'));
   temporary.push(root);
   const executable = path.join(root, 'fake-mitmdump');
   await fs.writeFile(
@@ -22,13 +22,13 @@ async function fixture(): Promise<EngineStartOptions> {
 const net = require('node:net');
 const args = process.argv;
 const port = Number(args[args.indexOf('--listen-port') + 1]);
-const rogue = net.connect(Number(process.env.API_MOCK_CONTROL_PORT), '127.0.0.1');
+const rogue = net.connect(Number(process.env.FLUTTER_PILOT_CONTROL_PORT), '127.0.0.1');
 rogue.on('error', () => {});
 rogue.on('connect', () => rogue.end(JSON.stringify({event:'hello', protocolVersion:1, token:'wrong'})+'\\n'));
-const socket = net.connect(Number(process.env.API_MOCK_CONTROL_PORT), '127.0.0.1');
-let active = process.env.API_MOCK_START_PAUSED !== '1';
+const socket = net.connect(Number(process.env.FLUTTER_PILOT_CONTROL_PORT), '127.0.0.1');
+let active = process.env.FLUTTER_PILOT_START_PAUSED !== '1';
 const send = (data) => socket.write(JSON.stringify(data)+'\\n');
-socket.on('connect', () => send({event:'hello', protocolVersion:1, token:process.env.API_MOCK_CONTROL_TOKEN}));
+socket.on('connect', () => send({event:'hello', protocolVersion:1, token:process.env.FLUTTER_PILOT_CONTROL_TOKEN}));
 let buffer = '';
 socket.on('data', (chunk) => {
  buffer += chunk;
@@ -40,7 +40,7 @@ socket.on('data', (chunk) => {
   if(msg.method === 'fail') { send({id:msg.id,error:{message:'测试错误'}}); continue; }
   if(msg.method === 'proxy.start') active = true;
   if(msg.method === 'proxy.stop') active = false;
-  if(['health','proxy.start','proxy.stop'].includes(msg.method)) send({id:msg.id,result:{ready:true,proxyPort:port,proxyActive:active,caCertPath:process.env.API_MOCK_STORAGE+'/ca/mitmproxy-ca-cert.pem'}});
+  if(['health','proxy.start','proxy.stop'].includes(msg.method)) send({id:msg.id,result:{ready:true,proxyPort:port,proxyActive:active,caCertPath:process.env.FLUTTER_PILOT_STORAGE+'/ca/mitmproxy-ca-cert.pem'}});
   else send({id:msg.id,result:{echo:msg.params}});
   if(msg.method === 'event') {
    const bytes = Buffer.from(JSON.stringify({event:'test',data:{text:'中文正常'}})+'\\n');

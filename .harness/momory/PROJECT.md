@@ -1,4 +1,22 @@
-# Flutter API Mocks 项目记忆
+# Flutter Pilot 项目记忆
+
+## GitHub 远端与推送授权（2026-11-11）
+
+- 用户指定远端 https://github.com/codepgq/Flutter-Pilot.git，并要求将当前项目推送至 origin/main，授权提交此前已验证的 Flutter Pilot 更名及安装记录，覆盖此前本轮不提交限制。
+- 推送前确认当前分支 main、无已配置远端、目标仓库没有分支引用；添加 origin 后使用常规推送并设置 main 的上游，不强制推送。
+
+## Flutter Pilot Cursor 安装授权（2026-11-11）
+
+- 用户要求卸载 Cursor 旧插件并安装新插件，覆盖此前本轮不安装限制；使用应用包内 CLI，不启动 GUI、不强制重载、不修改真实 Agent 配置。
+- CLI 确认旧 api-mocks.flutter-api-mocks 未安装；Flutter Pilot 0.0.7 已安装，列表与活动登记一致，25 个文件与 VSIX 逐项一致（manifest 仅排除 Cursor 安装元数据）。报告 artifacts/flutter-pilot-cursor-install-report.json。
+
+## Flutter Pilot 完整更名确认（2026-11-11）
+
+- 用户选定新品牌 Flutter Pilot，副标题为“Flutter 运行时调试与 Agent 联调工作台”，要求插件名称、MCP 名称及一切对外展示统一更名。
+- 头脑风暴后用户明确选择直接切换，不兼容旧配置、规则或历史；正式技术标识为 flutter-pilot / flutterPilot，项目目录为 .flutter-pilot，扩展 ID 为 flutter-pilot.flutter-pilot。
+- 插件 UI、命令、设置、MCP 服务/资源/指南、安装包、文档、示例及运行时接入标识同步更新。旧项目需重新配置，真实 Agent 配置不自动修改。
+- 旧历史记录、验收证据及截图保留原事实，不作为新品牌的重新验收结果。本节覆盖以下历史约定中的旧名称与旧配置路径。
+- 本轮仅更名与验证，不自动提交、安装、发布或启动 IDE GUI，不强制重载用户窗口。
 
 ## 0.0.7 发布授权（2026-11-10）
 

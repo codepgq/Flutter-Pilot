@@ -20,13 +20,13 @@ const sanitize = (value) => String(value).replace(/(?:wss?|https?):\/\/[^\s'"<>]
 
 exports.run = async () => {
   const report = {
-    ide: process.env.API_MOCK_TEST_IDE,
+    ide: process.env.FLUTTER_PILOT_TEST_IDE,
     ideVersion: vscode.version,
-    ideAppVersion: process.env.API_MOCK_TEST_IDE_APP_VERSION,
-    flutterVersion: process.env.API_MOCK_TEST_FLUTTER_VERSION,
-    dartVersion: process.env.API_MOCK_TEST_DART_VERSION,
+    ideAppVersion: process.env.FLUTTER_PILOT_TEST_IDE_APP_VERSION,
+    flutterVersion: process.env.FLUTTER_PILOT_TEST_FLUTTER_VERSION,
+    dartVersion: process.env.FLUTTER_PILOT_TEST_DART_VERSION,
     dartExtensionVersion: vscode.extensions.getExtension('Dart-Code.dart-code')?.packageJSON.version,
-    device: process.env.API_MOCK_TEST_DEVICE,
+    device: process.env.FLUTTER_PILOT_TEST_DEVICE,
     passed: false,
     assertions: [],
     limits: ['macOS local iOS simulator only; Android and physical devices not exercised.'],
@@ -39,7 +39,7 @@ exports.run = async () => {
   const workspace = folder.uri.fsPath;
   const owned = new Map();
   const started = vscode.debug.onDidStartDebugSession((session) => {
-    if (session.configuration.cwd === workspace || session.name.startsWith('API Mocks Discovery Fixture')) {
+    if (session.configuration.cwd === workspace || session.name.startsWith('Flutter Pilot Discovery Fixture')) {
       owned.set(session.id, session);
       console.log('DISCOVERY_SESSION_STARTED ' + session.type + ' ' + session.name);
     }
@@ -58,7 +58,7 @@ exports.run = async () => {
     assert.equal(workbench.engine.state.status, 'stopped');
   };
   async function begin(request = 'launch', extras = {}) {
-    const name = `API Mocks Discovery Fixture ${request} ${Date.now()}`;
+    const name = `Flutter Pilot Discovery Fixture ${request} ${Date.now()}`;
     assert.equal(
       await vscode.debug.startDebugging(folder, {
         type: 'dart',
@@ -66,7 +66,7 @@ exports.run = async () => {
         name,
         cwd: workspace,
         ...(request === 'launch' ? { program: path.join(workspace, 'lib', 'main.dart') } : {}),
-        deviceId: process.env.API_MOCK_TEST_DEVICE,
+        deviceId: process.env.FLUTTER_PILOT_TEST_DEVICE,
         flutterMode: 'debug',
         ...extras,
       }),
@@ -119,16 +119,16 @@ exports.run = async () => {
     server = undefined;
   }
   try {
-    const extension = vscode.extensions.getExtension('api-mocks.flutter-api-mocks');
+    const extension = vscode.extensions.getExtension('flutter-pilot.flutter-pilot');
     assert.ok(extension);
     await extension.activate();
-    workbench = await vscode.commands.executeCommand('flutterApiMocks.open');
+    workbench = await vscode.commands.executeCommand('flutterPilot.open');
     assert.ok(workbench?.vm);
     const first = await begin();
     passed('real Flutter IDE launch auto-connects without a manually entered URI; Dio/WS remain off');
     await verifyHttp();
     passed('real Flutter dart:io HTTP request recorded after auto-connect');
-    const { VmDiscovery, createVscodeDiscoveryHost } = require(process.env.API_MOCK_TEST_DISCOVERY_BUNDLE);
+    const { VmDiscovery, createVscodeDiscoveryHost } = require(process.env.FLUTTER_PILOT_TEST_DISCOVERY_BUNDLE);
     probe = new VmDiscovery(createVscodeDiscoveryHost(vscode));
     await probe.start();
     await waitFor(
@@ -173,8 +173,8 @@ exports.run = async () => {
     let appStarted = false;
     let machineFailure;
     flutterProcess = spawn(
-      process.env.API_MOCK_TEST_FLUTTER,
-      ['run', '--machine', '--no-pub', '-d', process.env.API_MOCK_TEST_DEVICE],
+      process.env.FLUTTER_PILOT_TEST_FLUTTER,
+      ['run', '--machine', '--no-pub', '-d', process.env.FLUTTER_PILOT_TEST_DEVICE],
       { cwd: workspace, stdio: ['pipe', 'pipe', 'pipe'] },
     );
     flutterProcess.stdout.on('data', (data) => {
@@ -216,7 +216,7 @@ exports.run = async () => {
     const currentHash = createHash('sha256')
       .update(await fs.readFile(path.join(workspace, 'lib', 'main.dart')))
       .digest('hex');
-    assert.equal(currentHash, process.env.API_MOCK_TEST_SOURCE_HASH);
+    assert.equal(currentHash, process.env.FLUTTER_PILOT_TEST_SOURCE_HASH);
     passed('fixture Flutter application source SHA-256 unchanged');
     report.passed = true;
   } catch (error) {
@@ -236,7 +236,7 @@ exports.run = async () => {
       if (flutterProcess.exitCode === null) flutterProcess.kill('SIGTERM');
     }
     if (server) await new Promise((resolve) => server.close(resolve));
-    await fs.writeFile(process.env.API_MOCK_TEST_DISCOVERY_REPORT, JSON.stringify(report, null, 2) + '\n');
+    await fs.writeFile(process.env.FLUTTER_PILOT_TEST_DISCOVERY_REPORT, JSON.stringify(report, null, 2) + '\n');
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   }
 };

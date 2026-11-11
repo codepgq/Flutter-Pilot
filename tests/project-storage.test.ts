@@ -26,7 +26,7 @@ describe('project-private storage migration', () => {
   let legacy: string;
   let clients: ChildProcessWithoutNullStreams[];
   beforeEach(async () => {
-    temporary = await mkdtemp(join(tmpdir(), 'api-mocks-project-storage-'));
+    temporary = await mkdtemp(join(tmpdir(), 'flutter-pilot-project-storage-'));
     root = join(temporary, 'private');
     uri = pathToFileURL(join(temporary, 'project')).toString();
     legacy = join(root, 'workspaces', hash(uri));

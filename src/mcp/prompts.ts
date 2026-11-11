@@ -242,7 +242,7 @@ export function getMcpPrompt(name: string, args: Record<string, string> = {}) {
             args.task?.trim()
               ? `任务：${args.task.trim()}`
               : '尚未指定具体任务：先询问操作目标和预期结果，再执行以下流程。',
-            `使用 flutter-api-mocks MCP 完成任务；先调用 get_usage_guide，按需读取主题：${topics.join('、')}。详细参数和限制以指南及工具 schema 为准。`,
+            `使用 flutter-pilot MCP 完成任务；先调用 get_usage_guide，按需读取主题：${topics.join('、')}。详细参数和限制以指南及工具 schema 为准。`,
             name === 'get_usage_guide'
               ? '这是离线只读指南入口，不要求先调用 list_sessions、连接 VM 或开启 Mock。'
               : name === 'list_sessions'

@@ -220,7 +220,7 @@ export class McpSessionServer {
         (client.scope !== undefined && !['project', 'global'].includes(client.scope))
       )
         throw new McpToolError('INVALID_ARGUMENTS', '客户端信息无效。');
-      if (client.name !== 'flutter-api-mocks-selftest') {
+      if (client.name !== 'flutter-pilot-selftest') {
         if (client.event === 'disconnected') {
           if (this.clients.delete(client.connectionId)) this.options.onClient?.(client);
         } else {

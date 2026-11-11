@@ -44,7 +44,7 @@ export async function readConfig(path: string): Promise<ConfigSnapshot> {
 export async function writeConfig(path: string, before: ConfigSnapshot, text: string): Promise<void> {
   await checkConfigPath(path);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const lock = `${path}.api-mocks.lock`;
+  const lock = `${path}.flutter-pilot.lock`;
   let lockHandle;
   try {
     lockHandle = await open(lock, 'wx', 0o600);

@@ -100,7 +100,7 @@ export class WsVmInjector extends EventEmitter {
     this.listener = (notification: any) => {
       const event = notification?.params?.event;
       const data = event?.extensionData;
-      if (event?.extensionKind !== 'api_mocks.vm.ws' || data?.session !== this.session) return;
+      if (event?.extensionKind !== 'flutter_pilot.vm.ws' || data?.session !== this.session) return;
       if (Number.isSafeInteger(data.omitted) && data.omitted > 0) this.emit('omitted', data.omitted);
       if (!Array.isArray(data.messages)) return;
       for (const item of data.messages.slice(0, 100)) {

@@ -6,16 +6,16 @@ import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 const root = resolve('.');
-const kind = process.env.API_MOCK_TEST_IDE || 'vscode';
-if (!['vscode', 'cursor'].includes(kind)) throw new Error('API_MOCK_TEST_IDE 必须为 vscode 或 cursor');
+const kind = process.env.FLUTTER_PILOT_TEST_IDE || 'vscode';
+if (!['vscode', 'cursor'].includes(kind)) throw new Error('FLUTTER_PILOT_TEST_IDE 必须为 vscode 或 cursor');
 const executable =
   kind === 'cursor'
     ? '/Applications/Cursor.app/Contents/MacOS/Cursor'
     : '/Applications/Visual Studio Code.app/Contents/MacOS/Code';
 await access(executable);
-const extensionPath = resolve(process.env.API_MOCK_TEST_EXTENSION_PATH || root);
+const extensionPath = resolve(process.env.FLUTTER_PILOT_TEST_EXTENSION_PATH || root);
 await access(join(extensionPath, 'dist', 'extension.js'));
-const temp = await mkdtemp(join(tmpdir(), `api-mocks-${kind}-vm-test-`));
+const temp = await mkdtemp(join(tmpdir(), `flutter-pilot-${kind}-vm-test-`));
 const user = join(temp, 'user');
 const workspace = join(temp, 'flutter-workspace');
 await mkdir(join(user, 'User'), { recursive: true });
@@ -31,12 +31,12 @@ await writeFile(
     'workbench.startupEditor': 'none',
     'update.mode': 'none',
     'extensions.ignoreRecommendations': true,
-    'flutterApiMocks.autoStart': true,
+    'flutterPilot.autoStart': true,
     // No configured or cached engine is available in this isolated user profile.
-    'flutterApiMocks.enginePath': '',
+    'flutterPilot.enginePath': '',
   }),
 );
-const globalStorage = join(user, 'User', 'globalStorage', 'api-mocks.flutter-api-mocks');
+const globalStorage = join(user, 'User', 'globalStorage', 'flutter-pilot.flutter-pilot');
 const legacyStorage = join(
   globalStorage,
   'workspaces',
@@ -48,7 +48,7 @@ await runTests({
   vscodeExecutablePath: executable,
   extensionDevelopmentPath: extensionPath,
   extensionTestsPath: join(root, 'tests', 'ide', 'vm-smoke.cjs'),
-  extensionTestsEnv: { API_MOCK_TEST_GLOBAL_STORAGE: globalStorage },
+  extensionTestsEnv: { FLUTTER_PILOT_TEST_GLOBAL_STORAGE: globalStorage },
   launchArgs: [
     workspace,
     '--user-data-dir',

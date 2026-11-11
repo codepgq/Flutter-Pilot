@@ -54,7 +54,7 @@ class Connection:
         self.total_changes = 0
 
     def _run(self, statements):
-        script = ";\n".join(statements) + ";\nSELECT total_changes() AS __api_mocks_changes;\n"
+        script = ";\n".join(statements) + ";\nSELECT total_changes() AS __flutter_pilot_changes;\n"
         result = subprocess.run(["/usr/bin/sqlite3", "-batch", "-bail", "-json", "-cmd", ".timeout 5000", self.path], input=script, encoding="utf-8", stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
         if result.returncode:
             raise ValueError("SQLite 操作失败: " + result.stderr.strip())
@@ -66,7 +66,7 @@ class Connection:
             blocks.append(block)
             remainder = remainder[end:].lstrip()
         if blocks:
-            self.total_changes += blocks[-1][0]["__api_mocks_changes"]
+            self.total_changes += blocks[-1][0]["__flutter_pilot_changes"]
         rows = blocks[-2] if len(blocks) >= 2 else []
         return Cursor(rows)
 

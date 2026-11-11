@@ -3,8 +3,8 @@
     'rules': jsonDecode(__RULES__),
     'expiresAt': DateTime.now().millisecondsSinceEpoch + 15000,
     'tag': __TAG__,
-    'clients': Expando<Object>('api-mocks-clients'),
-    'requests': Expando<Object>('api-mocks-requests'),
+    'clients': Expando<Object>('flutter-pilot-clients'),
+    'requests': Expando<Object>('flutter-pilot-requests'),
     'sequence': 0,
     'enabled': true,
     'installed': 0,
@@ -156,7 +156,7 @@
     flow['duration'] = DateTime.now().millisecondsSinceEpoch - flow['startedAt'];
     final result = Map<String, dynamic>.from(flow);
     result.remove('finished'); result.remove('ruleSnapshot'); result.remove('statusChanged');
-    try { emitEvent('api_mocks.vm.flow', {'session': state['tag'], 'entry': result}); } catch (_) {}
+    try { emitEvent('flutter_pilot.vm.flow', {'session': state['tag'], 'entry': result}); } catch (_) {}
     if (failure != null) throw failure;
   }
   bool accepted(dynamic value) => value.requestOptions.validateStatus == null || value.requestOptions.validateStatus(value.statusCode) == true;
@@ -209,7 +209,7 @@
           handler.next(options);
         } catch (error) {
           flow['request'] ??= original; flow['automaticRequest'] ??= original;
-          final failure = DioException(requestOptions: options, error: 'API Mocks VM rule application failed', type: DioExceptionType.unknown);
+          final failure = DioException(requestOptions: options, error: 'Flutter Pilot VM rule application failed', type: DioExceptionType.unknown);
           finish(flow, null, failure); handler.reject(failure, true);
         }
       },
@@ -221,7 +221,7 @@
           finish(flow, value, null);
           if (flow['statusChanged'] != true || accepted(value)) handler.next(value);
           else handler.reject(DioException.badResponse(statusCode: value.statusCode!, requestOptions: value.requestOptions, response: value), true);
-        } catch (_) { handler.reject(DioException(requestOptions: value.requestOptions, error: 'API Mocks VM response rule failed'), true); }
+        } catch (_) { handler.reject(DioException(requestOptions: value.requestOptions, error: 'Flutter Pilot VM response rule failed'), true); }
       },
       onError: (error, handler) {
         final flow = state['requests'][error.requestOptions];

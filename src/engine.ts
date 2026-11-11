@@ -148,11 +148,11 @@ export class EngineManager extends EventEmitter {
       const child = spawn(options.executable, args, {
         env: {
           ...process.env,
-          API_MOCK_CONTROL_PORT: String(controlPort),
-          API_MOCK_CONTROL_TOKEN: this.token,
-          API_MOCK_STORAGE: options.storagePath,
-          API_MOCK_SETTINGS: JSON.stringify(options.settings),
-          API_MOCK_START_PAUSED: options.startPaused ? '1' : '0',
+          FLUTTER_PILOT_CONTROL_PORT: String(controlPort),
+          FLUTTER_PILOT_CONTROL_TOKEN: this.token,
+          FLUTTER_PILOT_STORAGE: options.storagePath,
+          FLUTTER_PILOT_SETTINGS: JSON.stringify(options.settings),
+          FLUTTER_PILOT_START_PAUSED: options.startPaused ? '1' : '0',
         },
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,

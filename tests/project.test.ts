@@ -17,7 +17,7 @@ const rule = {
 };
 const json = async (file: string) => JSON.parse(await readFile(file, 'utf8'));
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'api-mocks-project-'));
+  root = await mkdtemp(join(tmpdir(), 'flutter-pilot-project-'));
   workspace = join(root, 'flutter-project');
   legacy = join(root, 'private-legacy');
   await mkdir(workspace);
@@ -42,7 +42,7 @@ describe('project-local identity and configuration', () => {
     const binding = await openProjectBinding(workspace, legacy);
     expect(binding.config).toMatchObject({ version: 1, name: 'flutter-project', connection: { mode: 'vm' } });
     expect(binding.projectId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(binding.rulesDirectory).toBe(join(await realpath(workspace), '.api-mocks'));
+    expect(binding.rulesDirectory).toBe(join(await realpath(workspace), '.flutter-pilot'));
     expect(await json(join(binding.directory, 'rules.json'))).toEqual({ version: 1, rules: [] });
     const reopened = await openProjectBinding(workspace, legacy);
     expect(reopened.projectId).toBe(binding.projectId);
@@ -177,7 +177,7 @@ describe('project-local identity and configuration', () => {
     async (kind) => {
       const outside = join(root, 'outside');
       await mkdir(outside);
-      if (kind === 'directory') await symlink(outside, join(workspace, '.api-mocks'));
+      if (kind === 'directory') await symlink(outside, join(workspace, '.flutter-pilot'));
       else {
         const binding = await openProjectBinding(workspace, legacy);
         const file = join(binding.directory, kind === 'project' ? 'project.json' : 'rules.json');

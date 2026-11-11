@@ -1,6 +1,8 @@
-# EXIO：在 Cursor 和 iPhone 18 Pro 使用 API Mocks
+# EXIO：在 Cursor 和 iPhone 18 Pro 使用 Flutter Pilot
 
-本教程截图来自 2026-11-08 的真实操作。项目为 `/Users/mark.pan/Documents/exio/exio_app`，设备为 iPhone 18 Pro / iOS 27.2，使用 dev 环境。插件名称 **Flutter API Mocks**，扩展 ID `api-mocks.flutter-api-mocks`。
+本教程截图来自 2026-11-08 更名前的真实操作。项目为 `/Users/mark.pan/Documents/exio/exio_app`，设备为 iPhone 18 Pro / iOS 27.2，使用 dev 环境。当前插件名称为 **Flutter Pilot**，扩展 ID 为 `flutter-pilot.flutter-pilot`。
+
+历史截图保留当时旧名称，不修改验收证据。下文的外部 EXIO 启动项、入口文件、代理参数和响应头也保留当时实际值，本次未修改 EXIO 仓库；更名后需按 [升级说明](../../README.md#升级现有项目) 重新配置，新代理 helper 使用 `FLUTTER_PILOT_PROXY`。
 
 截图保留首次接入时的界面。当前 API 工作台已增加目录收起 / 展开、最近调用与请求时间倒序、详情放大，以及正文 JSON / 原文切换和复制，详见 [API 与历史使用说明](../../README.md#api-与历史)。
 
@@ -17,7 +19,7 @@
 
 ## 1. 打开插件
 
-在 Cursor 按 **⌘ ⇧ P**，输入 `Flutter API Mocks`，执行 **Flutter API Mocks: 打开工作台**。也可点击底部状态栏的 **API Mocks**。当前版本没有独立左侧栏图标。
+在 Cursor 按 **⌘ ⇧ P**，输入 `Flutter Pilot`，执行 **Flutter Pilot: 打开工作台**。也可点击底部状态栏的 **Flutter Pilot**。当前版本没有独立左侧栏图标。
 
 ![命令面板打开插件](01-open-command.png)
 
@@ -53,7 +55,7 @@
 
 ![自动记录的接口和历史](04-api-history.png)
 
-本次已重载 Cursor 实测：未打开工作台时，底部即显示 **API Mocks · 1 记录中**。EXIO 这类根 pubspec 只有 workspace 声明的多包仓库也可自动识别。
+历史实测中，重载 Cursor 后未打开工作台时，底部即显示 **API Mocks · 1 记录中**；当前对应入口显示 Flutter Pilot。EXIO 这类根 pubspec 只有 workspace 声明的多包仓库也可自动识别。
 
 ![重载后无工作台仍自动记录](12-background-after-reload.png)
 
@@ -101,9 +103,9 @@
 
 ## 8. 停止和恢复常规开发
 
-- 保持代理运行时，可继续使用 API Mocks 启动项；关闭工作台不停止采集。
+- 历史接入中保持代理运行时，可继续使用上述 EXIO 专用启动项；关闭工作台不停止采集。
 - 要关闭代理，先停止当前调试，再选择原来的 **exio_app** 启动项运行，最后点击插件 **停止代理**，避免应用仍指向已关闭的代理。
-- 停用自动后台启动可设置 `flutterApiMocks.autoStart: false`。手动停止后，重新打开工作台不会擅自启动。
+- 停用自动后台启动可设置 `flutterPilot.autoStart: false`。手动停止后，重新打开工作台不会擅自启动。
 - 独立开发入口内的 CA 属于本机配置；换电脑或重建插件 CA 后需要更新，不能复制私钥。
 
 ## 实际验证边界

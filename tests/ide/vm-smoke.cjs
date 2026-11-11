@@ -17,18 +17,18 @@ async function waitFor(check, timeout = 5000) {
 }
 
 exports.run = async () => {
-  const extension = vscode.extensions.getExtension('api-mocks.flutter-api-mocks');
+  const extension = vscode.extensions.getExtension('flutter-pilot.flutter-pilot');
   assert.ok(extension, 'Extension discovered');
   await extension.activate();
-  const globalStorage = process.env.API_MOCK_TEST_GLOBAL_STORAGE;
+  const globalStorage = process.env.FLUTTER_PILOT_TEST_GLOBAL_STORAGE;
   // Tests run inside the same extension host. The open command returns its
   // Workbench; call its internal message handler to exercise the webview route
   // without claiming to click a real webview or publishing a test-only API.
-  const workbench = await vscode.commands.executeCommand('flutterApiMocks.open');
+  const workbench = await vscode.commands.executeCommand('flutterPilot.open');
   assert.ok(workbench && typeof workbench.handle === 'function', 'Workbench message route available');
   const storage = workbench.storage;
   const workspace = vscode.workspace.workspaceFolders[0].uri;
-  const projectFile = path.join(await fs.realpath(workspace.fsPath), '.api-mocks', 'project.json');
+  const projectFile = path.join(await fs.realpath(workspace.fsPath), '.flutter-pilot', 'project.json');
   assert.equal(workbench.project.file, projectFile);
   const project = JSON.parse(await fs.readFile(projectFile, 'utf8'));
   assert.match(project.projectId, /^[0-9a-f-]{36}$/i);
@@ -43,10 +43,10 @@ exports.run = async () => {
       createHash('sha256').update(workspace.toString()).digest('hex').slice(0, 24),
     ),
   );
-  const rulesFile = path.join(workspace.fsPath, '.api-mocks', 'rules.json');
+  const rulesFile = path.join(workspace.fsPath, '.flutter-pilot', 'rules.json');
   assert.deepEqual(JSON.parse(await fs.readFile(rulesFile, 'utf8')), { version: 1, rules: [] });
   await fs.access(path.join(storage, 'vm-history.sqlite3'));
-  const wsRulesFile = path.join(workspace.fsPath, '.api-mocks', 'ws-rules.json');
+  const wsRulesFile = path.join(workspace.fsPath, '.flutter-pilot', 'ws-rules.json');
   await fs.access(path.join(storage, 'ws-history.sqlite3'));
   assert.deepEqual(JSON.parse(await fs.readFile(wsRulesFile, 'utf8')), { version: 1, rules: [] });
   const wsRule = {
@@ -203,7 +203,7 @@ exports.run = async () => {
     assert.equal(workbench.engine.state.status, 'stopped');
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     assert.equal(workbench.vm.state.status, 'connected');
-    const reopened = await vscode.commands.executeCommand('flutterApiMocks.open');
+    const reopened = await vscode.commands.executeCommand('flutterPilot.open');
     assert.equal(reopened, workbench);
     assert.equal(reopened.vm.state.status, 'connected');
     const configuration = await fs.readFile(projectFile, 'utf8');

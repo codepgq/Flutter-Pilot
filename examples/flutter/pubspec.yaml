@@ -1,5 +1,5 @@
-name: api_mocks_example
-description: "Flutter API Mocks 的 Dio 接入和请求调试示例。"
+name: flutter_pilot_example
+description: "Flutter Pilot 的 Dio 接入和请求调试示例。"
 publish_to: 'none'
 version: 0.1.0+1
 

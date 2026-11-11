@@ -1,5 +1,7 @@
 # 通过 MCP 接入编码 Agent
 
+Flutter Pilot 的 MCP 服务名和客户端配置键均为 `flutter-pilot`，指南资源 URI 使用 `flutter-pilot://`。本次更名直接切换，已有旧服务配置不会自动转换；请在工作台重新适配，并在客户端移除旧条目后重连。
+
 MCP 让 Claude Code CLI、Codex CLI 和 Codex App 复用插件已经连接的 Dart VM，在 Flutter Debug 应用中按 Key 定位、点击、输入和滚动，并读取 HTTP／WebSocket 记录验证结果。接入无需在应用中添加 Driver、测试入口或 helper。插件仍需在受信任的 macOS 本地 Cursor／VS Code 工作区中运行。
 
 主要用于开发联调和多业务状态验证：API Mock 构造下单成功、失败、余额不足或不同资产数据，WS Mock 与主动消息驱动订单/资产事件，再通过 Key 精确操作目标组件。结构化快照和 Key 避免日常交互反复截图识别，减少耗时与 token；视觉样式与布局验收仍应补充截图。多状态任务按场景逐个切换并分别验证，防止规则和页面状态互相干扰。
@@ -48,7 +50,7 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 | `ui`               | 快照发现真实 Key、父范围查找、点击／输入／滚动／等待、Key 诊断与修复 |
 | `workflow`         | 编辑规则 → 重载 → 显式开启采集／Mock → 操作 UI → 查询网络及页面结果  |
 
-同一份指南还可通过 `resources/list` 发现，URI 为 `flutter-api-mocks://guides/<topic>`，使用 `resources/read` 读取。工具入口兼容只使用 MCP tools 的 Agent，资源入口方便支持参考资料的客户端；两者返回相同内容。
+同一份指南还可通过 `resources/list` 发现，URI 为 `flutter-pilot://guides/<topic>`，使用 `resources/read` 读取。工具入口兼容只使用 MCP tools 的 Agent，资源入口方便支持参考资料的客户端；两者返回相同内容。
 
 支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 25 个模板：原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及下文工具列表中全部 21 个工具的同名独立模板。`hot_reload` 和 `hot_restart` 可以直接按同名 Prompt 查找，无需先打开其他场景模板。
 
@@ -163,11 +165,11 @@ VM 连接未断时，已有采集／Mock 开关维持，并重新发现运行时
 
 可以向编码 Agent 下达以下任务：
 
-> 读取 Flutter API Mocks 的 `get_usage_guide`（http／ui／workflow），调用 `list_sessions` 选择当前项目。查看 `get_network_status` 返回的规则路径，保留已有规则，只修改产品详情 Mock 正文。保存 `.api-mocks/rules.json` 后调用 `reload_rules`，确认加载和同步成功，显式开启 HTTP Mock。通过 `get_ui_snapshot` 找到实际产品及详情 Key，确认目标唯一后点击产品，等待详情出现，查询对应 HTTP 请求并验证响应字段。出现 Key 诊断问题时修改业务源码补稳定 Key，重新验证；不要用文本点击绕过问题。
+> 读取 Flutter Pilot 的 `get_usage_guide`（http／ui／workflow），调用 `list_sessions` 选择当前项目。查看 `get_network_status` 返回的规则路径，保留已有规则，只修改产品详情 Mock 正文。保存 `.flutter-pilot/rules.json` 后调用 `reload_rules`，确认加载和同步成功，显式开启 HTTP Mock。通过 `get_ui_snapshot` 找到实际产品及详情 Key，确认目标唯一后点击产品，等待详情出现，查询对应 HTTP 请求并验证响应字段。出现 Key 诊断问题时修改业务源码补稳定 Key，重新验证；不要用文本点击绕过问题。
 
 > 分别构造接口成功、失败和空数据三个场景。每次只启用对应 Mock，保存后 `reload_rules`，确认采集和 Mock 状态，再用 `hot_restart` 重置页面状态。检查重启返回的网络状态及本次新请求；如果启动请求早于 Mock 接入，待接入后按 Key 再次触发。最后核对接口命中和对应 UI，不把热重启完成当作场景通过。
 
-HTTP 规则保存在 `.api-mocks/rules.json`，WS 持久规则保存在 `.api-mocks/ws-rules.json`。Agent 直接维护文件；配置非法时保留文件及上一份有效规则。重载并不自动开启 Mock，WS 重载保留仍有效的连接临时规则。HTTP 与 WS 开关彼此独立，VM 断线后按原有规则关闭，重新连接后须显式开启。
+HTTP 规则保存在 `.flutter-pilot/rules.json`，WS 持久规则保存在 `.flutter-pilot/ws-rules.json`。Agent 直接维护文件；配置非法时保留文件及上一份有效规则。重载并不自动开启 Mock，WS 重载保留仍有效的连接临时规则。HTTP 与 WS 开关彼此独立，VM 断线后按原有规则关闭，重新连接后须显式开启。
 
 ## 可用性与验证边界
 

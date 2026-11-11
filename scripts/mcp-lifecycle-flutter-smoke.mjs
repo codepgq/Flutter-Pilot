@@ -13,7 +13,7 @@ const root = resolve('.');
 const flutter = process.env.FLUTTER ?? 'flutter';
 const device = process.env.VM_FLUTTER_DEVICE;
 if (!device) throw new Error('设置 VM_FLUTTER_DEVICE 为测试模拟器 ID');
-const temp = await mkdtemp(join(tmpdir(), 'api-mocks-lifecycle-'));
+const temp = await mkdtemp(join(tmpdir(), 'flutter-pilot-lifecycle-'));
 const run = (args) =>
   new Promise((done, reject) => {
     const child = spawn(flutter, args, { stdio: 'pipe' });
@@ -36,7 +36,7 @@ const wait = async (predicate, timeout = 10000) => {
   }
   throw new Error('fixture timeout');
 };
-await run(['create', '--platforms=ios', '--project-name=api_mocks_lifecycle_fixture', temp]);
+await run(['create', '--platforms=ios', '--project-name=flutter_pilot_lifecycle_fixture', temp]);
 await run(['pub', 'add', '--offline', '--directory', temp, 'dio:^5.9.0']);
 const sourcePath = join(temp, 'lib/main.dart');
 const source = `import 'dart:convert';
@@ -163,10 +163,10 @@ try {
   if (!address.pathname.endsWith('/ws')) address.pathname = address.pathname.replace(/\/?$/, '/ws');
   await vm.connect(address.toString(), []);
   check((await ui.probe()).supported, 'Flutter UI available through Debug VM');
-  const store = new RuleStore(join(temp, '.api-mocks'));
+  const store = new RuleStore(join(temp, '.flutter-pilot'));
   const network = new McpNetworkController({
     httpRulesPath: store.file,
-    wsRulesPath: join(temp, '.api-mocks/ws-rules.json'),
+    wsRulesPath: join(temp, '.flutter-pilot/ws-rules.json'),
     readHttpRules: async () => (await store.load()).rules,
     readWsRules: async () => [],
     applyHttpRules: (rules) => vm.updateRules(rules),

@@ -1,9 +1,9 @@
 {
-  "name": "flutter-api-mocks",
-  "displayName": "Flutter API Mocks",
-  "description": "Flutter Dio API 调试工作台：VM 零源码采集、实验性运行时 Mock、HTTPS 代理与请求历史。",
+  "name": "flutter-pilot",
+  "displayName": "Flutter Pilot",
+  "description": "Flutter 运行时调试与 Agent 联调工作台：HTTP/WebSocket 采集与 Mock、UI 精确操作、热重载和 MCP。",
   "version": "0.0.7",
-  "publisher": "api-mocks",
+  "publisher": "flutter-pilot",
   "license": "MIT",
   "engines": {
     "vscode": "^1.96.0"
@@ -26,7 +26,7 @@
   "activationEvents": [
     "onDebug:dart",
     "workspaceContains:pubspec.yaml",
-    "onCommand:flutterApiMocks.open"
+    "onCommand:flutterPilot.open"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -38,68 +38,68 @@
   "contributes": {
     "commands": [
       {
-        "command": "flutterApiMocks.open",
-        "title": "Flutter API Mocks: 打开工作台",
+        "command": "flutterPilot.open",
+        "title": "Flutter Pilot: 打开工作台",
         "icon": "$(radio-tower)"
       },
       {
-        "command": "flutterApiMocks.start",
-        "title": "Flutter API Mocks: 启动代理"
+        "command": "flutterPilot.start",
+        "title": "Flutter Pilot: 启动代理"
       },
       {
-        "command": "flutterApiMocks.stop",
-        "title": "Flutter API Mocks: 停止代理"
+        "command": "flutterPilot.stop",
+        "title": "Flutter Pilot: 停止代理"
       }
     ],
     "configuration": {
-      "title": "Flutter API Mocks",
+      "title": "Flutter Pilot",
       "properties": {
-        "flutterApiMocks.enginePath": {
+        "flutterPilot.enginePath": {
           "type": "string",
           "default": "",
           "description": "可选：本地兼容 mitmdump 的绝对路径。留空则由插件下载和管理。"
         },
-        "flutterApiMocks.proxyPort": {
+        "flutterPilot.proxyPort": {
           "type": "number",
           "default": 8080,
           "minimum": 1024,
           "maximum": 65535,
           "description": "首选代理端口；占用时自动选择可用端口。"
         },
-        "flutterApiMocks.retentionDays": {
+        "flutterPilot.retentionDays": {
           "type": "number",
           "default": 7,
           "minimum": 1,
           "maximum": 365,
           "description": "请求历史保留天数。"
         },
-        "flutterApiMocks.maxRecords": {
+        "flutterPilot.maxRecords": {
           "type": "number",
           "default": 10000,
           "minimum": 1,
           "maximum": 100000,
           "description": "历史记录条数上限。"
         },
-        "flutterApiMocks.maxBodyBytes": {
+        "flutterPilot.maxBodyBytes": {
           "type": "number",
           "default": 1048576,
           "minimum": 1024,
           "maximum": 10485760,
           "description": "单个正文保存和可编辑的字节上限。"
         },
-        "flutterApiMocks.breakpointTimeout": {
+        "flutterPilot.breakpointTimeout": {
           "type": "number",
           "default": 60,
           "minimum": 10,
           "maximum": 300,
           "description": "默认断点等待秒数。"
         },
-        "flutterApiMocks.autoStart": {
+        "flutterPilot.autoStart": {
           "type": "boolean",
           "default": true,
           "description": "代理模式下，打开受信任的 Flutter 项目后使用已安装引擎后台自动记录，关闭工作台后继续。"
         },
-        "flutterApiMocks.autoConnectVm": {
+        "flutterPilot.autoConnectVm": {
           "type": "boolean",
           "default": true,
           "scope": "resource",
@@ -116,7 +116,7 @@
     "test:proxy": "python3 -m unittest discover -s tests/proxy -v",
     "test:ui": "playwright test",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-api-mocks-0.0.7.vsix",
+    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-pilot-0.0.7.vsix",
     "test:ide": "node scripts/ide-test.mjs",
     "format:check": "prettier --check \"src/**/*.ts\" \"webview/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/*.{mjs,cjs}\" \"*.{json,ts,mts}\"",
     "test:vm": "node scripts/vm-injection-smoke.mjs",

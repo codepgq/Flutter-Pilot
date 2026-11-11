@@ -53,7 +53,7 @@ export class VmUiController {
       return;
     }
     const data = event?.extensionData;
-    if (event?.extensionKind !== 'api_mocks.vm.ui' || data?.session !== this.tag) return;
+    if (event?.extensionKind !== 'flutter_pilot.vm.ui' || data?.session !== this.tag) return;
     const item = this.pending.get(data.operationId);
     if (!item) return;
     this.pending.delete(data.operationId);

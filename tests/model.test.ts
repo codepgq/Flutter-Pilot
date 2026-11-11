@@ -51,7 +51,7 @@ describe('规则文件与历史草稿', () => {
 });
 describe('规则持久化', () => {
   it('原子保存可重读，错误文件不能静默抹掉', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'api-mocks-store-'));
+    const dir = await mkdtemp(join(tmpdir(), 'flutter-pilot-store-'));
     try {
       const store = new RuleStore(dir);
       expect((await store.load()).rules).toEqual([]);

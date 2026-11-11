@@ -14,7 +14,7 @@ vi.mock('node:https', () => ({ get: vi.fn() }));
 const execute = promisify(execFile);
 const temporary: string[] = [];
 async function temp() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'api-mocks-runtime-test-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'flutter-pilot-runtime-test-'));
   temporary.push(dir);
   return dir;
 }

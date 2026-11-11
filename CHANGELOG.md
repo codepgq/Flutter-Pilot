@@ -1,5 +1,11 @@
 # Changelog
 
+## 未发布 — Flutter Pilot 更名（2026-11-11）
+
+- 插件、工作台、命令、设置、MCP 服务、指南资源、文档及安装包统一使用 Flutter Pilot。技术标识为 `flutter-pilot` / `flutterPilot`，扩展 ID 为 `flutter-pilot.flutter-pilot`，项目目录为 `.flutter-pilot/`。
+- 按直接切换方案实施：不兼容或自动迁移旧名称下的配置与规则，需重新配置项目并适配 MCP；旧扩展应先停用或卸载。
+- 下方历史版本说明中的路径按当前命名展示；历史验收报告和原始安装包名称以 [验收记录](docs/validation.md) 为准。
+
 ## 0.0.7 — MCP 全能力提示词（2026-11-10）
 
 - 为全部21个MCP工具提供同名独立Prompt，包含hot_reload/hot_restart；保留4个场景模板，共25个提示词。
@@ -37,7 +43,7 @@
 
 - 新增独立 WebSocket Tab：连接列表、双向消息、正文与生效内容对比、JSON 格式化和摘要分页。
 - 新增手动开启的实验性 VM WS 采集和独立 Mock 开关，支持文本整条替换、丢弃与向 App 手动模拟推送；不修改应用源码或 TLS。
-- 项目 WS 规则独立保存到 `.api-mocks/ws-rules.json`；URL 未知时可创建当前连接临时规则，临时规则不落盘。
+- 项目 WS 规则独立保存到 `.flutter-pilot/ws-rules.json`；URL 未知时可创建当前连接临时规则，临时规则不落盘。
 - WS 历史使用工作区隔离的私有 SQLite；正文和队列有界，断线及租约到期自动旁路，关闭工作台后继续记录。
 - 新握手从 HTTP API 目录分离，旧 HTTP 历史保留；详细验证和支持边界见 `docs/v0.0.3-websocket.md` 与 `docs/validation.md`。
 
@@ -49,7 +55,7 @@
 - VM 成功连接后突出显示已连接及实际端点，禁用地址输入，仅保留断开操作；前后端阻止重复连接，避免意外卸载已开启的 Mock。
 - VM WS 改为新工作区默认且推荐接入，代理标注为备用方案；首次打开不自动启动缓存代理，已有工作区继续沿用保存的方式，兼容旧版无 mode 的代理连接配置。
 - 规则启停改为简洁滑块开关，停用卡片保留正常对比度；保留悬停和键盘焦点反馈，移除冗余状态文字。
-- 新增项目 UUID 绑定，配置和规则分别保存在项目 `.api-mocks/project.json`、`.api-mocks/rules.json`；同 UUID 的不同目录与 worktree 隔离本机历史，保留旧版数据迁移。
+- 新增项目 UUID 绑定，配置和规则分别保存在项目 `.flutter-pilot/project.json`、`.flutter-pilot/rules.json`；同 UUID 的不同目录与 worktree 隔离本机历史，保留旧版数据迁移。
 
 - 新增 Flutter VM WS 连接，默认只采集 API、请求与响应，无需代理引擎、CA 或应用源码补丁；关闭工作台后继续记录。VM 认证地址仅保存在会话内存。
 - 新增主动开启的实验性 Debug/JIT Dio 运行时 Mock，支持已有 / 后续发现的多 Dio、本地 Mock、双向修改、转发、规则同步及 Hot Restart 重发现。VM 不支持手动断点。

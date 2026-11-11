@@ -1,15 +1,15 @@
-# Flutter API Mocks 示例
+# Flutter Pilot 示例
 
 这是包含 Android/iOS 宿主的 Dio 5 示例，可发送 GET 和 JSON POST，并展示正常及错误响应。建议使用 Flutter 3.24 或更新版本。
 
 1. 在 VS Code 或 Cursor 中打开当前 `examples/flutter` 目录。
-2. 执行 `flutter pub get`，在 IDE 中打开 **Flutter API Mocks: 打开工作台**。
+2. 执行 `flutter pub get`，在 IDE 中打开 **Flutter Pilot: 打开工作台**。
 3. 启动代理，选择设备连接方式，检查 HTTP 和 HTTPS 诊断。
 4. 若设备系统代理无法覆盖 Dio，在接入向导中选择 `lib/main.dart` 中的 `dio`，预览并应用补丁。向导添加开发 helper 和一次初始化调用，不修改 Release/Profile 的客户端行为。
 5. 使用工作台显示的代理地址启动，例如 Android USB 已配置 `adb reverse` 时：
 
    ```sh
-   flutter run --dart-define=API_MOCK_PROXY=127.0.0.1:8080
+   flutter run --dart-define=FLUTTER_PILOT_PROXY=127.0.0.1:8080
    ```
 
    端口以工作台实际显示为准。iOS 真机使用开发电脑的局域网 IP，并开启插件局域网监听；手机与电脑需要互通。iOS 模拟器通常可使用 `127.0.0.1`。
@@ -37,4 +37,4 @@ flutter test
 python3 tool/device_smoke.py --mitmdump /absolute/path/to/mitmdump --ios BOOTED_SIMULATOR_UDID --android AUTHORIZED_ANDROID_SERIAL
 ```
 
-`--ios`、`--android` 可以只选一个。请确保示例尚未接入且相关源码未修改；脚本不会覆盖已有 `lib/proxy_smoke.dart`。日志保存在示例 `.dart_tool/api-mocks-device-smoke-*` 中。已有实机验收结果见 `tool/device-validation.json`，其中明确列出未验证平台。
+`--ios`、`--android` 可以只选一个。请确保示例尚未接入且相关源码未修改；脚本不会覆盖已有 `lib/proxy_smoke.dart`。日志保存在示例 `.dart_tool/flutter-pilot-device-smoke-*` 中。已有实机验收结果见 `tool/device-validation.json`，其中明确列出未验证平台。

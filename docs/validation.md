@@ -1,5 +1,15 @@
 # 验收记录
 
+以下历史章节为更名前各版本的验收证据。原始 VSIX 路径保留当时名称；复现命令中的环境变量已按当前 Flutter Pilot 脚本名称更新。历史通过结果不代表本次更名后的安装或设备验收已经执行。
+
+## Flutter Pilot 更名验证（2026-11-11）
+
+- 插件显示名、扩展 ID、命令与设置、MCP 服务与资源、项目目录、生成 helper、代理参数、运行时事件、文档及示例统一更名；采用直接切换，不读取旧名称配置。
+- 357 项 Vitest、37 项 Playwright、TypeScript 类型检查、Prettier、构建及 diff 检查通过；Flutter 示例 3 项 Widget 测试通过。
+- 真实隔离 Dart Debug VM 的 HTTP/Dio 注入验证 21 项通过；WS/WSS 采集、Mock、主动消息及 MCP 链路均通过，每种传输 120 条记录、400 条预期队列遗漏、无警告。
+- Python 代理规则与存储 17 项通过，19 项真实代理集成因未设置 MITMDUMP 跳过。没有启动 IDE GUI、执行 Flutter 设备验收、安装扩展或修改真实 Agent 配置。
+- 新安装包为 `artifacts/flutter-pilot-0.0.7.vsix`；版本保持 0.0.7，更名改动尚未发布。打包内容与 MCP 握手结果记录于 `artifacts/flutter-pilot-rename-report.json`。
+
 ## 0.0.7 本地发布（2026-11-10）
 
 - 发布MCP全工具同名提示词：21个工具、25个Prompts、5份指南资源；manifest、lockfile、MCP serverInfo及VSIX命名统一为0.0.7。
@@ -73,7 +83,7 @@
 | --- | --- |
 | TypeScript | 44 项单测：引擎下载校验/缓存/安全解压、进程与令牌协议、端口冲突、UTF-8分包、RPC 超时/崩溃、规则文件与历史草稿、Dio 检测/补丁/撤销、设备解析和转发、扩展生命周期及生效状态 |
 | Python | 28 项测试：12 项规则/SQLite 单测、16 项真实 HTTP/HTTPS 代理集成；使用真实官方独立引擎 |
-| SQLite 后备 | 强制 API_MOCK_SQLITE_CLI=1，7 项存储测试，含 SQL/CLI 注入字符串、空字符、Unicode、保留策略、查询及跨重启读取 |
+| SQLite 后备 | 强制 FLUTTER_PILOT_SQLITE_CLI=1，7 项存储测试，含 SQL/CLI 注入字符串、空字符、Unicode、保留策略、查询及跨重启读取 |
 | 工作台 | 6 项 Playwright 交互测试：连接操作、规则表单/JSON 校验及 CRUD 消息、历史/对比/备注/规则草稿、并发断点编辑/终止、浅色主题/680px窄面板无横向溢出；保存截图；额外回归仅修改头部保留正文及关闭断点后保存 |
 | 扩展宿主 | VS Code、Cursor 分别激活扩展、打开工作台、启动真实引擎、HTTPS Mock、SQLite 历史落盘、停止代理监听；均通过 |
 | Flutter | flutter analyze 无问题，3 项 Widget 测试；Android debug、iOS simulator 构建通过 |
@@ -103,9 +113,9 @@ npm test
 npm run build
 npm run test:ui
 MITMDUMP=/absolute/path/to/mitmdump npm run test:proxy
-API_MOCK_SQLITE_CLI=1 python3 -m unittest discover -s tests/proxy -p test_storage.py -v
-API_MOCK_TEST_ENGINE=/absolute/path/to/mitmdump npm run test:ide
-API_MOCK_TEST_ENGINE=/absolute/path/to/mitmdump API_MOCK_TEST_IDE=cursor npm run test:ide
+FLUTTER_PILOT_SQLITE_CLI=1 python3 -m unittest discover -s tests/proxy -p test_storage.py -v
+FLUTTER_PILOT_TEST_ENGINE=/absolute/path/to/mitmdump npm run test:ide
+FLUTTER_PILOT_TEST_ENGINE=/absolute/path/to/mitmdump FLUTTER_PILOT_TEST_IDE=cursor npm run test:ide
 cd examples/flutter
 flutter analyze
 flutter test
@@ -131,7 +141,7 @@ flutter test
 | --- | --- |
 | TypeScript | 59 项通过，包含无面板启动、首次无引擎不下载、不受信任工作区、autoStart 热切换、关闭面板保活、手动停止后重开不恢复、退出 / 下载竞态和多工作区隔离 |
 | Python | 36 项通过：17 项规则 / 存储单测和 19 项真实 HTTP / HTTPS 集成；包含目录迁移、历史清理后保留、删除后重新发现、后台断点和断连释放 |
-| SQLite 后备 | 强制 API_MOCK_SQLITE_CLI=1，12 项存储测试通过 |
+| SQLite 后备 | 强制 FLUTTER_PILOT_SQLITE_CLI=1，12 项存储测试通过 |
 | 工作台 | 9 项 Playwright 测试通过，包含自动记录提示、空历史下目录保留及目录独立删除 |
 | Cursor | 真实扩展宿主通过：激活后无需 UI 即可 HTTPS Mock，关闭 UI 后继续、后台跳过断点、未配置 Mock 的接口自动发现并保存目录、手动停止后重开 UI 不重启 |
 | VS Code | 使用本次 VSIX 解包后的扩展运行真实扩展宿主，上述自动记录场景全部通过 |
@@ -230,7 +240,7 @@ VM 连接默认仅采集，用户主动开启运行时 Mock 后才安装拦截�
 | 源码与TLS | 一次性测试fixture源码SHA-256在运行时安装前后相同；不连接或改用户EXIO App。WSS使用测试CA加入fixture可信根，未跳过证书校验；生产注入不改TLS或CA |
 | 代理回归 | 17项Python规则/存储通过；19项需MITMDUMP的引擎集成跳过，本轮未重新验收代理设备链路 |
 
-复现命令：`npm run test:ws`；`VM_FLUTTER_DEVICE=<booted-simulator-id> npm run test:ws:flutter`；`API_MOCK_TEST_IDE=cursor npm run test:ide:vm`（vscode同理）。
+复现命令：`npm run test:ws`；`VM_FLUTTER_DEVICE=<booted-simulator-id> npm run test:ws:flutter`；`FLUTTER_PILOT_TEST_IDE=cursor npm run test:ide:vm`（vscode同理）。
 
 本轮未验收Android、iOS真机、其他Dart SDK、Socket.IO专用协议、原生插件或WebView；不把测试fixture成功当作EXIO业务WS或登录链路验收。URL关联会开启SDK HTTP profiling，App内缓存无插件强制容量上限；本地历史有界不替代该边界。代理WS不在首版范围。
 
@@ -252,7 +262,7 @@ VM 连接默认仅采集，用户主动开启运行时 Mock 后才安装拦截�
 
 真实测试使用 `/tmp` 独立 fixture、隔离的 IDE profile 与扩展目录，只控制测试创建的调试会话；没有修改或控制用户的 EXIO 会话。测试曾因 Dart 自动追加调试名称而修正会话定位；HTTP 验证等待 profiling 就绪（`vm.state.isolates > 0`）后再发请求，未把采集前请求当作可补录。
 
-复现：`API_MOCK_TEST_IDE=cursor node scripts/ide-vm-discovery-test.mjs`，VS Code 改为 `vscode`；可设置 `API_MOCK_TEST_DEVICE` 和 `API_MOCK_TEST_FLUTTER`。完整脱敏报告在忽略目录 `artifacts/vm-discovery-cursor-report.json`、`artifacts/vm-discovery-vscode-report.json`。合成 IDE 验证仍用 `test:ide:vm`，不能替代上述真实验收。
+复现：`FLUTTER_PILOT_TEST_IDE=cursor node scripts/ide-vm-discovery-test.mjs`，VS Code 改为 `vscode`；可设置 `FLUTTER_PILOT_TEST_DEVICE` 和 `FLUTTER_PILOT_TEST_FLUTTER`。完整脱敏报告在忽略目录 `artifacts/vm-discovery-cursor-report.json`、`artifacts/vm-discovery-vscode-report.json`。合成 IDE 验证仍用 `test:ide:vm`，不能替代上述真实验收。
 
 本轮未验收 Android、iOS 真机、其他 SDK / Dart 扩展版本、Web、Profile / Release 或 Remote SSH。外部终端独立运行不属于自动发现范围；本轮验证的是在 IDE 附加后发现。版本和分支沿用 0.0.3，未提交、合并或覆盖安装。
 

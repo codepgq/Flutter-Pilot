@@ -11,20 +11,20 @@ Future<void> main() async {
       receiveTimeout: const Duration(seconds: 90),
     ),
   );
-  // 在 IDE 工作台中预览接入补丁，会在此处添加 await configureApiMocks(dio)。
-  runApp(ApiMocksExample(dio: dio));
+  // 在 IDE 工作台中预览接入补丁，会在此处添加 await configureFlutterPilot(dio)。
+  runApp(FlutterPilotExample(dio: dio));
 }
 
 /// 使用真实 Dio 客户端验证请求修改、Mock、转发和响应断点。
-class ApiMocksExample extends StatelessWidget {
-  const ApiMocksExample({required this.dio, super.key});
+class FlutterPilotExample extends StatelessWidget {
+  const FlutterPilotExample({required this.dio, super.key});
 
   final Dio dio;
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'API Mocks 示例',
+      title: 'Flutter Pilot 示例',
       theme: ThemeData(colorSchemeSeed: const Color(0xff6750a4)),
       darkTheme: ThemeData(
         colorSchemeSeed: const Color(0xff6750a4),
@@ -102,9 +102,9 @@ class _RequestPageState extends State<_RequestPage> {
 
   @override
   Widget build(BuildContext context) {
-    const proxy = String.fromEnvironment('API_MOCK_PROXY');
+    const proxy = String.fromEnvironment('FLUTTER_PILOT_PROXY');
     return Scaffold(
-      appBar: AppBar(title: const Text('Flutter API Mocks')),
+      appBar: AppBar(title: const Text('Flutter Pilot')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [

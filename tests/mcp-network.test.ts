@@ -4,8 +4,8 @@ import { parseTool } from '../src/mcp/tools';
 
 function fixture() {
   const host: NetworkHost = {
-    httpRulesPath: '/project/.api-mocks/rules.json',
-    wsRulesPath: '/project/.api-mocks/ws-rules.json',
+    httpRulesPath: '/project/.flutter-pilot/rules.json',
+    wsRulesPath: '/project/.flutter-pilot/ws-rules.json',
     readHttpRules: vi.fn(async () => []),
     readWsRules: vi.fn(async () => []),
     applyHttpRules: vi.fn(async () => {}),

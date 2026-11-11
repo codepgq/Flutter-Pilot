@@ -17,7 +17,7 @@ async function project(
   source = "import 'package:dio/dio.dart';\n\nFuture<void> main() async {\n  final dio = Dio();\n  await dio.get('/hello');\n}\n",
   pubspec = 'name: setup_test\ndependencies:\n  flutter:\n    sdk: flutter\n  dio: ^5.9.0\n',
 ) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'api-mocks-setup-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'flutter-pilot-setup-'));
   roots.push(root);
   await fs.mkdir(path.join(root, 'lib'));
   await fs.writeFile(path.join(root, 'pubspec.yaml'), pubspec);
@@ -38,12 +38,12 @@ describe('Flutter 接入', () => {
     expect(inspection.candidates[0].automatic).toBe(true);
     const preview = await prepareSetup(root, inspection.candidates[0], certificate);
     expect(await getSetupState(root)).toBeNull();
-    expect(preview.files[1].after).toContain("import 'api_mocks_debug.dart';");
-    expect(preview.files[1].after).toContain('final dio = Dio();\n  await configureApiMocks(dio);');
+    expect(preview.files[1].after).toContain("import 'flutter_pilot_debug.dart';");
+    expect(preview.files[1].after).toContain('final dio = Dio();\n  await configureFlutterPilot(dio);');
     expect(await fs.readFile(path.join(root, 'lib', 'main.dart'), 'utf8')).toBe(original);
     const helper = preview.files[0].after;
     expect(helper).toContain('if (!kDebugMode) return;');
-    expect(helper).toContain("String.fromEnvironment('API_MOCK_PROXY')");
+    expect(helper).toContain("String.fromEnvironment('FLUTTER_PILOT_PROXY')");
     expect(helper).toContain('SecurityContext(withTrustedRoots: true)');
     expect(helper).not.toContain('badCertificateCallback');
     await applySetup(preview);
@@ -53,7 +53,7 @@ describe('Flutter 接入', () => {
     expect(reverted.preserved).toEqual([]);
     expect(await fs.readFile(path.join(root, 'lib', 'main.dart'), 'utf8')).toBe(original);
     expect(await getSetupState(root)).toBeNull();
-    await expect(fs.access(path.join(root, 'lib', 'api_mocks_debug.dart'))).rejects.toThrow();
+    await expect(fs.access(path.join(root, 'lib', 'flutter_pilot_debug.dart'))).rejects.toThrow();
   });
 
   it('源码在预览后改变时拒绝应用', async () => {
@@ -62,7 +62,7 @@ describe('Flutter 接入', () => {
     const preview = await prepareSetup(root, inspection.candidates[0], certificate);
     await fs.appendFile(path.join(root, 'lib', 'main.dart'), '// user change\n');
     await expect(applySetup(preview)).rejects.toThrow('预览后文件已变化');
-    await expect(fs.access(path.join(root, 'lib', 'api_mocks_debug.dart'))).rejects.toThrow();
+    await expect(fs.access(path.join(root, 'lib', 'flutter_pilot_debug.dart'))).rejects.toThrow();
   });
 
   it('撤销保留用户后续编辑及关联 helper，避免破坏导入', async () => {
@@ -90,7 +90,7 @@ Future<void> main() async {
     expect(inspection.candidates[0].automatic).toBe(true);
     const preview = await prepareSetup(root, inspection.candidates[0], certificate);
     expect(preview.files[1].after).toContain(
-      "baseUrl: 'https://example.com/a;{}'));\n  await configureApiMocks(client);",
+      "baseUrl: 'https://example.com/a;{}'));\n  await configureFlutterPilot(client);",
     );
   });
 
@@ -105,7 +105,7 @@ Future<void> main() async {
       expect(inspection.candidates[0].automatic).toBe(false);
       const preview = await prepareSetup(root, inspection.candidates[0], certificate);
       expect(preview.files).toHaveLength(1);
-      expect(preview.manualSnippet).toContain('await configureApiMocks(dio);');
+      expect(preview.manualSnippet).toContain('await configureFlutterPilot(dio);');
     }
   });
 
@@ -118,7 +118,7 @@ Future<void> main() async {
     await expect(prepareSetup(root, { ...candidates[0], offset: 0 }, certificate)).rejects.toThrow(
       '源码已变化',
     );
-    await fs.writeFile(path.join(root, 'lib', 'api_mocks_debug.dart'), '// user file');
+    await fs.writeFile(path.join(root, 'lib', 'flutter_pilot_debug.dart'), '// user file');
     await expect(prepareSetup(root, candidates[0], certificate)).rejects.toThrow('已存在');
   });
 
@@ -169,11 +169,11 @@ Future<void> main() async {
     expect(second.automatic).toBe(true);
     await applySetup(await prepareSetup(root, second, certificate));
     const source = await fs.readFile(path.join(root, 'lib', 'main.dart'), 'utf8');
-    expect(source).toContain('await configureApiMocks(first);');
-    expect(source).toContain('await configureApiMocks(second);');
-    expect(source.match(/import 'api_mocks_debug.dart';/g)).toHaveLength(1);
+    expect(source).toContain('await configureFlutterPilot(first);');
+    expect(source).toContain('await configureFlutterPilot(second);');
+    expect(source.match(/import 'flutter_pilot_debug.dart';/g)).toHaveLength(1);
     await revertSetup(root);
     expect(await fs.readFile(path.join(root, 'lib', 'main.dart'), 'utf8')).toBe(original);
-    await expect(fs.access(path.join(root, 'lib', 'api_mocks_debug.dart'))).rejects.toThrow();
+    await expect(fs.access(path.join(root, 'lib', 'flutter_pilot_debug.dart'))).rejects.toThrow();
   });
 });

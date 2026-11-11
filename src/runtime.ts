@@ -77,7 +77,7 @@ function requestDownload(url: string, redirects = 0): Promise<import('node:http'
   return new Promise((resolve, reject) => {
     const target = new URL(url);
     if (target.protocol !== 'https:') return reject(new Error('引擎下载必须使用 HTTPS。'));
-    const req = https.get(target, { headers: { 'User-Agent': 'flutter-api-mocks' } }, (res) => {
+    const req = https.get(target, { headers: { 'User-Agent': 'flutter-pilot' } }, (res) => {
       if (res.statusCode && [301, 302, 303, 307, 308].includes(res.statusCode)) {
         res.resume();
         if (redirects >= 5 || !res.headers.location) return reject(new Error('引擎下载重定向次数过多。'));

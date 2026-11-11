@@ -5,17 +5,17 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const root = resolve('.');
-const ide = process.env.API_MOCK_TEST_IDE || 'vscode';
-if (!['cursor', 'vscode'].includes(ide)) throw new Error('API_MOCK_TEST_IDE must be cursor or vscode');
-if (process.env.API_MOCKS_RUN_IDE_SMOKE !== '1') {
+const ide = process.env.FLUTTER_PILOT_TEST_IDE || 'vscode';
+if (!['cursor', 'vscode'].includes(ide)) throw new Error('FLUTTER_PILOT_TEST_IDE must be cursor or vscode');
+if (process.env.FLUTTER_PILOT_RUN_IDE_SMOKE !== '1') {
   console.log(
-    'IDE MCP smoke skipped. This test starts an isolated desktop IDE and may trigger macOS keychain prompts; MCP configuration itself does not require keychain access. Set API_MOCKS_RUN_IDE_SMOKE=1 explicitly to run VS Code.',
+    'IDE MCP smoke skipped. This test starts an isolated desktop IDE and may trigger macOS keychain prompts; MCP configuration itself does not require keychain access. Set FLUTTER_PILOT_RUN_IDE_SMOKE=1 explicitly to run VS Code.',
   );
   process.exit(0);
 }
-if (ide === 'cursor' && process.env.API_MOCKS_RUN_CURSOR_SMOKE !== '1') {
+if (ide === 'cursor' && process.env.FLUTTER_PILOT_RUN_CURSOR_SMOKE !== '1') {
   console.log(
-    'Cursor MCP smoke skipped. An isolated Cursor profile may trigger repeated macOS keychain prompts. Set both API_MOCKS_RUN_IDE_SMOKE=1 and API_MOCKS_RUN_CURSOR_SMOKE=1 explicitly to run it.',
+    'Cursor MCP smoke skipped. An isolated Cursor profile may trigger repeated macOS keychain prompts. Set both FLUTTER_PILOT_RUN_IDE_SMOKE=1 and FLUTTER_PILOT_RUN_CURSOR_SMOKE=1 explicitly to run it.',
   );
   process.exit(0);
 }
@@ -24,12 +24,12 @@ const executable =
     ? '/Applications/Cursor.app/Contents/MacOS/Cursor'
     : '/Applications/Visual Studio Code.app/Contents/MacOS/Code';
 await access(executable);
-const temp = await realpath(await mkdtemp(join(tmpdir(), `api-mocks-${ide}-mcp-`)));
+const temp = await realpath(await mkdtemp(join(tmpdir(), `flutter-pilot-${ide}-mcp-`)));
 const home = join(temp, 'home');
 const user = join(temp, 'user');
 const workspace = join(temp, 'flutter-workspace');
 const extensions = join(temp, 'extensions');
-const extensionPath = join(extensions, 'api-mocks.flutter-api-mocks');
+const extensionPath = join(extensions, 'flutter-pilot.flutter-pilot');
 const bridgeRoot = join(home, 'mcp');
 const reportPath = join(temp, 'mcp-report.json');
 await Promise.all(
@@ -84,8 +84,8 @@ await writeFile(
     'extensions.autoUpdate': false,
     'extensions.autoCheckUpdates': false,
     'extensions.ignoreRecommendations': true,
-    'flutterApiMocks.autoConnectVm': false,
-    'flutterApiMocks.autoStart': false,
+    'flutterPilot.autoConnectVm': false,
+    'flutterPilot.autoStart': false,
   }),
 );
 const appVersion = JSON.parse(
@@ -125,12 +125,12 @@ try {
       extensionTestsEnv: {
         HOME: home,
         CODEX_HOME: join(home, '.codex'),
-        API_MOCKS_MCP_ROOT: bridgeRoot,
-        API_MOCK_TEST_IDE: ide,
-        API_MOCK_TEST_IDE_APP_VERSION: appVersion,
-        API_MOCK_TEST_MCP_REPORT: reportPath,
-        API_MOCK_TEST_PHASE: phase,
-        API_MOCK_TEST_NODE: process.execPath,
+        FLUTTER_PILOT_MCP_ROOT: bridgeRoot,
+        FLUTTER_PILOT_TEST_IDE: ide,
+        FLUTTER_PILOT_TEST_IDE_APP_VERSION: appVersion,
+        FLUTTER_PILOT_TEST_MCP_REPORT: reportPath,
+        FLUTTER_PILOT_TEST_PHASE: phase,
+        FLUTTER_PILOT_TEST_NODE: process.execPath,
       },
       launchArgs: [
         workspace,

@@ -2,7 +2,7 @@
 export const guideTopics = ['overview', 'http', 'ws', 'ui', 'workflow'] as const;
 export type GuideTopic = (typeof guideTopics)[number];
 
-export const agentInstructions = `Flutter API Mocks 配合 Flutter Debug 开发联调：用 API Mock 构造下单成功/失败、资产数据等业务状态，用 WS Mock、向App注入或向服务端发送消息驱动业务事件，再按 Key 精确操作 UI 并验证结果，减少逐步截图识别的耗时与token。
+export const agentInstructions = `Flutter Pilot 配合 Flutter Debug 开发联调：用 API Mock 构造下单成功/失败、资产数据等业务状态，用 WS Mock、向App注入或向服务端发送消息驱动业务事件，再按 Key 精确操作 UI 并验证结果，减少逐步截图识别的耗时与token。
 当用户任务需要这些能力时，主动使用本 MCP：先调用 get_usage_guide 按需读取 overview/http/ws/ui/workflow，再 list_sessions 选择用户任务对应的项目；不要只给用户手工操作建议。
 get_usage_guide 无需 sessionId，插件未运行也能读取；也可通过 resources/list 发现对应指南资源。
 能力入口：get_network_status 查询规则路径与开关；get_requests/get_request 查询 HTTP 列表与详情；get_ws_connections/get_ws_messages 查询业务 WS 连接与消息；reload_rules 加载规则；set_capture_enabled/set_mock_enabled 显式控制 http/ws 域。UI 使用 get_ui_snapshot、find_widget、tap、enter_text、scroll、wait_for_widget、inspect_key_issues；应用热更新使用 hot_reload/hot_restart，主动 WS 消息使用 inject_ws_message/send_ws_message。
@@ -48,7 +48,7 @@ const selected = { sessionId: '<从 list_sessions 选择的会话ID>' };
 
 const guides: Record<GuideTopic, Record<string, unknown>> = {
   overview: {
-    title: '什么时候使用 Flutter API Mocks MCP',
+    title: '什么时候使用 Flutter Pilot MCP',
     scenarios: [
       '需要测试下单成功/失败、余额不足、不同资产信息或接口空数据等业务状态，或改请求/响应/目标地址时，读取 http。',
       '需要替换/丢弃业务 WebSocket 消息、向App注入订单或资产事件、通过真实连接发送topic/data、检查双向消息时，读取 ws。',
@@ -61,7 +61,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       step('list_sessions'),
       step('get_network_status', selected),
     ],
-    files: { http: '.api-mocks/rules.json', ws: '.api-mocks/ws-rules.json' },
+    files: { http: '.flutter-pilot/rules.json', ws: '.flutter-pilot/ws-rules.json' },
     boundaries: [
       '指南只读且不需要运行中的插件；实际运行需要本机 IDE 中对应项目已开启 MCP 和 Flutter Debug VM。',
       '文件由编码 Agent 编辑，MCP 负责加载、开关、UI 操作与验证；不修改无关规则，不猜测会话ID或VM地址。',
@@ -69,7 +69,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
     ],
   },
   http: {
-    title: '编辑 .api-mocks/rules.json：HTTP/Dio 规则',
+    title: '编辑 .flutter-pilot/rules.json：HTTP/Dio 规则',
     preparation:
       '先 get_network_status 取得 files.http 绝对路径，再读取文件并保留已有 rules。JSON 顶层只含 version:1 和 rules 数组，不能写注释；示例是新增单条规则的参考，不是覆盖整个现有文件。',
     exampleDocument: httpExample,
@@ -262,8 +262,8 @@ export function getUsageGuide(
   return { topic, topics: guideTopics, ...guides[topic] };
 }
 export const guideResources = guideTopics.map((topic) => ({
-  uri: `flutter-api-mocks://guides/${topic}`,
-  name: `flutter-api-mocks-${topic}-guide`,
+  uri: `flutter-pilot://guides/${topic}`,
+  name: `flutter-pilot-${topic}-guide`,
   description: String(guides[topic].title),
   mimeType: 'application/json',
 }));

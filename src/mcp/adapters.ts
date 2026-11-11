@@ -9,7 +9,7 @@ import { readConfig, writeConfig, type ConfigSnapshot } from './config-file';
 
 export type AgentId = 'claude' | 'codex-cli' | 'codex-app';
 export type AdapterScope = 'project' | 'global';
-export const MCP_SERVER_NAME = 'flutter-api-mocks';
+export const MCP_SERVER_NAME = 'flutter-pilot';
 export interface AgentAdapterState {
   agent: AgentId;
   scope: AdapterScope;
@@ -87,7 +87,7 @@ function parseDocument(text: string, toml: boolean): Record<string, any> {
 /** Recognize a TOML header by parsing its keys instead of comparing its quote style. */
 function headerKeys(header: string): string[] | undefined {
   try {
-    const document = parseToml(`${header}\napi_mocks_probe = true\n`);
+    const document = parseToml(`${header}\nflutter_pilot_probe = true\n`);
     const keys: string[] = [];
     let current: any = document;
     while (
@@ -99,7 +99,7 @@ function headerKeys(header: string): string[] | undefined {
         continue;
       }
       const name = Object.keys(current)[0];
-      if (name === 'api_mocks_probe') return keys;
+      if (name === 'flutter_pilot_probe') return keys;
       keys.push(name);
       current = current[name];
     }

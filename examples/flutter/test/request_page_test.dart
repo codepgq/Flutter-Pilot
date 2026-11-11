@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:api_mocks_example/main.dart';
+import 'package:flutter_pilot_example/main.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -35,7 +35,7 @@ void main() {
   testWidgets('发送 POST 并展示 Dio 返回的数据', (tester) async {
     final adapter = _TestAdapter();
     final dio = Dio()..httpClientAdapter = adapter;
-    await tester.pumpWidget(ApiMocksExample(dio: dio));
+    await tester.pumpWidget(FlutterPilotExample(dio: dio));
     await tester.tap(find.text('POST'));
     await tester.pumpAndSettle();
     await tester.enterText(
@@ -53,7 +53,7 @@ void main() {
 
   testWidgets('服务端错误状态仍展示响应正文', (tester) async {
     final dio = Dio()..httpClientAdapter = _TestAdapter(status: 503);
-    await tester.pumpWidget(ApiMocksExample(dio: dio));
+    await tester.pumpWidget(FlutterPilotExample(dio: dio));
     await tester.tap(find.byKey(const Key('send-request')));
     await tester.pumpAndSettle();
     expect(find.textContaining('HTTP 503'), findsOneWidget);
@@ -64,7 +64,7 @@ void main() {
   testWidgets('无效 JSON 不发送请求，并显示可修正的错误', (tester) async {
     final adapter = _TestAdapter();
     final dio = Dio()..httpClientAdapter = adapter;
-    await tester.pumpWidget(ApiMocksExample(dio: dio));
+    await tester.pumpWidget(FlutterPilotExample(dio: dio));
     await tester.tap(find.text('POST'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('request-body')), '{invalid');

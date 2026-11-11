@@ -18,7 +18,7 @@ describe('project WS rules persistence', () => {
   let store: WsRuleStore;
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'ws-rules-'));
-    store = new WsRuleStore(join(root, '.api-mocks'));
+    store = new WsRuleStore(join(root, '.flutter-pilot'));
   });
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
@@ -60,8 +60,8 @@ describe('project WS rules persistence', () => {
     await symlink(outside, store.file);
     await expect(store.load()).rejects.toThrow('符号链接');
     expect(await readFile(outside, 'utf8')).toBe('untouched');
-    await rm(join(root, '.api-mocks'), { recursive: true });
-    await symlink(root, join(root, '.api-mocks'));
+    await rm(join(root, '.flutter-pilot'), { recursive: true });
+    await symlink(root, join(root, '.flutter-pilot'));
     await expect(store.load()).rejects.toThrow('普通目录');
   });
   it('serializes competing saves and rejects a stale second writer', async () => {

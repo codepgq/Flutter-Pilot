@@ -248,7 +248,7 @@
         final code = error is String && (error == 'ANCESTOR_NOT_FOUND' || error == 'AMBIGUOUS_ANCESTOR' || error == 'TREE_LIMIT') ? error : 'UI_OPERATION_FAILED';
         result = fail(code, 'Flutter UI 操作未能完成。');
       }
-      emitEvent('api_mocks.vm.ui', {'session': __SESSION__, 'operationId': operationId, 'result': result});
+      emitEvent('flutter_pilot.vm.ui', {'session': __SESSION__, 'operationId': operationId, 'result': result});
     });
     return true;
   };

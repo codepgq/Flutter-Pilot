@@ -11,7 +11,7 @@ describe('MCP Agent configuration adapters', () => {
   let options: ConstructorParameters<typeof AgentAdapterManager>[0];
   let manager: AgentAdapterManager;
   beforeEach(async () => {
-    temporary = await realpath(await mkdtemp(join(tmpdir(), 'api-mocks-adapter-')));
+    temporary = await realpath(await mkdtemp(join(tmpdir(), 'flutter-pilot-adapter-')));
     options = {
       workspace: join(temporary, 'project'),
       bridgeRoot: join(temporary, 'bridge'),
@@ -41,7 +41,7 @@ describe('MCP Agent configuration adapters', () => {
     expect(raw).toContain('"custom": {"token": "synthetic-secret"}');
     const document = JSON.parse(raw);
     expect(document.mcpServers.other.command).toBe('other');
-    expect(document.mcpServers['flutter-api-mocks'].args).toEqual([
+    expect(document.mcpServers['flutter-pilot'].args).toEqual([
       join(options.bridgeRoot, 'bridge.cjs'),
       '--registry',
       join(options.bridgeRoot, 'sessions'),
@@ -60,7 +60,7 @@ describe('MCP Agent configuration adapters', () => {
     expect(manager.configPath('codex-cli', 'global')).toBe(join(options.codexHome!, 'config.toml'));
     const global = await manager.adapt('codex-cli', 'global');
     expect(
-      (parseToml(await readFile(global.path, 'utf8')) as any).mcp_servers['flutter-api-mocks'].args,
+      (parseToml(await readFile(global.path, 'utf8')) as any).mcp_servers['flutter-pilot'].args,
     ).not.toContain('--workspace');
   });
 
@@ -68,7 +68,7 @@ describe('MCP Agent configuration adapters', () => {
     const path = manager.configPath('codex-cli');
     await mkdir(dirname(path), { recursive: true });
     const original =
-      '# my settings\nmodel = "custom"\nnote = """\n[mcp_servers.flutter-api-mocks]\nthis is text\n"""\n\n[mcp_servers.other]\ncommand = "other" # keep\n';
+      '# my settings\nmodel = "custom"\nnote = """\n[mcp_servers.flutter-pilot]\nthis is text\n"""\n\n[mcp_servers.other]\ncommand = "other" # keep\n';
     await writeFile(path, original);
     await manager.adapt('codex-cli');
     expect(await readFile(path, 'utf8')).toContain(original);
@@ -79,7 +79,7 @@ describe('MCP Agent configuration adapters', () => {
 
   it('does not overwrite a conflict until repair and never deletes an unowned entry', async () => {
     const path = manager.configPath('claude');
-    const original = JSON.stringify({ mcpServers: { 'flutter-api-mocks': { command: 'custom' } } });
+    const original = JSON.stringify({ mcpServers: { 'flutter-pilot': { command: 'custom' } } });
     await writeFile(path, original);
     expect((await manager.inspect('claude')).status).toBe('conflict');
     await expect(manager.adapt('claude')).rejects.toThrow('修复');
@@ -96,21 +96,21 @@ describe('MCP Agent configuration adapters', () => {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(
       path,
-      '# top\n[mcp_servers.\'flutter-api-mocks\']\ncommand="old"\n[mcp_servers.\'flutter-api-mocks\'.env]\nTEST="old"\n[mcp_servers.keep]\ncommand="keep"\n',
+      '# top\n[mcp_servers.\'flutter-pilot\']\ncommand="old"\n[mcp_servers.\'flutter-pilot\'.env]\nTEST="old"\n[mcp_servers.keep]\ncommand="keep"\n',
     );
     await manager.adapt('codex-cli', 'project', true);
     expect((parseToml(await readFile(path, 'utf8')) as any).mcp_servers.keep.command).toBe('keep');
     await manager.remove('codex-cli');
-    expect((parseToml(await readFile(path, 'utf8')) as any).mcp_servers['flutter-api-mocks']).toBeUndefined();
+    expect((parseToml(await readFile(path, 'utf8')) as any).mcp_servers['flutter-pilot']).toBeUndefined();
   });
 
   it('repairs inline and dotted TOML layouts without losing other servers', async () => {
     const path = manager.configPath('codex-cli');
     await mkdir(dirname(path), { recursive: true });
     for (const original of [
-      '# preserve\nmcp_servers={ other={command="other"}, "flutter-api-mocks"={command="old"} }\n',
-      '# preserve\n[mcp_servers]\n"flutter-api-mocks"={command="old"}\nother={command="other"}\n',
-      '# preserve\nmcp_servers."flutter-api-mocks".command="old"\nmcp_servers.other.command="other"\n',
+      '# preserve\nmcp_servers={ other={command="other"}, "flutter-pilot"={command="old"} }\n',
+      '# preserve\n[mcp_servers]\n"flutter-pilot"={command="old"}\nother={command="other"}\n',
+      '# preserve\nmcp_servers."flutter-pilot".command="old"\nmcp_servers.other.command="other"\n',
     ]) {
       await writeFile(path, original);
       await manager.adapt('codex-cli', 'project', true);
@@ -162,7 +162,7 @@ describe('MCP Agent configuration adapters', () => {
         projects: {
           [options.workspace]: {
             mcpServers: {
-              'flutter-api-mocks': { command: 'private-command-fixture', env: { TOKEN: 'secret-fixture' } },
+              'flutter-pilot': { command: 'private-command-fixture', env: { TOKEN: 'secret-fixture' } },
             },
           },
         },
@@ -206,9 +206,9 @@ describe('MCP Agent configuration adapters', () => {
     await writeFile(path, '{"changed":true}');
     await expect(writeConfig(path, before, '{"wrong":true}')).rejects.toThrow('外部修改');
     const latest = await readConfig(path);
-    await writeFile(`${path}.api-mocks.lock`, '');
+    await writeFile(`${path}.flutter-pilot.lock`, '');
     await expect(writeConfig(path, latest, '{}')).rejects.toThrow('其他适配');
-    await rm(`${path}.api-mocks.lock`);
+    await rm(`${path}.flutter-pilot.lock`);
     await rm(path);
     await writeFile(join(temporary, 'target'), '{}');
     await symlink(join(temporary, 'target'), path);

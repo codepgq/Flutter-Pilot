@@ -15,17 +15,17 @@ async function waitFor(check, label) {
   throw new Error('MCP IDE timeout: ' + label);
 }
 exports.run = async () => {
-  const phase = process.env.API_MOCK_TEST_PHASE;
-  const reportPath = process.env.API_MOCK_TEST_MCP_REPORT;
-  const bridgeRoot = process.env.API_MOCKS_MCP_ROOT;
+  const phase = process.env.FLUTTER_PILOT_TEST_PHASE;
+  const reportPath = process.env.FLUTTER_PILOT_TEST_MCP_REPORT;
+  const bridgeRoot = process.env.FLUTTER_PILOT_MCP_ROOT;
   let report;
   try {
     report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
   } catch {
     report = {
-      ide: process.env.API_MOCK_TEST_IDE,
+      ide: process.env.FLUTTER_PILOT_TEST_IDE,
       ideVersion: vscode.version,
-      appVersion: process.env.API_MOCK_TEST_IDE_APP_VERSION,
+      appVersion: process.env.FLUTTER_PILOT_TEST_IDE_APP_VERSION,
       passed: false,
       assertions: [],
       limits: [
@@ -39,10 +39,10 @@ exports.run = async () => {
   };
   let workbench, client;
   try {
-    const extension = vscode.extensions.getExtension('api-mocks.flutter-api-mocks');
+    const extension = vscode.extensions.getExtension('flutter-pilot.flutter-pilot');
     assert.ok(extension);
     await extension.activate();
-    workbench = await vscode.commands.executeCommand('flutterApiMocks.open');
+    workbench = await vscode.commands.executeCommand('flutterPilot.open');
     assert.ok(workbench?.handle);
     const workspace = await fs.realpath(vscode.workspace.workspaceFolders[0].uri.fsPath);
     if (phase === 'first') {
@@ -58,7 +58,7 @@ exports.run = async () => {
       await workbench.handle({ action: 'mcp.inspect', payload: { scope: 'project' } });
       await workbench.handle({ action: 'mcp.adapt', payload: { agent: 'codex-cli', scope: 'project' } });
       const config = await fs.readFile(path.join(workspace, '.codex/config.toml'), 'utf8');
-      assert.match(config, /flutter-api-mocks/);
+      assert.match(config, /flutter-pilot/);
       assert.match(config, /--workspace/);
       assert.ok(config.includes(bridgeRoot));
       assert.ok(workbench.mcpState.notice.includes('自检通过'));
@@ -75,7 +75,7 @@ exports.run = async () => {
     client = new Client({ name: 'codex-cli-ide-smoke', version: '1.0.0' });
     await client.connect(
       new StdioClientTransport({
-        command: process.env.API_MOCK_TEST_NODE,
+        command: process.env.FLUTTER_PILOT_TEST_NODE,
         args: [
           path.join(bridgeRoot, 'bridge.cjs'),
           '--registry',
@@ -96,7 +96,7 @@ exports.run = async () => {
     const status = await call('get_network_status');
     assert.equal(status.isError, undefined);
     assert.equal(status.structuredContent.vmConnected, false);
-    assert.equal(status.structuredContent.files.http, path.join(workspace, '.api-mocks/rules.json'));
+    assert.equal(status.structuredContent.files.http, path.join(workspace, '.flutter-pilot/rules.json'));
     await waitFor(
       () => workbench.mcpState.clients.some((c) => c.name === 'codex-cli-ide-smoke'),
       'client handshake',
@@ -131,7 +131,7 @@ exports.run = async () => {
     await waitFor(() => !workbench.panel, 'panel close');
     assert.equal(workbench.mcpState.running, true);
     assert.equal((await call('get_network_status')).isError, undefined);
-    const reopened = await vscode.commands.executeCommand('flutterApiMocks.open');
+    const reopened = await vscode.commands.executeCommand('flutterPilot.open');
     assert.equal(reopened, workbench);
     passed(phase + ': closing and reopening workbench keeps MCP session available');
     if (phase === 'first') {
@@ -141,7 +141,7 @@ exports.run = async () => {
       assert.equal((await fs.readdir(path.join(bridgeRoot, 'sessions'))).length, 0);
       assert.match(
         await fs.readFile(path.join(workspace, '.codex/config.toml'), 'utf8'),
-        /flutter-api-mocks/,
+        /flutter-pilot/,
       );
       await workbench.handle({ action: 'mcp.enable', payload: { enabled: true } });
       assert.equal(workbench.mcpState.running, true);

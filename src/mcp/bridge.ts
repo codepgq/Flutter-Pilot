@@ -28,7 +28,7 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
   const connectionId = randomUUID();
   const announced = new Map<string, SessionDescriptor>();
   const server = new Server(
-    { name: 'flutter-api-mocks', version: '0.0.7' },
+    { name: 'flutter-pilot', version: '0.0.7' },
     {
       capabilities: { tools: {}, resources: {}, prompts: {} },
       instructions: agentInstructions,
@@ -197,7 +197,7 @@ async function main(): Promise<void> {
 
 if (require.main === module) {
   void main().catch(() => {
-    process.stderr.write('Flutter API Mocks MCP 无法启动，请检查配置和 Node.js 版本。\n');
+    process.stderr.write('Flutter Pilot MCP 无法启动，请检查配置和 Node.js 版本。\n');
     process.exitCode = 1;
   });
 }

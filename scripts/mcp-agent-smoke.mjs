@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 
-const temporary = await realpath(await mkdtemp(join(tmpdir(), 'api-mocks-agent-smoke-')));
+const temporary = await realpath(await mkdtemp(join(tmpdir(), 'flutter-pilot-agent-smoke-')));
 const results = [];
 const processes = new Set();
 const server = createServer();
@@ -90,11 +90,11 @@ async function codexAppServerCall(env, cwd) {
     const thread = await call('thread/start', { cwd, approvalPolicy: 'never', model: 'gpt-5.5' });
     const inventory = await call('mcpServerStatus/list', {
       threadId: thread.thread.id,
-      serverName: 'flutter-api-mocks',
+      serverName: 'flutter-pilot',
     });
     const result = await call('mcpServer/tool/call', {
       threadId: thread.thread.id,
-      server: 'flutter-api-mocks',
+      server: 'flutter-pilot',
       tool: 'verify_echo',
       arguments: { marker: 'app-server-fixture' },
     });
@@ -220,7 +220,7 @@ try {
     join(bridgeRoot, 'bridge.cjs'),
     `
 const fs=require('node:fs'),readline=require('node:readline');
-readline.createInterface({input:process.stdin}).on('line',line=>{try{const m=JSON.parse(line);fs.appendFileSync(${JSON.stringify(events)},JSON.stringify({method:m.method,params:m.method==='tools/call'?m.params:undefined})+'\\n');if(m.id===undefined)return;let result={};if(m.method==='initialize')result={protocolVersion:m.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'api-mocks-cli-fixture',version:'1.0.0'}};if(m.method==='tools/list')result={tools:[{name:'verify_echo',description:'Verify the isolated MCP client fixture',inputSchema:{type:'object',properties:{marker:{type:'string'}},required:['marker'],additionalProperties:false}}]};if(m.method==='tools/call')result={content:[{type:'text',text:'verified:'+m.params.arguments.marker}]};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');}catch{}});
+readline.createInterface({input:process.stdin}).on('line',line=>{try{const m=JSON.parse(line);fs.appendFileSync(${JSON.stringify(events)},JSON.stringify({method:m.method,params:m.method==='tools/call'?m.params:undefined})+'\\n');if(m.id===undefined)return;let result={};if(m.method==='initialize')result={protocolVersion:m.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'flutter-pilot-cli-fixture',version:'1.0.0'}};if(m.method==='tools/list')result={tools:[{name:'verify_echo',description:'Verify the isolated MCP client fixture',inputSchema:{type:'object',properties:{marker:{type:'string'}},required:['marker'],additionalProperties:false}}]};if(m.method==='tools/call')result={content:[{type:'text',text:'verified:'+m.params.arguments.marker}]};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');}catch{}});
 `,
   );
   for (const agent of ['codex-cli', 'claude']) {
@@ -265,7 +265,7 @@ readline.createInterface({input:process.stdin}).on('line',line=>{try{const m=JSO
       const command = agent === 'claude' ? 'claude' : 'codex';
       const get = await run(
         command,
-        ['mcp', 'get', 'flutter-api-mocks', ...(agent === 'claude' ? [] : ['--json'])],
+        ['mcp', 'get', 'flutter-pilot', ...(agent === 'claude' ? [] : ['--json'])],
         env,
         workspace,
       );
@@ -279,7 +279,7 @@ readline.createInterface({input:process.stdin}).on('line',line=>{try{const m=JSO
         '--output-format',
         'json',
         '--allowedTools',
-        'mcp__flutter-api-mocks__verify_echo',
+        'mcp__flutter-pilot__verify_echo',
         ...(scope === 'project' ? ['--mcp-config', state.path, '--strict-mcp-config'] : []),
       ];
       let execution = { code: 0, signal: null, stdout: '', stderr: '' };

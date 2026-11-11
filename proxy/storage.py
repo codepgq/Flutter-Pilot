@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 try:
-    if os.environ.get("API_MOCK_SQLITE_CLI") == "1":
+    if os.environ.get("FLUTTER_PILOT_SQLITE_CLI") == "1":
         raise ImportError("CLI backend requested")
     import sqlite3
 except ImportError:

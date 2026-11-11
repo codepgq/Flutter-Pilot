@@ -52,7 +52,7 @@ describe('VM history using the real system SQLite CLI', () => {
   let folder: string;
   let store: VmHistoryStore;
   beforeEach(async () => {
-    folder = await mkdtemp(join(tmpdir(), 'api-mocks-vm-storage-'));
+    folder = await mkdtemp(join(tmpdir(), 'flutter-pilot-vm-storage-'));
     store = new VmHistoryStore(folder, { retentionDays: 7, maxRecords: 3 });
     await store.init();
   });
@@ -136,7 +136,7 @@ describe('VM history using the real system SQLite CLI', () => {
 
   it('treats quotes, SQL, CLI commands, shell substitutions and LIKE wildcards as data', async () => {
     const malicious =
-      "a'\n.shell touch /tmp/api-mocks-should-never-exist\n$(touch unexpected); DROP TABLE history;--_100%\\中文";
+      "a'\n.shell touch /tmp/flutter-pilot-should-never-exist\n$(touch unexpected); DROP TABLE history;--_100%\\中文";
     await store.put(
       entry('quoted', {
         path: malicious,

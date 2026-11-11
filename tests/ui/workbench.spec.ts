@@ -72,7 +72,7 @@ test('设置和本地引擎入口使用原生命令链接，不向扩展宿主�
   const settings = page.getByRole('link', { name: '设置', exact: true });
   const href = await settings.getAttribute('href');
   expect(href?.split('?')[0]).toBe('command:workbench.action.openSettings');
-  expect(JSON.parse(decodeURIComponent(href!.split('?')[1]))).toEqual(['@ext:api-mocks.flutter-api-mocks']);
+  expect(JSON.parse(decodeURIComponent(href!.split('?')[1]))).toEqual(['@ext:flutter-pilot.flutter-pilot']);
   // Chromium has no IDE command handler; stop navigation after React handlers have run.
   await page.evaluate(() => document.addEventListener('click', (event) => event.preventDefault()));
   await settings.click();
@@ -88,8 +88,8 @@ test('项目绑定展示 UUID 并打开配置、规则和读取项目文件', as
   const project = {
     id: 'edb038d8-0a2a-4b1f-a974-d39e1a5af278',
     name: 'commerce_app_'.repeat(15),
-    configPath: '/workspace/.api-mocks/project.json',
-    rulesPath: '/workspace/.api-mocks/rules.json',
+    configPath: '/workspace/.flutter-pilot/project.json',
+    rulesPath: '/workspace/.flutter-pilot/rules.json',
   };
   await state(page, { project });
   const card = page.getByRole('region', { name: '当前绑定项目' });
@@ -973,8 +973,8 @@ for (const width of [1280, 390]) {
         project: {
           id: 'test-project',
           name: 'commerce_app',
-          configPath: '/workspace/.api-mocks/project.json',
-          rulesPath: '/workspace/.api-mocks/rules.json',
+          configPath: '/workspace/.flutter-pilot/project.json',
+          rulesPath: '/workspace/.flutter-pilot/rules.json',
         },
       },
       entry,

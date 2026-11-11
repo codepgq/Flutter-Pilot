@@ -8,18 +8,18 @@ const { promisify } = require('node:util');
 const { createHash } = require('node:crypto');
 const exec = promisify(execFile);
 exports.run = async () => {
-  const extension = vscode.extensions.getExtension('api-mocks.flutter-api-mocks');
+  const extension = vscode.extensions.getExtension('flutter-pilot.flutter-pilot');
   assert.ok(extension, 'Extension discovered');
   await extension.activate();
   const commands = await vscode.commands.getCommands();
-  for (const command of ['open', 'start', 'stop']) assert.ok(commands.includes(`flutterApiMocks.${command}`));
+  for (const command of ['open', 'start', 'stop']) assert.ok(commands.includes(`flutterPilot.${command}`));
   const workspace = vscode.workspace.workspaceFolders[0].uri;
-  const projectDirectory = path.join(workspace.fsPath, '.api-mocks');
+  const projectDirectory = path.join(workspace.fsPath, '.flutter-pilot');
   const project = JSON.parse(await fs.readFile(path.join(projectDirectory, 'project.json'), 'utf8'));
   assert.match(project.projectId, /^[0-9a-f-]{36}$/i);
   assert.equal(project.name, path.basename(workspace.fsPath));
   assert.equal(project.connection.mode, 'proxy');
-  const legacyStorage = process.env.API_MOCK_TEST_LEGACY_STORAGE;
+  const legacyStorage = process.env.FLUTTER_PILOT_TEST_LEGACY_STORAGE;
   const storage = path.join(
     path.dirname(path.dirname(legacyStorage)),
     'projects',
@@ -55,18 +55,18 @@ exports.run = async () => {
   try {
     await fs.access(certificate);
     // No workbench or start command: workspace activation must already listen.
-    assert.deepEqual(await get('https://ide.api-mocks.test/ping'), { ide: true });
-    await vscode.commands.executeCommand('flutterApiMocks.open');
+    assert.deepEqual(await get('https://ide.flutter-pilot.test/ping'), { ide: true });
+    await vscode.commands.executeCommand('flutterPilot.open');
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     await new Promise((resolve) => setTimeout(resolve, 250));
     // The same rule has both breakpoints; with no panel it must never wait.
-    assert.deepEqual(await get('https://ide.api-mocks.test/ping'), { ide: true });
+    assert.deepEqual(await get('https://ide.flutter-pilot.test/ping'), { ide: true });
     // Discovery must also work without any matching mock/modification rule.
     const target = `http://127.0.0.1:${origin.address().port}/unconfigured-api`;
     assert.deepEqual(await get(target), { discovered: true });
     await new Promise((resolve) => setTimeout(resolve, 300));
     assert.equal(
-      await sql("SELECT calls FROM api_catalog WHERE host='ide.api-mocks.test' AND path='/ping'"),
+      await sql("SELECT calls FROM api_catalog WHERE host='ide.flutter-pilot.test' AND path='/ping'"),
       '2',
     );
     assert.equal(
@@ -74,7 +74,7 @@ exports.run = async () => {
       '1',
     );
     assert.equal(await sql('SELECT count(*) FROM history'), '3');
-    await vscode.commands.executeCommand('flutterApiMocks.stop');
+    await vscode.commands.executeCommand('flutterPilot.stop');
     await assert.rejects(
       exec('/usr/bin/curl', [
         '--silent',
@@ -88,7 +88,7 @@ exports.run = async () => {
         target,
       ]),
     );
-    await vscode.commands.executeCommand('flutterApiMocks.open');
+    await vscode.commands.executeCommand('flutterPilot.open');
     await assert.rejects(
       exec('/usr/bin/curl', [
         '--silent',

@@ -13,7 +13,7 @@
 
 ## 设置
 
-`flutterApiMocks.autoConnectVm` 默认 `true`，独立于代理的 `autoStart`。项目 `.api-mocks/project.json` 中的 `settings.autoConnectVm` 优先于 IDE 设置；未指定时回退 IDE。修改项目文件后点击“读取项目文件”，该设置立即生效。关闭自动连接保留当前已经建立的连接，仍允许在候选列表中手动选择连接。
+`flutterPilot.autoConnectVm` 默认 `true`，独立于代理的 `autoStart`。项目 `.flutter-pilot/project.json` 中的 `settings.autoConnectVm` 优先于 IDE 设置；未指定时回退 IDE。修改项目文件后点击“读取项目文件”，该设置立即生效。关闭自动连接保留当前已经建立的连接，仍允许在候选列表中手动选择连接。
 
 自动尝试最多三次：立即连接、等待 1 秒、再等待 3 秒。连接成功后意外断线的自动重连也共用本次会话及地址的三次预算；重复事件不会刷新预算。用尽后点击“重试连接”，或等待新的调试会话。发生真正的 VM 断线重连后，Dio Mock、WS 采集及 WS Mock 需要重新手动开启。
 
@@ -31,7 +31,7 @@ VM 和 DTD 认证地址只保留在扩展宿主内存，不传给工作台，不
 
 - `npm test`：发现、DTD 协议与竞态、调度、项目设置和扩展集成。
 - `npm run test:ui`：候选选择、失败重试、暂停重连、禁用状态及窄面板。
-- `API_MOCK_TEST_IDE=cursor npm run test:ide:vm`（或 `vscode`）：隔离 IDE 内合成候选与 VM JSON-RPC 的消息链路验证。
-- `API_MOCK_TEST_IDE=cursor node scripts/ide-vm-discovery-test.mjs`（或 `vscode`）：隔离 IDE、真实 Dart 扩展与 Flutter fixture 验收。可通过 `API_MOCK_TEST_DEVICE`、`API_MOCK_TEST_FLUTTER` 指定本机模拟器与 SDK；脚本只控制自己创建的调试会话。
+- `FLUTTER_PILOT_TEST_IDE=cursor npm run test:ide:vm`（或 `vscode`）：隔离 IDE 内合成候选与 VM JSON-RPC 的消息链路验证。
+- `FLUTTER_PILOT_TEST_IDE=cursor node scripts/ide-vm-discovery-test.mjs`（或 `vscode`）：隔离 IDE、真实 Dart 扩展与 Flutter fixture 验收。可通过 `FLUTTER_PILOT_TEST_DEVICE`、`FLUTTER_PILOT_TEST_FLUTTER` 指定本机模拟器与 SDK；脚本只控制自己创建的调试会话。
 
 实际通过的环境与未验证范围统一记录在 [验收记录](validation.md)。合成服务不替代真实 Flutter 验收。

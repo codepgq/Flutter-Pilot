@@ -81,7 +81,7 @@ export class DioVmInjector extends EventEmitter {
     super();
     this.listener = (notification: any) => {
       const event = notification?.params?.event;
-      if (event?.extensionKind !== 'api_mocks.vm.flow' || event.extensionData?.session !== this.session)
+      if (event?.extensionKind !== 'flutter_pilot.vm.flow' || event.extensionData?.session !== this.session)
         return;
       const entry = event.extensionData.entry as HistoryEntry;
       if (

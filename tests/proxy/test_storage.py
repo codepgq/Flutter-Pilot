@@ -138,7 +138,7 @@ class StorageTests(unittest.TestCase):
             self.store.delete_api(None, "api.test", "/users")
 
     def test_untrusted_strings_remain_data_in_cli_backend(self):
-        entry = self.entry("quote'); DROP TABLE history;--", path="/quote'\n.shell touch /tmp/api-mocks-invalid\n")
+        entry = self.entry("quote'); DROP TABLE history;--", path="/quote'\n.shell touch /tmp/flutter-pilot-invalid\n")
         self.store.put(entry)
         note = "带引号 ' 中文\n.sql\n\x00 null"
         self.store.update(entry["id"], note, ["a'b"])

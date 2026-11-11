@@ -41,7 +41,7 @@ class UiRpc extends EventEmitter {
   }
   complete(event = this.events.at(-1)!, result = { ok: true }) {
     this.emit('notification', {
-      params: { event: { extensionKind: 'api_mocks.vm.ui', extensionData: { ...event, result } } },
+      params: { event: { extensionKind: 'flutter_pilot.vm.ui', extensionData: { ...event, result } } },
     });
   }
 }

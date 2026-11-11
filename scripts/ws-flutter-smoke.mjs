@@ -13,7 +13,7 @@ const root = resolve('.');
 const flutter = process.env.FLUTTER ?? 'flutter';
 const device = process.env.VM_FLUTTER_DEVICE;
 if (!device) throw Error('设置 VM_FLUTTER_DEVICE 为已启动的 iOS 模拟器 ID');
-const temp = await mkdtemp(join(tmpdir(), 'api-mocks-ws-flutter-'));
+const temp = await mkdtemp(join(tmpdir(), 'flutter-pilot-ws-flutter-'));
 const peers = new Map();
 const received = [];
 const servers = [];
@@ -58,7 +58,7 @@ try {
       '-days',
       '1',
       '-subj',
-      '/CN=API Mocks Flutter Test Root',
+      '/CN=Flutter Pilot Flutter Test Root',
       '-addext',
       'basicConstraints=critical,CA:TRUE',
       '-addext',
@@ -130,7 +130,7 @@ try {
   console.log('Creating disposable Flutter WS fixture…');
   execFileSync(
     flutter,
-    ['create', '--platforms=ios', '--no-pub', '--project-name', 'api_mocks_ws_fixture', project],
+    ['create', '--platforms=ios', '--no-pub', '--project-name', 'flutter_pilot_ws_fixture', project],
     { stdio: 'pipe' },
   );
   const pubspec = await readFile(join(project, 'pubspec.yaml'), 'utf8');
@@ -142,7 +142,7 @@ try {
   const ca = (await readFile(join(temp, 'ca.pem'))).toString('base64');
   const source = `import 'dart:io';import 'dart:convert';import 'dart:async';import 'package:flutter/material.dart';import 'package:web_socket_channel/io.dart';
 final sockets=<WebSocket>[];final sinks=<dynamic>[];final events=<dynamic>[];
-void main(){runApp(const MaterialApp(home:Scaffold(body:Center(child:Text('API Mocks disposable WebSocket fixture')))));}
+void main(){runApp(const MaterialApp(home:Scaffold(body:Center(child:Text('Flutter Pilot disposable WebSocket fixture')))));}
 Future<void> connect() async {final context=SecurityContext(withTrustedRoots:true)..setTrustedCertificatesBytes(base64Decode('${ca}'));final client=HttpClient(context:context);for(var i=0;i<4;i++){final base=i.isEven?'ws://127.0.0.1:${wsServer.address().port}':'wss://127.0.0.1:${secure.address().port}';final socket=await WebSocket.connect('$base/business?index=$i',customClient:client);sockets.add(socket);if(i>=2){final channel=IOWebSocketChannel(socket);sinks.add(channel.sink);channel.stream.listen((dynamic data)=>events.add({'index':i,'data':data}));}else{sinks.add(socket);socket.listen((dynamic data)=>events.add({'index':i,'data':data}));}}events.add({'ready':true});}
 void send(int index,String text)=>sinks[index].add(text);
 void utf8Send(String text)=>sockets[0].addUtf8Text(utf8.encode(text));

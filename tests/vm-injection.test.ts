@@ -169,7 +169,7 @@ describe('VM Dio injection lifecycle', () => {
     const entry = { id: 'test-flow', startedAt: 1, originalRequest: {}, request: {} };
     const event = (tag: string, value: unknown) => ({
       params: {
-        event: { extensionKind: 'api_mocks.vm.flow', extensionData: { session: tag, entry: value } },
+        event: { extensionKind: 'flutter_pilot.vm.flow', extensionData: { session: tag, entry: value } },
       },
     });
     rpc.emit('notification', event('another-session', entry));

@@ -196,7 +196,7 @@ export function McpPanel({
           MCP 并连接 VM。
         </p>
         <p>
-          编辑 <code>.api-mocks/rules.json</code> 或 <code>.api-mocks/ws-rules.json</code> → 调用{' '}
+          编辑 <code>.flutter-pilot/rules.json</code> 或 <code>.flutter-pilot/ws-rules.json</code> → 调用{' '}
           <code>reload_rules</code> → 显式开启 Mock → 按 Key 操作 UI → 查询网络记录。
         </p>
         <p>缺少稳定 Key 时由 MCP 返回诊断，由编码 Agent 修复源码。正式交互不会回退到文本定位。</p>

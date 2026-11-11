@@ -1,6 +1,6 @@
-# Flutter API Mocks
+# Flutter Pilot
 
-面向 **VS Code 和 Cursor** 的 Flutter Dio 接口调试插件。支持通过 **Flutter VM WebSocket 零源码记录 API、实验性运行时 Dio Mock**，也保留 HTTP/HTTPS 代理、双向修改、转发、手动断点和请求历史。
+**Flutter 运行时调试与 Agent 联调工作台**，面向 **VS Code 和 Cursor**。支持通过 **Flutter VM WebSocket 零源码记录 API、实验性运行时 Dio Mock**，也保留 HTTP/HTTPS 代理、双向修改、转发、手动断点和请求历史。
 
 配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key 精确操作页面，减少逐步截图识别的耗时与 token 消耗。
 
@@ -16,9 +16,9 @@
 
 **0.0.3 新增业务 WebSocket Tab**：通过现有 VM 手动开启 WS 采集，查看双向消息；独立开启实验性 WS Mock 后，可按规则整条替换或丢弃文本消息，向 App 手动注入模拟推送。运行时结构须探测通过；接入前消息不可补抓。详见 [WebSocket 使用说明](docs/v0.0.3-websocket.md)。
 
-**MCP 与编码 Agent 接入**：MCP 服务名为 `flutter-api-mocks`。工作台的 MCP Tab 默认按项目适配 Claude Code CLI、Codex CLI／App；Agent 可复用现有 VM 操作 UI、重载 HTTP／WS 规则并查询记录验证结果。详见 [MCP 与编码 Agent](#mcp-与编码-agent) 和 [MCP 使用说明](docs/mcp.md)。
+**MCP 与编码 Agent 接入**：MCP 服务名为 `flutter-pilot`。工作台的 MCP Tab 默认按项目适配 Claude Code CLI、Codex CLI／App；Agent 可复用现有 VM 操作 UI、重载 HTTP／WS 规则并查询记录验证结果。详见 [MCP 与编码 Agent](#mcp-与编码-agent) 和 [MCP 使用说明](docs/mcp.md)。
 
-项目首次初始化会生成 `.api-mocks/project.json` 保存 UUID 和项目配置，Mock 规则保存在 `.api-mocks/rules.json`。复制项目或创建 worktree 后，各目录读取自己的规则、分别记录本机历史。API 与历史按新到旧展示，目录可折叠，响应自动尝试 JSON 格式化；规则启停使用简洁 switch。
+项目首次初始化会生成 `.flutter-pilot/project.json` 保存 UUID 和项目配置，Mock 规则保存在 `.flutter-pilot/rules.json`。复制项目或创建 worktree 后，各目录读取自己的规则、分别记录本机历史。API 与历史按新到旧展示，目录可折叠，响应自动尝试 JSON 格式化；规则启停使用简洁 switch。
 
 > 当前通过 VSIX 安装，尚未发布到扩展商店。0.0.2 VM 路线已在 iPhone 18 Pro / iOS 27.2 模拟器实际验证，应用入口 SHA-256 保持不变。代理路线的旧版设备验收与 VM 新版验收分别记录，完整证据和限制见 [VM 使用与可行性验证](docs/v0.0.2-vm-service.md) 和 [验收记录](docs/validation.md)。
 
@@ -68,14 +68,14 @@
 
 ## MCP 与编码 Agent
 
-MCP 服务名称和客户端配置项名称均为 **`flutter-api-mocks`**；插件显示名称是 **Flutter API Mocks**。服务使用标准 MCP stdio 传输，支持工具、资源和提示模板；桥接进程通过本机私有 Unix socket 访问插件会话。它复用 Flutter Debug VM，无需向应用添加 Driver 或 helper。
+MCP 服务名称和客户端配置项名称均为 **`flutter-pilot`**；插件显示名称是 **Flutter Pilot**。服务使用标准 MCP stdio 传输，支持工具、资源和提示模板；桥接进程通过本机私有 Unix socket 访问插件会话。它复用 Flutter Debug VM，无需向应用添加 Driver 或 helper。
 
 1. 在受信任的本地 Flutter 工作区启动 Debug 应用，并在工作台的 **连接与诊断** 中确认 VM 已连接。
 2. 在 **MCP** Tab 开启服务，选择目标 Agent 和 **当前项目**（默认）或全局范围，点击 **一键适配**。需要本机 Node.js 20+。
 3. 按客户端提示加载配置、信任或批准项目 MCP；必要时重连或新建会话。**已配置不代表客户端已连接**，实际握手状态在工作台显示。
-4. 让 Agent 使用 `flutter-api-mocks` 的 `get_usage_guide` 和 `list_sessions`，选择对应项目后执行任务。
+4. 让 Agent 使用 `flutter-pilot` 的 `get_usage_guide` 和 `list_sessions`，选择对应项目后执行任务。
 
-Agent 可按 `ValueKey<String/int>` 查找、点击、输入和滚动，诊断当前界面的 Key 问题；也可查询 HTTP 请求和业务 WebSocket 消息、重载规则并控制采集与 Mock。规则由 Agent 编辑项目的 `.api-mocks/rules.json` 和 `.api-mocks/ws-rules.json`，重载规则不会自动开启 Mock。多状态测试逐个切换场景，分别检查新网络记录和页面结果；Key 用于日常精确交互，视觉样式和布局验收再补充截图。
+Agent 可按 `ValueKey<String/int>` 查找、点击、输入和滚动，诊断当前界面的 Key 问题；也可查询 HTTP 请求和业务 WebSocket 消息、重载规则并控制采集与 Mock。规则由 Agent 编辑项目的 `.flutter-pilot/rules.json` 和 `.flutter-pilot/ws-rules.json`，重载规则不会自动开启 Mock。多状态测试逐个切换场景，分别检查新网络记录和页面结果；Key 用于日常精确交互，视觉样式和布局验收再补充截图。
 
 WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服务端消息，`send_ws_message` 通过 App 当前真实 WS 连接发给服务端。均需显式开启 WS 采集与 WS Mock，并选择准确的在线连接；不新建连接。可传原始 `text`，或传 `topic` 和 `data` 组装为 `{"topic": "...", "data": ...}`；自定义业务协议使用完整原始文本。真实发送经过当前 outbound 规则，可能被替换或丢弃；工具调用成功后仍需核对消息和业务结果。
 
@@ -83,7 +83,7 @@ WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服�
 
 例如可以向 Agent 提出：
 
-> 使用 `flutter-api-mocks` 模拟订单列表为空，并验证页面。先读取 HTTP 和工作流指南，选择当前项目；保留其他规则，重载后显式开启 Mock，通过实际 UI Key 操作页面，并检查新产生的请求和页面结果。
+> 使用 `flutter-pilot` 模拟订单列表为空，并验证页面。先读取 HTTP 和工作流指南，选择当前项目；保留其他规则，重载后显式开启 Mock，通过实际 UI Key 操作页面，并检查新产生的请求和页面结果。
 
 > 分别测试下单成功、下单失败和余额不足状态。每个场景只启用对应规则，按 Key 操作下单入口，核对请求命中、页面提示和资产变化，记录各场景结果。
 
@@ -115,27 +115,27 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 
 ### 从 VSIX 安装
 
-1. 获取 `flutter-api-mocks-0.0.7.vsix`。从源码构建见下方步骤。
+1. 获取 `flutter-pilot-0.0.7.vsix`。从源码构建见下方步骤。
 2. 在 VS Code 或 Cursor 扩展面板右上角菜单选择 **Install from VSIX… / 从 VSIX 安装…**。
 3. 选择安装包，按 IDE 提示重新加载窗口。
 4. 打开包含 `pubspec.yaml` 的 Flutter 项目根目录，并信任工作区。
-5. 执行 **Flutter API Mocks: 打开工作台**。扩展激活后，也可点击状态栏 **API Mocks**。
+5. 执行 **Flutter Pilot: 打开工作台**。扩展激活后，也可点击状态栏 **Flutter Pilot**。
 6. 默认进入推荐的 **VM 连接**，输入本次 Flutter VM WS 后点击 **连接并记录**。只有需要备用方案时才切换到 **代理连接**，安装 / 初始化引擎并按向导接入。新工作区即使已有引擎缓存，也不会自动启动代理。
 
-本版本号 0.0.7 比旧包 0.1.0 小。已有 0.1.0 时需强制覆盖安装，例如：
+安装当前 Flutter Pilot 包，例如：
 
 ```sh
-cursor --install-extension artifacts/flutter-api-mocks-0.0.7.vsix --force
+cursor --install-extension artifacts/flutter-pilot-0.0.7.vsix --force
 # VS Code 使用 code --install-extension 同一文件 --force
 ```
 
 命令在仓库根目录执行，并要求对应 IDE 的 CLI 可用。安装后执行 **Developer: Reload Window / 重新加载窗口**。
 
-插件显示名称为 **Flutter API Mocks**，扩展 ID 为 `api-mocks.flutter-api-mocks`。重新加载后通过命令面板搜索 **Flutter API Mocks: 打开工作台**，或点击状态栏 **API Mocks**；入口不依赖单独的侧栏图标。
+插件显示名称为 **Flutter Pilot**，扩展 ID 为 `flutter-pilot.flutter-pilot`。重新加载后通过命令面板搜索 **Flutter Pilot: 打开工作台**，或点击状态栏 **Flutter Pilot**；入口不依赖单独的侧栏图标。
 
 打开项目或工作台不会静默下载引擎。以下自动启动说明仅适用于代理模式：已安装或显式配置兼容引擎后，默认在受信任的本地 Flutter 工作区打开时自动启动，无需打开面板。首次仍需完成引擎安装、设备连接及 Flutter 接入；未经过代理的请求无法被记录。
 
-`flutterApiMocks.autoStart` 默认为 `true`。关闭它后，仍可手动启动；本次 IDE 会话中手动停止后，重新打开工作台不会自动恢复，重新打开 IDE / 工作区后则按设置再次自动启动。多根工作区为各 Flutter 文件夹维护独立会话，打开工作台时选择要查看的工作区。Dart workspace 根目录也支持自动识别显式列出的 Flutter 成员，共用根目录会话；最多检查 256 个成员，不递归扫描或展开 glob。
+`flutterPilot.autoStart` 默认为 `true`。关闭它后，仍可手动启动；本次 IDE 会话中手动停止后，重新打开工作台不会自动恢复，重新打开 IDE / 工作区后则按设置再次自动启动。多根工作区为各 Flutter 文件夹维护独立会话，打开工作台时选择要查看的工作区。Dart workspace 根目录也支持自动识别显式列出的 Flutter 成员，共用根目录会话；最多检查 256 个成员，不递归扫描或展开 glob。
 
 ### 从源码构建安装包
 
@@ -148,28 +148,30 @@ npm test
 npm run package
 ```
 
-产物为 `artifacts/flutter-api-mocks-0.0.7.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
+产物为 `artifacts/flutter-pilot-0.0.7.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
 
 ### 使用已有引擎
 
-工作台点击 **选择本地引擎** 打开设置，将 `flutterApiMocks.enginePath` 设为 **mitmdump 可执行文件的绝对路径**，然后重新初始化。该按钮打开设置，不是文件选择器。
+工作台点击 **选择本地引擎** 打开设置，将 `flutterPilot.enginePath` 设为 **mitmdump 可执行文件的绝对路径**，然后重新初始化。该按钮打开设置，不是文件选择器。
 
 自动下载固定为 **mitmproxy 12.3.1**，按架构验证 [引擎清单](resources/engine-manifest.json) 中的 SHA-256。已有引擎目前检查是否属于 **12.x**；完整验收基于 12.3.1，建议使用相同版本。不要只复制 macOS 独立包内的单个 mitmdump 文件，应保留完整应用包结构。
 
 ## 升级现有项目
 
-1. 覆盖安装最新 VSIX，保存工作区中的文件，在调试方便时执行 **Developer: Reload Window**。重载会结束插件当前的 VM 连接，认证 WS 不会保存供下次复用。
-2. 打开 **Flutter API Mocks: 打开工作台 → 连接与诊断**，确认项目绑定卡上的名称和 UUID。首次绑定时插件创建 `.api-mocks/`，后续复用项目文件。
-3. 已有项目文件优先；缺少项目文件时导入该目录旧版私有规则和可迁移的连接配置，并将历史、API 目录及 CA 迁移到新的本机存储。源数据保留，已有目标数据不覆盖；配置错误会提示修复。
-4. 已有工作区沿用保存的接入方式，包括旧版代理配置；全新工作区默认 VM。使用 VM 时自动发现 IDE 内的 Flutter Debug 会话；唯一会话自动连接，多个会话手动选择，也可填写当前有效 WS。需要改写接口时主动开启运行时 Dio Mock。
-5. 在 **Mock 规则** 检查规则，在 **API 与历史** 检查当前模式的历史。外部修改规则文件后，先保存文件，再点击 **读取项目文件**。
+本次更名采用直接切换：插件 ID 为 `flutter-pilot.flutter-pilot`，命令和设置前缀为 `flutterPilot`，MCP 服务名为 `flutter-pilot`，项目目录为 `.flutter-pilot/`。新插件不会读取或自动迁移旧名称下的设置、项目配置、规则、本机历史及 MCP 适配。
 
-升级和切换接入方式是两项操作。由代理切换到 VM 时，还需按下一节说明移除代理启动参数并重新运行应用；单纯切换工作台标签不会改变 App 已创建的网络客户端。
+1. 保存文件并结束旧插件的调试连接，停用或卸载旧插件，避免两个插件同时接管应用。更换扩展 ID 后，安装新包不会覆盖旧扩展。
+2. 安装 Flutter Pilot VSIX，在方便时重新加载 IDE 窗口，然后执行 **Flutter Pilot: 打开工作台**。
+3. 在新建的 `.flutter-pilot/` 中重新配置项目和规则，并按需设置 `flutterPilot.*`。默认使用 VM；重新连接后按需开启 HTTP / WS 采集与 Mock。
+4. 使用 MCP 时，在工作台重新执行目标 Agent 的 **一键适配**，加载新服务 `flutter-pilot`，并在客户端移除旧服务配置。改名不会自动修改已有真实 Agent 配置。
+5. 代理接入需要使用新 helper 和 `FLUTTER_PILOT_PROXY` 参数重新配置。旧 helper 应在原插件中先撤销，或由项目自行恢复后再接入；VM 路线无需 helper。
+
+后续 Flutter Pilot 版本升级会继续读取 `.flutter-pilot/`。外部修改规则后，先保存文件，再点击 **读取项目文件**。接入方式切换和插件升级是独立操作；由代理切换到 VM 时，先移除代理启动参数并重新运行应用。
 
 ## VM 快速上手：无需修改 Flutter 源码
 
 1. 在 Cursor / VS Code 中用原有入口以 **Debug** 启动或附加 Flutter 应用，插件自动发现本项目的调试会话。外部终端独立运行时，先在 IDE 附加调试，或手动提供 VM Service 的 `ws://…/ws` 地址。
-2. 打开 **Flutter API Mocks: 打开工作台 → 连接与诊断 → VM 连接**。只有一个可用会话时自动连接并后台记录，多个时选择会话。手动地址入口保留，认证地址仅在内存中使用。
+2. 打开 **Flutter Pilot: 打开工作台 → 连接与诊断 → VM 连接**。只有一个可用会话时自动连接并后台记录，多个时选择会话。手动地址入口保留，认证地址仅在内存中使用。
 3. 在应用内触发请求，进入 **API 与历史** 查看自动发现的 API、请求和响应。此时仅采集，不改变请求结果。
 4. 需要 Mock 时，主动开启 **开启运行时 Dio Mock**，等待“已接入 Dio”数量更新。尚未创建的 Dio 会周期性发现；也可点 **重新发现并同步**。新实例首次请求可能早于接入，应确认接入后再触发。
 5. 在 **Mock 规则** 创建并启用规则。保存并同步成功后，再次触发接口。已有规则可复用；VM 不支持手动断点。
@@ -183,7 +185,7 @@ Flutter 可能把原始 VM 连接重定向到 DDS（Dart Development Service）�
 
 要确认 Mock 真正生效，检查 **运行时 Dio Mock 已开启 → 已接入 Dio 大于 0 → 目标规则已启用并同步成功**，再在 App 中重新触发请求。最新历史应显示 `MOCK` 和命中的规则，响应正文应包含预设内容。仅打开单条规则的 switch，不会让仍处于观察状态的 VM 改写响应；App 已缓存的页面也需要重新请求接口。
 
-**从旧代理路线切换时，先停止当前 Flutter 调试，移除 `API_MOCK_PROXY` 启动参数，使用原启动项重新运行应用。** 再停止旧代理并连接 VM。切换界面不会撤销已有 helper，也不会改写已运行 App 的代理设置。
+**从旧代理路线切换时，先停止当前 Flutter 调试，移除 `FLUTTER_PILOT_PROXY` 启动参数，使用原启动项重新运行应用。** 再停止旧代理并连接 VM。切换界面不会撤销已有 helper，也不会改写已运行 App 的代理设置。
 
 VM 转发发生在应用的 Dio 中，因此 `127.0.0.1` 指应用所在设备；iOS 模拟器、Android 模拟器和真机访问电脑服务的地址不同。代理模式的转发则由开发电脑执行。详细边界、可复现验证命令和故障处理见 [0.0.2 VM 使用说明](docs/v0.0.2-vm-service.md)。
 
@@ -203,19 +205,19 @@ VM 转发发生在应用的 Dio 中，因此 `127.0.0.1` 指应用所在设备�
    | --- | --- |
    | 名称 | 第一条 HTTPS Mock |
    | 方法 | GET |
-   | 主机 | api-mocks.test |
+   | 主机 | flutter-pilot.test |
    | 路径 | /hello |
    | 状态码 | 200 |
    | Headers JSON | `{"content-type":"application/json"}` |
-   | Body | `{"message":"Hello from API Mocks"}` |
+   | Body | `{"message":"Hello from Flutter Pilot"}` |
 
 6. 按工作台实际地址运行。下面假设端口为 8080；有多台设备时用 `-d` 指定设备。
 
    ```sh
-   flutter run -d YOUR_ANDROID_SERIAL --dart-define=API_MOCK_PROXY=127.0.0.1:8080
+   flutter run -d YOUR_ANDROID_SERIAL --dart-define=FLUTTER_PILOT_PROXY=127.0.0.1:8080
    ```
 
-7. 在示例中将 URL 改为 `https://api-mocks.test/hello`，选择 GET 并发送。
+7. 在示例中将 URL 改为 `https://flutter-pilot.test/hello`，选择 GET 并发送。
 8. 应用应显示预设 JSON；工作台 **API 与历史** 出现带 `MOCK` 标记的记录。该域名无需真实存在，完整匹配的 Mock 不访问上游。
 
 这个流程通过 helper 信任当前调试 CA，无需在设备系统中安装证书。测试结束，去掉 `--dart-define` 参数重新运行应用，再停止代理。
@@ -249,9 +251,9 @@ VM 转发发生在应用的 Dio 中，因此 `127.0.0.1` 指应用所在设备�
 
 应用补丁通常包含：
 
-- 新增 `lib/api_mocks_debug.dart`，其中只嵌入当前代理 CA 的公钥证书。
-- 在选定文件中导入 helper，并在第一次请求前调用 `await configureApiMocks(dio)`。
-- 在 `.dart_tool/api_mocks_setup.json` 保存撤销记录。
+- 新增 `lib/flutter_pilot_debug.dart`，其中只嵌入当前代理 CA 的公钥证书。
+- 在选定文件中导入 helper，并在第一次请求前调用 `await configureFlutterPilot(dio)`。
+- 在 `.dart_tool/flutter_pilot_setup.json` 保存撤销记录。
 
 典型接入位置如下。helper 应由向导生成，不需要新增 Flutter SDK 依赖：
 
@@ -259,25 +261,25 @@ VM 转发发生在应用的 Dio 中，因此 `127.0.0.1` 指应用所在设备�
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
-import 'api_mocks_debug.dart';
+import 'flutter_pilot_debug.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final dio = Dio();
-  await configureApiMocks(dio);
+  await configureFlutterPilot(dio);
   runApp(MyApp(dio: dio));
 }
 ```
 
 上面的 `MyApp` 代表项目自己的入口 Widget。接入每个实际发请求的 Dio 实例；只接入一个实例不会覆盖其他实例。
 
-helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入 `API_MOCK_PROXY=host:port`。Profile / Release 保持原配置。参数中不加 `http://` 或路径；修改 `--dart-define` 需要停止并重新运行应用，热重载不能更新编译时参数。
+helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入 `FLUTTER_PILOT_PROXY=host:port`。Profile / Release 保持原配置。参数中不加 `http://` 或路径；修改 `--dart-define` 需要停止并重新运行应用，热重载不能更新编译时参数。
 
 实现使用 `SecurityContext(withTrustedRoots: true)` 加入当前调试 CA，保留上游证书校验，不设置无条件通过的 `badCertificateCallback`。已有自定义客户端工厂或证书回调会拒绝自动覆盖，需在项目中人工合并。
 
 ### 不同设备的地址
 
-| 调试目标 | API_MOCK_PROXY 中的地址 | 操作与验证状态 |
+| 调试目标 | FLUTTER_PILOT_PROXY 中的地址 | 操作与验证状态 |
 | --- | --- | --- |
 | Android USB 真机 | `127.0.0.1:<端口>` | 启动代理后刷新设备、连接 USB；已实际验证 |
 | Android 模拟器 | 使用插件创建 USB/ADB reverse 后填 `127.0.0.1:<端口>` | 需要设备处于已授权状态；尚未实际验收 |
@@ -300,7 +302,7 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 ### 连接与诊断
 
-提供 **VM 连接 / 代理连接** 两种方式。VM 页输入 WS、连接 / 断开、开启运行时 Dio Mock、重新发现并同步；代理页准备引擎、设备、CA 和接入补丁。顶部持续展示记录状态，**工作区与连接** 可查看端点、启停连接及打开设置。已连接时，调试会话与手动地址默认收起；项目配置和规则文件入口位于页面底部的折叠区域。底部诊断日志和 IDE 的 **输出 → Flutter API Mocks** 可用于排查错误。
+提供 **VM 连接 / 代理连接** 两种方式。VM 页输入 WS、连接 / 断开、开启运行时 Dio Mock、重新发现并同步；代理页准备引擎、设备、CA 和接入补丁。顶部持续展示记录状态，**工作区与连接** 可查看端点、启停连接及打开设置。已连接时，调试会话与手动地址默认收起；项目配置和规则文件入口位于页面底部的折叠区域。底部诊断日志和 IDE 的 **输出 → Flutter Pilot** 可用于排查错误。
 
 ### API 与历史
 
@@ -437,7 +439,7 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
       "priority": 10,
       "match": { "method": "POST", "host": "api.example.com", "path": "/v1/orders" },
       "redirect": { "url": "http://127.0.0.1:3000/v1/orders" },
-      "request": { "headers": { "x-debug-source": "flutter-api-mocks" } }
+      "request": { "headers": { "x-debug-source": "flutter-pilot" } }
     },
     {
       "id": "orders-breakpoint",
@@ -451,35 +453,35 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 }
 ```
 
-代理模式转发由开发电脑上的代理引擎执行，因此目标中的 `127.0.0.1:3000` 指开发电脑本机服务；VM 模式转发由 App 的 Dio 执行，`127.0.0.1` 指应用所在设备。它与手机访问代理时使用的 `API_MOCK_PROXY` 地址是两个不同的配置。
+代理模式转发由开发电脑上的代理引擎执行，因此目标中的 `127.0.0.1:3000` 指开发电脑本机服务；VM 模式转发由 App 的 Dio 执行，`127.0.0.1` 指应用所在设备。它与手机访问代理时使用的 `FLUTTER_PILOT_PROXY` 地址是两个不同的配置。
 
 仓库还提供可导入的最小示例 [example.rules.json](resources/example.rules.json)。从历史生成规则草稿也能避免手动填写方法、主机和路径。
 
 ## 配置参考
 
-项目配置优先保存在下述 `.api-mocks/project.json`；没有指定的设置使用 IDE 工作区 / 用户设置。可在 IDE 设置中搜索 `Flutter API Mocks`。外部修改后点击工作台的 **读取项目文件**，规则校验后同步；接入方式和采集参数在重新加载 IDE 窗口后生效，仅关闭工作台不会重启后台会话。
+项目配置优先保存在下述 `.flutter-pilot/project.json`；没有指定的设置使用 IDE 工作区 / 用户设置。可在 IDE 设置中搜索 `Flutter Pilot`。外部修改后点击工作台的 **读取项目文件**，规则校验后同步；接入方式和采集参数在重新加载 IDE 窗口后生效，仅关闭工作台不会重启后台会话。
 
 | 设置 | 默认值 | 有效范围与说明 |
 | --- | --- | --- |
-| `flutterApiMocks.autoStart` | `true` | 仅已选择代理模式时，随受信任的本地 Flutter 工作区启动已安装 / 配置的引擎 |
-| `flutterApiMocks.autoConnectVm` | `true` | VM 模式自动发现 Flutter Debug 会话；唯一会话自动连接并记录 HTTP，多个会话由用户选择 |
-| `flutterApiMocks.enginePath` | `""` | 本地 mitmdump 绝对路径；留空使用插件管理的引擎 |
-| `flutterApiMocks.proxyPort` | `8080` | 1024–65535；初始端口占用时选择其他可用端口 |
-| `flutterApiMocks.retentionDays` | `7` | 1–365 天 |
-| `flutterApiMocks.maxRecords` | `10000` | 1–100000 条历史 |
-| `flutterApiMocks.maxBodyBytes` | `1048576` | 1024–10485760 字节；代理 / VM 观察的本地正文保存上限；VM 注入另有 256 KiB 上限 |
-| `flutterApiMocks.breakpointTimeout` | `60` | 10–300 秒；规则内可单独设置 |
+| `flutterPilot.autoStart` | `true` | 仅已选择代理模式时，随受信任的本地 Flutter 工作区启动已安装 / 配置的引擎 |
+| `flutterPilot.autoConnectVm` | `true` | VM 模式自动发现 Flutter Debug 会话；唯一会话自动连接并记录 HTTP，多个会话由用户选择 |
+| `flutterPilot.enginePath` | `""` | 本地 mitmdump 绝对路径；留空使用插件管理的引擎 |
+| `flutterPilot.proxyPort` | `8080` | 1024–65535；初始端口占用时选择其他可用端口 |
+| `flutterPilot.retentionDays` | `7` | 1–365 天 |
+| `flutterPilot.maxRecords` | `10000` | 1–100000 条历史 |
+| `flutterPilot.maxBodyBytes` | `1048576` | 1024–10485760 字节；代理 / VM 观察的本地正文保存上限；VM 注入另有 256 KiB 上限 |
+| `flutterPilot.breakpointTimeout` | `60` | 10–300 秒；规则内可单独设置 |
 
 ```json
 {
-  "flutterApiMocks.autoStart": true,
-  "flutterApiMocks.autoConnectVm": true,
-  "flutterApiMocks.enginePath": "",
-  "flutterApiMocks.proxyPort": 8080,
-  "flutterApiMocks.retentionDays": 7,
-  "flutterApiMocks.maxRecords": 10000,
-  "flutterApiMocks.maxBodyBytes": 1048576,
-  "flutterApiMocks.breakpointTimeout": 60
+  "flutterPilot.autoStart": true,
+  "flutterPilot.autoConnectVm": true,
+  "flutterPilot.enginePath": "",
+  "flutterPilot.proxyPort": 8080,
+  "flutterPilot.retentionDays": 7,
+  "flutterPilot.maxRecords": 10000,
+  "flutterPilot.maxBodyBytes": 1048576,
+  "flutterPilot.breakpointTimeout": 60
 }
 ```
 
@@ -489,19 +491,19 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 | 命令 ID | 显示名称 |
 | --- | --- |
-| `flutterApiMocks.open` | Flutter API Mocks: 打开工作台 |
-| `flutterApiMocks.start` | Flutter API Mocks: 启动代理 |
-| `flutterApiMocks.stop` | Flutter API Mocks: 停止代理 |
+| `flutterPilot.open` | Flutter Pilot: 打开工作台 |
+| `flutterPilot.start` | Flutter Pilot: 启动代理 |
+| `flutterPilot.stop` | Flutter Pilot: 停止代理 |
 
 ## 项目绑定与配置文件
 
-插件绑定 Cursor / VS Code 当前选中的项目根目录，首次初始化生成项目 UUID，保存在 `.api-mocks/project.json`，以后读取并复用。配置和 Mock 规则随项目文件保存，运行时采集数据留在 IDE 私有目录。
+插件绑定 Cursor / VS Code 当前选中的项目根目录，首次初始化生成项目 UUID，保存在 `.flutter-pilot/project.json`，以后读取并复用。配置和 Mock 规则随项目文件保存，运行时采集数据留在 IDE 私有目录。
 
 连接页的项目绑定卡显示项目名称与 UUID，提供 **项目配置**、**规则文件** 入口和 **读取项目文件** 操作。手动编辑规则后先读取，再在工作台继续修改；若磁盘文件已变化，插件会阻止使用未更新的工作台状态覆盖它。修改 UUID、接入方式或采集参数后按提示重新加载窗口，当前连接不会被读取操作强制中断。
 
 ```text
 项目根目录/
-└── .api-mocks/
+└── .flutter-pilot/
     ├── project.json              # 项目 UUID、格式版本、接入方式和项目设置
     └── rules.json                # version: 1 的 Mock 规则文档
 ```
@@ -526,7 +528,7 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 }
 ```
 
-`settings` 可省略；其中字段使用不带 `flutterApiMocks.` 前缀的名称，优先于对应 IDE 设置。引擎路径仍使用本机 IDE 的 `flutterApiMocks.enginePath`。`rules.json` 与导入 / 导出使用相同结构：`{"version":1,"rules":[]}`；工作台增删改、复制、启停和排序都会保存到当前目录的规则文件。
+`settings` 可省略；其中字段使用不带 `flutterPilot.` 前缀的名称，优先于对应 IDE 设置。引擎路径仍使用本机 IDE 的 `flutterPilot.enginePath`。`rules.json` 与导入 / 导出使用相同结构：`{"version":1,"rules":[]}`；工作台增删改、复制、启停和排序都会保存到当前目录的规则文件。
 
 | 修改内容 | 生效方式 |
 | --- | --- |
@@ -540,14 +542,14 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 同一项目复制到另一目录、创建 Git worktree 或重新克隆时，如果文件中保留相同 UUID，各目录仍分别记录历史、API 目录和后台会话；规则从各自目录读取，互不覆盖。移动项目时 UUID 可以保留，但新路径不自动接续旧路径的请求历史。多根工作区以所选文件夹为绑定根；Dart workspace 仍以打开的根目录维护会话。
 
-旧版私有目录中的规则和连接配置仅在项目文件不存在时导入，已有项目文件优先，原文件保留。是否将 `.api-mocks/` 纳入 Git 由项目自行决定，插件不会自动暂存或提交这些文件。字段、读取方式和迁移细节见 [项目绑定说明](docs/project-binding.md)。
+更名前的配置和规则不会自动导入；请在 `.flutter-pilot/` 中重新配置。是否将该目录纳入 Git 由项目自行决定，插件不会自动暂存或提交这些文件。字段和读取方式见 [项目绑定说明](docs/project-binding.md)。
 
 ## 数据存储与隐私
 
-项目配置和规则保存在项目 `.api-mocks/` 中。API 目录、请求历史、CA 以及设备相关的本机连接信息保存在 IDE 的 `globalStorage` 中，按项目身份与实际工作区目录隔离。VM WS 只保存在当前会话内存，不写入项目配置或本机连接文件。
+项目配置和规则保存在项目 `.flutter-pilot/` 中。API 目录、请求历史、CA 以及设备相关的本机连接信息保存在 IDE 的 `globalStorage` 中，按项目身份与实际工作区目录隔离。VM WS 只保存在当前会话内存，不写入项目配置或本机连接文件。
 
 ```text
-<IDE globalStorage>/api-mocks.flutter-api-mocks/
+<IDE globalStorage>/flutter-pilot.flutter-pilot/
 ├── engines/<版本>-<架构>/
 └── projects/<项目 UUID>/<工作区 URI 哈希>/
     ├── history.sqlite3           # 代理历史和 API 目录
@@ -567,7 +569,7 @@ macOS 默认 VS Code 用户数据下通常为 `~/Library/Application Support/Cod
 - CA 私钥只保存在插件私有目录；helper 包含的是 CA 公钥证书，不能将私钥放入项目或共享规则。
 - 引擎运行时不要直接删除私有数据库或 CA 文件。备份或手动清理前先退出 IDE，或移除对应工作区以确保后台引擎退出；仅关闭工作台不会关闭引擎。换 CA 后需要重新配置相关信任。
 
-撤销接入记录单独位于 Flutter 项目的 `.dart_tool/api_mocks_setup.json`，与历史数据库不是同一个文件。
+撤销接入记录单独位于 Flutter 项目的 `.dart_tool/flutter_pilot_setup.json`，与历史数据库不是同一个文件。
 
 ## 停止代理与恢复联网
 
@@ -579,7 +581,7 @@ macOS 默认 VS Code 用户数据下通常为 `~/Library/Application Support/Cod
 | 退出 IDE / 移除 Flutter 工作区 | 断开 VM 或退出后台引擎，释放断点并清理本会话转发；规则、API 目录和历史保留 |
 | 撤销接入 | 恢复向导记录的项目补丁；不会替你移除手机系统代理或证书 |
 
-使用 helper 时，去掉 `--dart-define=API_MOCK_PROXY=...` 并停止、重新运行应用，即可恢复直接联网。已创建的 `HttpClient` 不会在 IDE 停止代理后自动切换为直连。
+使用 helper 时，去掉 `--dart-define=FLUTTER_PILOT_PROXY=...` 并停止、重新运行应用，即可恢复直接联网。已创建的 `HttpClient` 不会在 IDE 停止代理后自动切换为直连。
 
 使用系统代理时，在设备 Wi-Fi 设置中恢复 **无代理 / 关闭**，按需移除调试 CA。引擎崩溃或 IDE 关闭后，如果客户端仍指向代理，可能暂时无法联网，按上述步骤恢复。
 
@@ -617,7 +619,7 @@ adb -s YOUR_ANDROID_SERIAL reverse --remove tcp:8080
 | API 目录有条目但没有请求历史 | 目录独立保留，对应历史可能已过期或清空；再次请求后会出现新记录 |
 | 删除的 API 后来又出现 | 同一 API 被再次调用后会自动重新发现，删除目录不禁用采集 |
 | 重启后历史看不到 | 确认同一 IDE、项目 UUID、目录和接入模式，检查保留策略；复制或移动目录不会共享旧路径历史。VM 历史不需初始化引擎，代理历史需对应引擎可用 |
-| 找不到 `.api-mocks/` | 确认当前工作区受信任、目录可写且插件已初始化；升级后重新加载窗口，再打开工作台查看项目绑定卡或输出日志 |
+| 找不到 `.flutter-pilot/` | 确认当前工作区受信任、目录可写且插件已初始化；升级后重新加载窗口，再打开工作台查看项目绑定卡或输出日志 |
 | 提示项目规则文件已被修改 | 保存外部编辑，点击 **连接与诊断 → 读取项目文件**，再继续在工作台编辑 |
 | 修改项目配置后没有变化 | 规则和名称可重新读取；接入方式及采集参数需重新加载窗口，UUID 改动也需建立新会话 |
 
@@ -665,7 +667,7 @@ npm run test:ui
 
 ```sh
 MITMDUMP=/absolute/path/to/mitmdump npm run test:proxy
-API_MOCK_SQLITE_CLI=1 python3 -m unittest discover -s tests/proxy -p test_storage.py -v
+FLUTTER_PILOT_SQLITE_CLI=1 python3 -m unittest discover -s tests/proxy -p test_storage.py -v
 ```
 
 不设置 `MITMDUMP` 时，真实集成测试会跳过，不能把跳过计为通过。Python 是源码测试驱动的要求，安装后的插件运行不依赖用户 Python。
@@ -676,11 +678,11 @@ IDE 测试脚本使用 `/Applications` 下的 VS Code / Cursor，运行独立临
 
 ```sh
 npm run build
-API_MOCK_TEST_ENGINE=/absolute/path/to/mitmdump npm run test:ide
-API_MOCK_TEST_ENGINE=/absolute/path/to/mitmdump API_MOCK_TEST_IDE=cursor npm run test:ide
+FLUTTER_PILOT_TEST_ENGINE=/absolute/path/to/mitmdump npm run test:ide
+FLUTTER_PILOT_TEST_ENGINE=/absolute/path/to/mitmdump FLUTTER_PILOT_TEST_IDE=cursor npm run test:ide
 ```
 
-可用 `API_MOCK_TEST_EXTENSION_PATH` 指向解压 VSIX 中的 `extension/`，验证打包产物。测试宿主会实际打开 IDE 窗口。
+可用 `FLUTTER_PILOT_TEST_EXTENSION_PATH` 指向解压 VSIX 中的 `extension/`，验证打包产物。测试宿主会实际打开 IDE 窗口。
 
 Flutter 示例检查：
 
@@ -704,7 +706,7 @@ python3 tool/device_smoke.py --mitmdump /absolute/path/to/mitmdump --ios YOUR_SI
 
 ```sh
 npm run package
-shasum -a 256 artifacts/flutter-api-mocks-0.0.7.vsix
+shasum -a 256 artifacts/flutter-pilot-0.0.7.vsix
 ```
 
 VSIX 包含扩展构建产物、VM 注入模板、代理 addon、引擎清单及文档，不包含 Node 开发依赖、Flutter 示例构建结果或真实证书。首次引擎下载单独发生。源码中的 README 修改后，应重新打包，安装包内的文档才会更新。

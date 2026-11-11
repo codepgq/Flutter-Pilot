@@ -7,8 +7,8 @@ import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 
 const root = resolve('.');
-const ide = process.env.API_MOCK_TEST_IDE || 'cursor';
-if (!['cursor', 'vscode'].includes(ide)) throw new Error('API_MOCK_TEST_IDE must be cursor or vscode');
+const ide = process.env.FLUTTER_PILOT_TEST_IDE || 'cursor';
+if (!['cursor', 'vscode'].includes(ide)) throw new Error('FLUTTER_PILOT_TEST_IDE must be cursor or vscode');
 const executable =
   ide === 'cursor'
     ? '/Applications/Cursor.app/Contents/MacOS/Cursor'
@@ -16,9 +16,9 @@ const executable =
 const appVersion = JSON.parse(
   await readFile(resolve(executable, '..', '..', 'Resources', 'app', 'package.json'), 'utf8'),
 ).version;
-const flutter = process.env.API_MOCK_TEST_FLUTTER || '/Users/mark.pan/fvm/default/bin/flutter';
-const device = process.env.API_MOCK_TEST_DEVICE || '9EB23D45-AF43-4952-BAE8-100CE01EDD46';
-const temp = await mkdtemp(join(tmpdir(), `api-mocks-${ide}-discovery-`));
+const flutter = process.env.FLUTTER_PILOT_TEST_FLUTTER || '/Users/mark.pan/fvm/default/bin/flutter';
+const device = process.env.FLUTTER_PILOT_TEST_DEVICE || '9EB23D45-AF43-4952-BAE8-100CE01EDD46';
+const temp = await mkdtemp(join(tmpdir(), `flutter-pilot-${ide}-discovery-`));
 const workspace = join(temp, 'flutter-fixture');
 const user = join(temp, 'user');
 const extensions = join(temp, 'extensions');
@@ -28,7 +28,7 @@ await cp(join(root, 'examples', 'flutter'), workspace, {
   filter: (source) =>
     !source
       .split('/')
-      .some((segment) => ['build', '.dart_tool', '.api-mocks', 'Pods', '.symlinks'].includes(segment)),
+      .some((segment) => ['build', '.dart_tool', '.flutter-pilot', 'Pods', '.symlinks'].includes(segment)),
 });
 await mkdir(join(user, 'User'), { recursive: true });
 await mkdir(extensions, { recursive: true });
@@ -50,8 +50,8 @@ await writeFile(
     'dart.checkForSdkUpdates': false,
     'dart.showDevToolsOptionsNotification': false,
     'dart.openDevTools': 'never',
-    'flutterApiMocks.autoConnectVm': true,
-    'flutterApiMocks.enginePath': '',
+    'flutterPilot.autoConnectVm': true,
+    'flutterPilot.enginePath': '',
   }),
 );
 function command(file, args, cwd) {
@@ -118,15 +118,15 @@ try {
     extensionDevelopmentPath: root,
     extensionTestsPath: join(root, 'tests', 'ide', 'vm-discovery-smoke.cjs'),
     extensionTestsEnv: {
-      API_MOCK_TEST_IDE: ide,
-      API_MOCK_TEST_IDE_APP_VERSION: appVersion,
-      API_MOCK_TEST_FLUTTER: flutter,
-      API_MOCK_TEST_DEVICE: device,
-      API_MOCK_TEST_DISCOVERY_BUNDLE: discoveryBundle,
-      API_MOCK_TEST_DISCOVERY_REPORT: reportPath,
-      API_MOCK_TEST_SOURCE_HASH: sourceHash,
-      API_MOCK_TEST_FLUTTER_VERSION: version.frameworkVersion,
-      API_MOCK_TEST_DART_VERSION: version.dartSdkVersion,
+      FLUTTER_PILOT_TEST_IDE: ide,
+      FLUTTER_PILOT_TEST_IDE_APP_VERSION: appVersion,
+      FLUTTER_PILOT_TEST_FLUTTER: flutter,
+      FLUTTER_PILOT_TEST_DEVICE: device,
+      FLUTTER_PILOT_TEST_DISCOVERY_BUNDLE: discoveryBundle,
+      FLUTTER_PILOT_TEST_DISCOVERY_REPORT: reportPath,
+      FLUTTER_PILOT_TEST_SOURCE_HASH: sourceHash,
+      FLUTTER_PILOT_TEST_FLUTTER_VERSION: version.frameworkVersion,
+      FLUTTER_PILOT_TEST_DART_VERSION: version.dartSdkVersion,
     },
     launchArgs: [
       workspace,

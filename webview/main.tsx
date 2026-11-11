@@ -23,7 +23,7 @@ declare global {
       getState?: () => { catalogCollapsed?: boolean } | undefined;
       setState?: (state: { catalogCollapsed?: boolean }) => void;
     };
-    __API_MOCK_TEST__?: boolean;
+    __FLUTTER_PILOT_TEST__?: boolean;
   }
 }
 const vscode = window.acquireVsCodeApi?.();
@@ -31,7 +31,7 @@ let viewPreferences = vscode?.getState?.() ?? {};
 function send(action: string, payload: unknown = {}) {
   vscode?.postMessage({ action, payload });
 }
-const settingsHref = `command:workbench.action.openSettings?${encodeURIComponent(JSON.stringify(['@ext:api-mocks.flutter-api-mocks']))}`;
+const settingsHref = `command:workbench.action.openSettings?${encodeURIComponent(JSON.stringify(['@ext:flutter-pilot.flutter-pilot']))}`;
 const initial: WorkbenchState = {
   mode: 'vm',
   rules: [],
@@ -361,7 +361,7 @@ function App() {
         <div className="brand">
           <Icon name="radar" size={18} />
           <div>
-            <h1>API Mocks</h1>
+            <h1>Flutter Pilot</h1>
           </div>
         </div>
         <span className="header-project" title={state.workspace}>
@@ -721,8 +721,9 @@ function VmConnection({ state }: { state: WorkbenchState }) {
       </section>
       {state.proxyActive && (
         <div className="notice">
-          旧代理仍在运行。要验证纯 VM 接入，请先用不含 API_MOCK_PROXY 的原启动项重新运行 App，再停止旧代理。
-          规则共用，保存改动也会同步到仍在运行的代理；关闭运行时 Dio Mock 只移除 VM 拦截器。
+          旧代理仍在运行。要验证纯 VM 接入，请先用不含 FLUTTER_PILOT_PROXY 的原启动项重新运行
+          App，再停止旧代理。 规则共用，保存改动也会同步到仍在运行的代理；关闭运行时 Dio Mock 只移除 VM
+          拦截器。
           <div className="card-actions">
             <Button action="proxy.stop">停止旧代理</Button>
           </div>
@@ -760,7 +761,7 @@ function Connection({
       }
     | undefined;
   const port = state.engine.proxyPort ?? 8080;
-  const command = `flutter run --dart-define=API_MOCK_PROXY=${state.connectionHost}:${port}`;
+  const command = `flutter run --dart-define=FLUTTER_PILOT_PROXY=${state.connectionHost}:${port}`;
   if (state.mode !== 'proxy')
     return (
       <div className="connection-page">

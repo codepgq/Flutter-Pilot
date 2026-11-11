@@ -52,7 +52,7 @@ async function fixture(
     workspace,
     name: workspaceName,
     sessionId: workspaceName,
-    describe: () => ({ connected: true, rulesFiles: ['.api-mocks/rules.json'] }),
+    describe: () => ({ connected: true, rulesFiles: ['.flutter-pilot/rules.json'] }),
     call: call ?? (async (tool, args) => ({ tool, key: args.key ?? null })),
     onClient: (event) => events.push(event),
   });
@@ -90,6 +90,7 @@ describe('MCP local session transport', () => {
       const registry = join(root, 'sessions');
       if (registryState === 'unsafe') await mkdir(registry, { mode: 0o755 });
       const client = await connect(registry);
+      expect(client.getServerVersion()).toMatchObject({ name: 'flutter-pilot' });
       expect(client.getInstructions()).toBe(agentInstructions);
       expect(client.getServerCapabilities()).toMatchObject({ tools: {}, resources: {}, prompts: {} });
       const prompts = await client.listPrompts();
@@ -130,7 +131,7 @@ describe('MCP local session transport', () => {
         const result = await client.callTool({ name: 'get_usage_guide', arguments: { topic } });
         expect(result.isError).not.toBe(true);
         expect(result.structuredContent).toEqual(getUsageGuide(topic));
-        const resource = await client.readResource({ uri: `flutter-api-mocks://guides/${topic}` });
+        const resource = await client.readResource({ uri: `flutter-pilot://guides/${topic}` });
         expect(resource.contents).toHaveLength(1);
         expect(resource.contents[0].mimeType).toBe('application/json');
         const content = resource.contents[0];
@@ -154,7 +155,7 @@ describe('MCP local session transport', () => {
     });
     const client = await connect(f.registryRoot, f.workspace);
     await client.callTool({ name: 'get_usage_guide', arguments: { topic: 'http' } });
-    await client.readResource({ uri: 'flutter-api-mocks://guides/ui' });
+    await client.readResource({ uri: 'flutter-pilot://guides/ui' });
     await client.listPrompts();
     await client.getPrompt({ name: 'flutter_ui' });
     expect(calls).toBe(0);
@@ -285,7 +286,7 @@ describe('MCP local session transport', () => {
 
   it('self-test handshake never claims an Agent loaded the configuration', async () => {
     const f = await fixture();
-    const client = await connect(f.registryRoot, f.workspace, 'flutter-api-mocks-selftest');
+    const client = await connect(f.registryRoot, f.workspace, 'flutter-pilot-selftest');
     await client.callTool({ name: 'list_sessions', arguments: {} });
     expect(f.events).toEqual([]);
   });

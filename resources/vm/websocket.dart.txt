@@ -12,7 +12,7 @@
     final messages = List<dynamic>.from(state['queue']);
     final omitted = state['omitted'];
     state['queue'].clear(); state['queuedBytes'] = 0; state['omitted'] = 0;
-    try { emitEvent('api_mocks.vm.ws', {'session': state['session'], 'messages': messages, 'omitted': omitted}); } catch (_) {}
+    try { emitEvent('flutter_pilot.vm.ws', {'session': state['session'], 'messages': messages, 'omitted': omitted}); } catch (_) {}
   }
   void enqueue(dynamic message) {
     final size = (message['original'] as String).length * 3 + ((message['effective'] ?? '') as String).length * 3 + 512;

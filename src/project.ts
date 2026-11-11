@@ -37,7 +37,7 @@ const ranges = {
   breakpointTimeout: [10, 300],
 } as const;
 function invalid(message: string): never {
-  throw new Error(`项目配置无效：${message}。请检查 .api-mocks/project.json`);
+  throw new Error(`项目配置无效：${message}。请检查 .flutter-pilot/project.json`);
 }
 function port(value: unknown) {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1024 && value <= 65535;
@@ -86,7 +86,7 @@ function validateConfig(value: unknown): ProjectConfig {
 async function checkDirectory(directory: string): Promise<void> {
   const info = await lstat(directory);
   if (!info.isDirectory() || info.isSymbolicLink())
-    throw new Error('.api-mocks 必须是项目内的普通目录，不能使用符号链接');
+    throw new Error('.flutter-pilot 必须是项目内的普通目录，不能使用符号链接');
 }
 async function readText(file: string, limit: number): Promise<string | undefined> {
   try {
@@ -109,7 +109,7 @@ function parseJson(text: string, label: string): unknown {
 }
 async function readProject(file: string): Promise<ProjectConfig | undefined> {
   const text = await readText(file, 1024 * 1024);
-  return text === undefined ? undefined : validateConfig(parseJson(text, '.api-mocks/project.json'));
+  return text === undefined ? undefined : validateConfig(parseJson(text, '.flutter-pilot/project.json'));
 }
 async function createOnce(directory: string, file: string, content: string): Promise<void> {
   await checkDirectory(directory);
@@ -164,7 +164,7 @@ export class ProjectBinding {
       await checkDirectory(this.directory);
       const before = await readText(this.file, 1024 * 1024);
       if (before === undefined) throw new Error('项目绑定文件已移除，请重新打开工作区初始化');
-      const fresh = validateConfig(parseJson(before, '.api-mocks/project.json'));
+      const fresh = validateConfig(parseJson(before, '.flutter-pilot/project.json'));
       if (fresh.projectId !== this.projectId)
         throw new Error('项目 UUID 已变更，请重新打开工作区以切换数据绑定');
       const patch = Object.fromEntries(
@@ -194,7 +194,7 @@ export async function openProjectBinding(
   legacyStoragePath: string,
 ): Promise<ProjectBinding> {
   const root = await realpath(workspacePath);
-  const directory = join(root, '.api-mocks');
+  const directory = join(root, '.flutter-pilot');
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await checkDirectory(directory);
   const file = join(directory, 'project.json');
@@ -250,9 +250,9 @@ export async function openProjectBinding(
     rules = await readText(rulesFile, 64 * 1024 * 1024);
   }
   try {
-    validateRuleDocument(parseJson(rules!, '.api-mocks/rules.json'));
+    validateRuleDocument(parseJson(rules!, '.flutter-pilot/rules.json'));
   } catch {
-    throw new Error('.api-mocks/rules.json 无效，请修复后重新打开工作区；不会覆盖已有规则');
+    throw new Error('.flutter-pilot/rules.json 无效，请修复后重新打开工作区；不会覆盖已有规则');
   }
   return new ProjectBinding(directory, config);
 }

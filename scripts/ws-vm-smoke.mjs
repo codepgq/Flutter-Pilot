@@ -11,7 +11,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const root = resolve('.');
-const temp = await mkdtemp(join(tmpdir(), 'api-mocks-ws-vm-'));
+const temp = await mkdtemp(join(tmpdir(), 'flutter-pilot-ws-vm-'));
 const dart = process.env.DART ?? 'dart';
 const children = [];
 const servers = [];
@@ -63,7 +63,7 @@ try {
       '-days',
       '1',
       '-subj',
-      '/CN=API Mocks Test Root',
+      '/CN=Flutter Pilot Test Root',
       '-addext',
       'basicConstraints=critical,CA:TRUE',
       '-addext',

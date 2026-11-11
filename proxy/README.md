@@ -35,7 +35,7 @@
 
 ```sh
 python3 -m unittest discover -s tests/proxy -p 'test_*.py' -v
-API_MOCK_SQLITE_CLI=1 python3 -m unittest discover -s tests/proxy -p 'test_storage.py' -v
+FLUTTER_PILOT_SQLITE_CLI=1 python3 -m unittest discover -s tests/proxy -p 'test_storage.py' -v
 MITMDUMP=/绝对路径/mitmdump python3 -m unittest discover -s tests/proxy -p 'test_*.py' -v
 ```
 

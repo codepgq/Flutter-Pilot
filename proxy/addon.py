@@ -1,4 +1,4 @@
-"""API Mocks' mitmproxy addon. Requires only the bundled engine and Python stdlib.
+"""Flutter Pilot' mitmproxy addon. Requires only the bundled engine and Python stdlib.
 
 The IDE owns the loopback control listener. This process authenticates to it and
 keeps proxy traffic, CA material and history isolated from the public UI channel.
@@ -32,7 +32,7 @@ def _now():
     return int(time.time() * 1000)
 
 
-class ApiMocksAddon:
+class FlutterPilotAddon:
     def __init__(self):
         self.rules = []
         self.revision = 0
@@ -48,9 +48,9 @@ class ApiMocksAddon:
         self.interactive = False
 
     def load(self, loader):
-        raw = json.loads(os.environ.get("API_MOCK_SETTINGS", "{}"))
+        raw = json.loads(os.environ.get("FLUTTER_PILOT_SETTINGS", "{}"))
         if not isinstance(raw, dict):
-            raise ValueError("API_MOCK_SETTINGS must be an object")
+            raise ValueError("FLUTTER_PILOT_SETTINGS must be an object")
         self.settings = {
             "retentionDays": max(1, min(365, int(raw.get("retentionDays", 7)))),
             "maxRecords": max(1, min(100000, int(raw.get("maxRecords", 10000)))),
@@ -58,9 +58,9 @@ class ApiMocksAddon:
             "breakpointTimeout": max(10, min(300, float(raw.get("breakpointTimeout", 60)))),
         }
         self.max_body = self.settings["maxBodyBytes"]
-        folder = os.environ.get("API_MOCK_STORAGE")
-        if not folder or not os.environ.get("API_MOCK_CONTROL_TOKEN"):
-            raise ValueError("API Mocks requires private storage and control token")
+        folder = os.environ.get("FLUTTER_PILOT_STORAGE")
+        if not folder or not os.environ.get("FLUTTER_PILOT_CONTROL_TOKEN"):
+            raise ValueError("Flutter Pilot requires private storage and control token")
         self.store = HistoryStore(folder, self.settings["retentionDays"], self.settings["maxRecords"])
 
     async def running(self):
@@ -94,7 +94,7 @@ class ApiMocksAddon:
                 if "id" in value:
                     payload = (json.dumps({"id": value["id"], "error": {"message": "该记录的 JSON 转义后体积超过控制帧上限，请减小正文保存上限后重新抓取"}}, ensure_ascii=False) + "\n").encode("utf-8")
                 else:
-                    ctx.log.warn("API Mocks event exceeds the control frame limit")
+                    ctx.log.warn("Flutter Pilot event exceeds the control frame limit")
                     return False
             self.writer.write(payload)
             return True
@@ -105,9 +105,9 @@ class ApiMocksAddon:
         while not self.stopping:
             writer = None
             try:
-                reader, writer = await asyncio.open_connection("127.0.0.1", int(os.environ["API_MOCK_CONTROL_PORT"]), limit=max(MAX_CONTROL_LINE, self.max_body * 10 + 1024 * 1024))
+                reader, writer = await asyncio.open_connection("127.0.0.1", int(os.environ["FLUTTER_PILOT_CONTROL_PORT"]), limit=max(MAX_CONTROL_LINE, self.max_body * 10 + 1024 * 1024))
                 self.writer = writer
-                self._send({"event": "hello", "protocolVersion": PROTOCOL_VERSION, "token": os.environ["API_MOCK_CONTROL_TOKEN"]})
+                self._send({"event": "hello", "protocolVersion": PROTOCOL_VERSION, "token": os.environ["FLUTTER_PILOT_CONTROL_TOKEN"]})
                 self.emit("ready", self._health())
                 await writer.drain()
                 delay = 0.25
@@ -129,13 +129,13 @@ class ApiMocksAddon:
                     except (ValueError, KeyError, TypeError) as exc:
                         self._send({"id": request_id, "error": {"message": str(exc)}})
                     except Exception as exc:
-                        ctx.log.error("API Mocks command error: %s" % exc)
+                        ctx.log.error("Flutter Pilot command error: %s" % exc)
                         self._send({"id": request_id, "error": {"message": str(exc)}})
                     await writer.drain()
             except asyncio.CancelledError:
                 break
             except (OSError, ValueError, ConnectionError) as exc:
-                ctx.log.debug("API Mocks control reconnect: %s" % exc)
+                ctx.log.debug("Flutter Pilot control reconnect: %s" % exc)
             finally:
                 if self.writer is writer:
                     self.writer = None
@@ -224,7 +224,7 @@ class ApiMocksAddon:
         raise ValueError("未知命令: " + method)
 
     def _body(self, message, flow, stage):
-        capture = flow.metadata.get("api_mocks.capture." + stage)
+        capture = flow.metadata.get("flutter_pilot.capture." + stage)
         streamed = capture is not None
         decoding_limitation = None
         undecoded = False
@@ -321,7 +321,7 @@ class ApiMocksAddon:
 
     def _set_stream(self, flow, message, stage):
         capture = {"prefix": bytearray(), "total": 0}
-        flow.metadata["api_mocks.capture." + stage] = capture
+        flow.metadata["flutter_pilot.capture." + stage] = capture
 
         def capture_chunk(chunk):
             capture["total"] += len(chunk)
@@ -340,18 +340,18 @@ class ApiMocksAddon:
             await self._process_request(flow)
 
     async def request(self, flow):
-        if not flow.metadata.get("api_mocks.request_processed"):
+        if not flow.metadata.get("flutter_pilot.request_processed"):
             await self._process_request(flow)
         else:
             self._refresh_stream_snapshots(flow, "request")
 
     async def _process_request(self, flow):
-        if flow.metadata.get("api_mocks.request_processed"):
+        if flow.metadata.get("flutter_pilot.request_processed"):
             return
-        flow.metadata["api_mocks.request_processed"] = True
+        flow.metadata["flutter_pilot.request_processed"] = True
         entry = self._ensure_entry(flow)
         if not ctx.options.server:
-            flow.response = http.Response.make(503, b"API Mocks proxy is paused. Disable the client proxy to connect directly.", {"Content-Type": "text/plain", "Connection": "close"})
+            flow.response = http.Response.make(503, b"Flutter Pilot proxy is paused. Disable the client proxy to connect directly.", {"Content-Type": "text/plain", "Connection": "close"})
             return
         rule = select_rule(self.rules, entry["originalRequest"], "request")
         if rule:
@@ -380,16 +380,16 @@ class ApiMocksAddon:
             await self._process_response(flow)
 
     async def response(self, flow):
-        if not flow.metadata.get("api_mocks.response_processed"):
+        if not flow.metadata.get("flutter_pilot.response_processed"):
             await self._process_response(flow)
         else:
             self._refresh_stream_snapshots(flow, "response")
         self._finish(flow)
 
     async def _process_response(self, flow):
-        if flow.metadata.get("api_mocks.response_processed") or not flow.response:
+        if flow.metadata.get("flutter_pilot.response_processed") or not flow.response:
             return
-        flow.metadata["api_mocks.response_processed"] = True
+        flow.metadata["flutter_pilot.response_processed"] = True
         entry = self._ensure_entry(flow)
         entry["originalResponse"] = self._snapshot(flow.response, flow, "response")
         rule = select_rule(self.rules, entry["originalRequest"], "response")
@@ -402,7 +402,7 @@ class ApiMocksAddon:
         entry["response"] = self._snapshot(flow.response, flow, "response")
 
     def _refresh_stream_snapshots(self, flow, stage):
-        if "api_mocks.capture." + stage not in flow.metadata:
+        if "flutter_pilot.capture." + stage not in flow.metadata:
             return
         entry = self.entries.get(flow.id)
         if not entry:
@@ -559,4 +559,4 @@ class ApiMocksAddon:
         self.emit("history", {"id": flow.id})
 
 
-addons = [ApiMocksAddon()]
+addons = [FlutterPilotAddon()]

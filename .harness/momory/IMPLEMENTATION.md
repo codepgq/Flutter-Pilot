@@ -1,5 +1,11 @@
 # 实现与验证结论
 
+## Flutter Pilot 完整更名（2026-11-11）
+
+- 用户确认直接切换、不兼容旧配置。显示名 Flutter Pilot，扩展 ID flutter-pilot.flutter-pilot，MCP flutter-pilot，命令/设置 flutterPilot，项目目录 .flutter-pilot，代理参数 FLUTTER_PILOT_PROXY；桥接根目录、规则导出、helper、VM事件及示例同时更新。
+- 版本保持 0.0.7；357 项 Vitest、37 项 UI、示例 3 项 Widget 测试、类型/格式/构建通过。真实 Dart Debug VM 的 HTTP/Dio 21 项、WS/WSS 两种传输及 MCP 链路通过。Python 17 项通过，19 项引擎集成跳过。
+- 新包 artifacts/flutter-pilot-0.0.7.vsix；包一致性与 SDK stdio 报告 artifacts/flutter-pilot-rename-report.json。未提交、安装、发布、启动 IDE GUI 或修改真实 Agent 配置；原历史截图和报告保留事实。
+
 ## 0.0.7 发布（2026-11-10）
 
 - 用户要求提交、发布及安装Cursor；manifest、lockfile、MCP serverInfo、打包路径、README和CHANGELOG升为0.0.7。包含21个工具的独立同名Prompts及覆盖检查，共25个提示词。
