@@ -1,5 +1,26 @@
 # 实现与验证结论
 
+## 0.0.10 发布与 Cursor 安装（2026-11-11）
+
+- 用户要求发布新版本、推送GitHub并安装Cursor，沿用记忆中的补丁版本与VSIX流程，包含API规则配置标签、API最新详情自动刷新及Mock运行时恢复修复。manifest、lockfile、MCP版本、README、CHANGELOG与打包路径统一0.0.10。
+- 类型检查、全仓格式、构建与打包通过；402项Vitest、53项Playwright全部通过。首次沙箱单测因本机监听受限失败，允许测试监听后全量通过。
+- Cursor CLI --force安装成功，28个分发文件与当前源码/构建、VSIX及安装目录逐项一致，manifest仅排除Cursor安装元数据。构建和安装桥接均通过真实SDK stdio：0.0.10、21工具、25 Prompts、5资源及离线指南。报告artifacts/v0.0.10-install-report.json，安装包artifacts/flutter-pilot-0.0.10.vsix。
+- 发布前fetch确认origin/main与HEAD一致；按授权提交main并常规推送origin/main。不发布商店、不启动IDE GUI、不强制重载窗口。用户活动窗口需方便时Reload Window并重连MCP；真实IDE热重启恢复尚未复验。
+
+## Mock 接入状态与 API 最新详情（2026-11-11）
+
+- EXIO 最新未命中记录的最终响应确为INDIVIDUAL，较早同规则存在MARKET_MAKER命中；重载原有规则后，通过正常账户页导航触发的新请求，mocked=true、requestRuleId=account-market-maker、最终userType=MARKET_MAKER，RWA列表警告恢复。未修改账户Mock正文或业务代码，不能据此断言每个启动首请求都会被拦截。
+- `reloadHistory` 同步已选API最新记录，按API标识及请求代次保护异步回写；历史单次详情保持固定，删除当前API清除选择。补新请求后INDIVIDUAL→MARKET_MAKER更新、切换历史时迟到正文不覆盖的集成测试。
+- VM Isolate更换即清除旧instances，自动为仍开启的Mock重新接入；同步失败及心跳失败清计数并恢复观察，旧Isolate在途同步结果不能回写成功。新增外部重启自动恢复及同步失败状态测试，旧实现两项失败、修复后通过。
+- 修复副本完整402项Vitest通过，相关5文件103项通过，TypeScript（含Webview）、修改文件格式及构建通过。新源码尚未加载到用户活动Cursor窗口，未自动安装或重载。
+
+## API 规则配置 tag（2026-11-11）
+
+- webview/api-rules.ts 按启用规则的方法、域名与 fnmatch 路径匹配目录，按类型和是否附加条件聚合，优先级稳定排序。提取原 VM globRegex 至 src/glob.ts 共用，保留原导出与运行时行为。
+- API 列表域名旁显示首类及 +N，概览展示全部类别；tooltip 含名称、优先级及条件字段名，不展示请求头值。条件以虚线边框和“条件”文字标识，提示实际命中按阶段优先级且需开启运行时功能。
+- 类型检查、构建、12 项相关 Vitest 与 46 项工作台 Playwright 全部通过；修改文件 Prettier 与 git diff --check 通过。首次 UI 测试受沙箱本机监听 EPERM 限制，允许本机测试服务器后通过。覆盖规则编辑、启停、删除、无历史、各操作类型、通配符及查询/请求头条件。
+- artifacts/api-rule-tags-{1280,680,390}.png 为合成截图；已目视检查 1280 和 390，tag 可见、无横向溢出、保持紧凑。未运行真实 IDE/App 验收，未打包、安装或提交。
+
 ## 0.0.9 发布与 Cursor 安装（2026-11-11）
 
 - 用户授权提交全部当前改动、发布新版本、安装 Cursor 并推送远端；manifest、lockfile、MCP serverInfo、README、CHANGELOG和VSIX路径同步为0.0.9，交付API请求与历史独立Tab及全宽列表。

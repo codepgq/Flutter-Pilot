@@ -67,8 +67,20 @@ export class VmSession extends EventEmitter {
       if (this.state.status === 'disconnected') return;
       this.isolateIds = ids;
       this.state.isolates = ids.length;
+      // Counts from the previous isolate must not advertise a live attachment.
+      this.state.instances = 0;
       this.lastDiscovery = 0;
       this.changed();
+      if (this.state.mockEnabled) {
+        const generation = this.generation;
+        void this.enqueue(async () => {
+          if (generation !== this.generation || this.state.status !== 'connected' || !this.state.mockEnabled)
+            return;
+          await this.profiler.setCaptureEnabled(this.state.captureEnabled !== false);
+          await this.injector.heartbeat();
+          await this.syncInternal();
+        }).catch(() => this.warn('应用 Isolate 已变化，Mock 尚未确认重新接入；请重新发现并同步。'));
+      }
     });
     this.profiler.on('warning', (message: string) => this.warn(message));
     this.client.on('disconnected', () => {
@@ -261,19 +273,28 @@ export class VmSession extends EventEmitter {
   }
   private async syncInternal() {
     this.syncing = true;
+    const generation = this.generation;
+    const isolateIds = [...this.isolateIds];
     try {
       let instances = 0;
       const warnings: string[] = [];
-      for (const id of this.isolateIds) {
+      for (const id of isolateIds) {
         const result = await this.injector.sync(id, this.rules);
         instances += result.instances;
         warnings.push(...result.warnings);
       }
+      if (generation !== this.generation || isolateIds.join(',') !== this.isolateIds.join(','))
+        throw new Error('VM Isolate 已变化，等待重新同步 Mock');
       this.state.instances = instances;
       await this.profiler.setCaptureEnabled(this.state.captureEnabled !== false && instances === 0);
       for (const warning of warnings) this.warn(warning);
       this.lastDiscovery = Date.now();
       if (!instances) this.warn('尚未找到可接入的 Dio 实例；请先让应用创建 Dio，再点击“重新发现并同步”。');
+    } catch (error) {
+      this.state.instances = 0;
+      this.lastDiscovery = 0;
+      await this.profiler.setCaptureEnabled(this.state.captureEnabled !== false).catch(() => undefined);
+      throw error;
     } finally {
       this.syncing = false;
       this.changed();
@@ -320,6 +341,9 @@ export class VmSession extends EventEmitter {
         if (Date.now() - this.lastDiscovery >= 6000) await this.syncInternal();
       });
     } catch {
+      this.state.instances = 0;
+      this.lastDiscovery = 0;
+      await this.profiler.setCaptureEnabled(this.state.captureEnabled !== false).catch(() => undefined);
       this.warn('VM Mock 心跳或同步失败；未续约的规则将自动旁路，请重新连接检查。');
     } finally {
       this.tickPending = false;

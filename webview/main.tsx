@@ -16,6 +16,7 @@ import './style.css';
 import { inspectJson } from './body';
 import { WebSocketPanel } from './websocket';
 import { McpPanel } from './mcp';
+import { apiRuleTags, type ApiRuleTag } from './api-rules';
 
 declare global {
   interface Window {
@@ -1023,6 +1024,31 @@ function Connection({
 function apiKey(api: Pick<ApiCatalogEntry, 'method' | 'host' | 'path'>) {
   return `${api.method} ${api.host}${api.path}`;
 }
+function ApiRuleTags({ tags, compact = false }: { tags: ApiRuleTag[]; compact?: boolean }) {
+  if (!tags.length) return null;
+  return (
+    <span className="api-rule-tags" aria-label="已启用的匹配规则">
+      {(compact ? tags.slice(0, 1) : tags).map((tag) => (
+        <span
+          key={`${tag.kind}:${tag.conditional}`}
+          className={`tag api-rule-tag ${tag.kind} ${tag.conditional ? 'conditional' : ''}`}
+          title={tag.title}
+        >
+          {tag.label}
+        </span>
+      ))}
+      {compact && tags.length > 1 && (
+        <span
+          className="tag api-rule-more"
+          title={tags.map((tag) => `${tag.label}\n${tag.title}`).join('\n\n')}
+          aria-label={`另有 ${tags.length - 1} 类规则，打开详情查看`}
+        >
+          +{tags.length - 1}
+        </span>
+      )}
+    </span>
+  );
+}
 function formatRequestTime(value?: number) {
   return value
     ? new Date(value).toLocaleString('zh-CN', {
@@ -1051,6 +1077,10 @@ function ApiCatalog({
   const [selectedKey, setSelectedKey] = useState('');
   const [detailFocused, setDetailFocused] = useState(false);
   const groups = useMemo(() => [...(state.apis ?? [])].sort((a, b) => b.lastAt - a.lastAt), [state.apis]);
+  const ruleTags = useMemo(
+    () => new Map(groups.map((api) => [apiKey(api), apiRuleTags(api, state.rules)])),
+    [groups, state.rules],
+  );
   const current = groups.find((api) => apiKey(api) === selectedKey);
   const record = selected && current && apiKey(selected) === selectedKey ? selected : undefined;
   const visible = groups.filter(
@@ -1115,9 +1145,12 @@ function ApiCatalog({
                     <Method method={api.method} />
                     <strong title={api.path}>{api.path}</strong>
                   </span>
-                  <small className="api-host" title={api.host}>
-                    {api.host}
-                  </small>
+                  <span className="api-host-info">
+                    <small className="api-host" title={api.host}>
+                      {api.host}
+                    </small>
+                    <ApiRuleTags tags={ruleTags.get(id) ?? []} compact />
+                  </span>
                   <b className="api-call-count">{api.count.toLocaleString()} 次</b>
                   <time className="api-last-seen" title={new Date(api.lastAt).toLocaleString('zh-CN')}>
                     {formatRequestTime(api.lastAt)}
@@ -1154,6 +1187,7 @@ function ApiCatalog({
                 </button>
               </div>
               <code>{apiKey(current)}</code>
+              <ApiRuleTags tags={ruleTags.get(selectedKey) ?? []} />
               <dl className="api-facts">
                 <div>
                   <dt>累计调用</dt>

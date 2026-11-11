@@ -476,6 +476,66 @@ for (const width of [1280, 760, 680, 390]) {
   });
 }
 
+test('API 规则 tag 随启停、修改和删除更新，清空历史不影响配置状态', async ({ page }) => {
+  await page.goto('/');
+  const redirect = {
+    ...rule,
+    id: 'redirect',
+    name: '订单转发',
+    priority: 20,
+    mock: undefined,
+    redirect: { url: '/v2/orders' },
+  };
+  const conditional = {
+    ...rule,
+    id: 'conditional',
+    name: '第一页订单',
+    match: { ...rule.match, query: { page: '1' } },
+  };
+  const overrides = { rules: [rule, redirect, conditional], history: { items: [], total: 0 } };
+  await state(page, overrides);
+  await page.getByRole('button', { name: 'API 请求' }).click();
+  const api = page.getByRole('button', { name: `查看 API GET ${entry.host}${entry.path}`, exact: true });
+  await expect(api.locator('.api-rule-tag')).toHaveText('转发');
+  await expect(api.locator('.api-rule-tag')).toHaveAttribute('title', /订单转发/);
+  await expect(api.locator('.api-rule-more')).toHaveText('+2');
+  await expect(api.locator('.api-rule-more')).toHaveAttribute('title', /第一页订单.*需满足查询参数：page/s);
+  await api.click();
+  const detail = page.locator('.api-detail-overview');
+  await expect(detail.locator('.api-rule-tag')).toHaveText(['转发', 'Mock', 'Mock · 条件']);
+  await state(page, { ...overrides, rules: [{ ...rule, enabled: false }, redirect] });
+  await expect(detail.locator('.api-rule-tag')).toHaveText(['转发']);
+  await expect(api.locator('.api-rule-more')).toHaveCount(0);
+  await state(page, { ...overrides, rules: [{ ...redirect, match: { path: '/other' } }] });
+  await expect(api.locator('.api-rule-tags')).toHaveCount(0);
+  await expect(detail.locator('.api-rule-tags')).toHaveCount(0);
+  await state(page, { ...overrides, rules: [] });
+  await expect(api.locator('.api-rule-tags')).toHaveCount(0);
+});
+
+test('API 规则 tag 在桌面和窄窗口保持紧凑且不溢出', async ({ page }) => {
+  await page.goto('/');
+  await state(page, {
+    rules: [{ ...rule, match: { ...rule.match, query: { page: '1' } } }],
+    apis: [fixture.apis[0], { ...fixture.apis[0], path: '/v1/other' }],
+  });
+  await page.getByRole('button', { name: 'API 请求' }).click();
+  for (const width of [1280, 680, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const row = page.locator('.api-group').first();
+    const tag = row.locator('.api-rule-tag');
+    await expect(tag).toHaveText('Mock · 条件');
+    await expect(tag).toBeVisible();
+    expect((await row.boundingBox())!.height).toBeLessThanOrEqual(68);
+    const rowBounds = (await row.boundingBox())!;
+    const tagBounds = (await tag.boundingBox())!;
+    expect(tagBounds.x + tagBounds.width).toBeLessThan(rowBounds.x + rowBounds.width - 20);
+    await expect(page.locator('.api-group').nth(1).locator('.api-rule-tags')).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: `artifacts/api-rule-tags-${width}.png`, fullPage: true });
+  }
+});
+
 test('目录删除只发送移除目录消息，保留请求历史', async ({ page }) => {
   await page.goto('/');
   await state(page);

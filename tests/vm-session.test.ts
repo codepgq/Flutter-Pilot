@@ -276,6 +276,34 @@ describe('VM session without a proxy engine', () => {
     expect(session.state.warnings).toContain('No compatible Dio');
   });
 
+  it('invalidates old attachment counts and automatically reattaches after an external restart', async () => {
+    const { session, profiler, injector } = fixture();
+    await session.connect('ws://127.0.0.1:1234/ws', [originalRule]);
+    await session.setMockEnabled(true);
+    const blocked = gate<{ instances: number; warnings: string[] }>();
+    injector.syncHook = async () => blocked.promise;
+    profiler.emit('isolates', ['isolates/restarted']);
+    expect(session.state.instances).toBe(0);
+    expect(session.state.mockEnabled).toBe(true);
+    await vi.waitFor(() =>
+      expect(injector.sync).toHaveBeenLastCalledWith('isolates/restarted', [originalRule]),
+    );
+    blocked.resolve({ instances: 1, warnings: [] });
+    await vi.waitFor(() => expect(session.state.instances).toBe(1));
+  });
+
+  it('does not keep claiming runtime attachment when rule synchronization fails', async () => {
+    const { session, profiler, injector } = fixture();
+    await session.connect('ws://127.0.0.1:1234/ws', [originalRule]);
+    await session.setMockEnabled(true);
+    injector.syncHook = async () => {
+      throw new Error('sync unavailable');
+    };
+    await expect(session.updateRules([originalRule])).rejects.toThrow('sync unavailable');
+    expect(session.state.instances).toBe(0);
+    expect(profiler.setCaptureEnabled).toHaveBeenLastCalledWith(true);
+  });
+
   it('stops profiling and clears runtime state on unexpected socket closure', async () => {
     const { session, client, profiler } = fixture();
     await session.connect('ws://127.0.0.1:1234/ws', [originalRule]);

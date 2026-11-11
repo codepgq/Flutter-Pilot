@@ -481,6 +481,66 @@ describe('后台采集与独立API目录控制', () => {
       limit: 30,
     });
   });
+  it('新请求到达时更新已选 API 的最终响应，历史详情仍固定在选中记录', async () => {
+    await open();
+    const engine = fake.engines[0];
+    const api = { method: 'POST', host: 'api.test', path: '/user/info' };
+    let detail = { ...api, id: 'before-mock', response: { status: 200, body: '{"userType":"INDIVIDUAL"}' } };
+    const original = engine.rpc.bind(engine);
+    vi.spyOn(engine, 'rpc').mockImplementation(async (...args: unknown[]) => {
+      const [method, params] = args as [string, any];
+      if (method === 'history.list' && params.limit === 1) return { items: [{ id: detail.id }], total: 2 };
+      if (method === 'history.get' && params.id === detail.id) return detail;
+      return original(method, params);
+    });
+    await message('api.select', api);
+    expect(latestSelected()).toEqual(detail);
+    detail = { ...api, id: 'after-mock', response: { status: 200, body: '{"userType":"MARKET_MAKER"}' } };
+    engine.emit('event', { event: 'history', data: { id: detail.id } });
+    await vi.waitFor(() => expect(latestSelected()).toEqual(detail));
+    detail = { ...detail, response: { status: 200, body: '{"userType":"MARKET_MAKER","updated":true}' } };
+    engine.emit('event', { event: 'history.updated', data: { id: detail.id } });
+    await vi.waitFor(() => expect(latestSelected()).toEqual(detail));
+    await message('history.select', { id: 'pinned-history' });
+    const pinned = latestSelected();
+    detail = { ...detail, id: 'later-request' };
+    engine.emit('event', { event: 'history', data: { id: detail.id } });
+    await vi.waitFor(() => expect(latest().state.busy).toBe(false));
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(latestSelected()).toEqual(pinned);
+  });
+
+  it('API 自动详情刷新在等待正文时切换到历史，不覆盖新选择', async () => {
+    await open();
+    const engine = fake.engines[0];
+    const api = { method: 'POST', host: 'api.test', path: '/user/info' };
+    let id = 'original';
+    let release!: (value: unknown) => void;
+    const blocked = new Promise((resolve) => {
+      release = resolve;
+    });
+    let fetching = false;
+    const original = engine.rpc.bind(engine);
+    vi.spyOn(engine, 'rpc').mockImplementation(async (...args: unknown[]) => {
+      const [method, params] = args as [string, any];
+      if (method === 'history.list' && params.limit === 1) return { items: [{ id }], total: 2 };
+      if (method === 'history.get' && params.id === 'new-request') {
+        fetching = true;
+        return blocked;
+      }
+      return original(method, params);
+    });
+    await message('api.select', api);
+    id = 'new-request';
+    engine.emit('event', { event: 'history', data: { id } });
+    await vi.waitFor(() => expect(fetching).toBe(true));
+    await message('history.select', { id: 'pinned-history' });
+    const pinned = latestSelected();
+    release({ ...api, id: 'new-request' });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(latestSelected()).toEqual(pinned);
+  });
+
   it('API 没有历史时清除旧详情，不额外读取完整请求', async () => {
     await open();
     const engine = fake.engines[0];

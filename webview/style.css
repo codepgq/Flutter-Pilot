@@ -2777,6 +2777,45 @@ footer {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.api-host-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.api-host-info > .api-host {
+  min-width: 0;
+}
+.api-rule-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.api-rule-tags .tag {
+  padding: 0 4px;
+  font-size: 9px;
+  line-height: 16px;
+}
+.api-rule-tag {
+  color: var(--focus);
+  background: color-mix(in srgb, var(--focus) 8%, transparent);
+  border-color: color-mix(in srgb, var(--focus) 30%, var(--line));
+}
+.api-rule-tag.redirect,
+.api-rule-tag.breakpoint {
+  color: var(--vscode-editorWarning-foreground, #b58b35);
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  border-color: color-mix(in srgb, currentColor 30%, var(--line));
+}
+.api-rule-tag.conditional {
+  border-style: dashed;
+}
+.api-detail-overview > .api-rule-tags {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
 .api-call-count,
 .api-last-seen {
   font-size: 10px;
@@ -2968,9 +3007,11 @@ footer {
     grid-column: 2;
     grid-row: 1;
   }
-  .api-host {
+  .api-host-info {
     grid-column: 1;
     grid-row: 2;
+  }
+  .api-host {
     font-size: 10px;
   }
   .api-last-seen {

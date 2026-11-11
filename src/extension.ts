@@ -273,6 +273,8 @@ class Workbench {
   private history: HistoryResult = { items: [], total: 0 };
   private selected?: HistoryEntry;
   private selectedSource: 'apis' | 'history' = 'history';
+  private selectedApi?: { method: string; host: string; path: string };
+  private apiDetailRevision = 0;
   private sentSelected?: HistoryEntry;
   private sentPreview?: setup.SetupPreview;
   private apis: WorkbenchState['apis'] = [];
@@ -895,7 +897,20 @@ class Workbench {
     ]);
     this.history = history;
     this.apis = apis.items;
+    await this.refreshSelectedApi();
     this.push();
+  }
+  private async refreshSelectedApi() {
+    const api = this.selectedApi;
+    if (!api || this.selectedSource !== 'apis') return;
+    const revision = ++this.apiDetailRevision;
+    const latest = await this.historyCall<HistoryResult>('history.list', { ...api, limit: 1, offset: 0 });
+    const current = () =>
+      this.selectedApi === api && this.selectedSource === 'apis' && revision === this.apiDetailRevision;
+    if (!current()) return;
+    const id = latest.items[0]?.id;
+    const detail = id ? await this.historyCall<HistoryEntry>('history.get', { id }) : undefined;
+    if (current()) this.selected = detail;
   }
   private onEvent(event: { event: string; data: unknown }) {
     const d = event.data as Record<string, unknown> | undefined;
@@ -1364,6 +1379,7 @@ class Workbench {
             await this.engine.rpc('breakpoint.setInteractive', { enabled: mode === 'proxy' && !!this.panel });
           this.mode = mode;
           this.updateVmAutoConnect();
+          this.selectedApi = undefined;
           this.selected = undefined;
           this.query = { limit: 30, offset: 0 };
           this.history = { items: [], total: 0 };
@@ -1535,17 +1551,10 @@ class Workbench {
           const { method, host, path } = payload;
           if ([method, host, path].some((value) => typeof value !== 'string'))
             throw new Error('API 标识无效');
-          const latest = await this.historyCall<HistoryResult>('history.list', {
-            method,
-            host,
-            path,
-            limit: 1,
-            offset: 0,
-          });
           this.selectedSource = 'apis';
-          this.selected = latest.items[0]
-            ? await this.historyCall<HistoryEntry>('history.get', { id: latest.items[0].id })
-            : undefined;
+          this.selectedApi = { method: method as string, host: host as string, path: path as string };
+          this.selected = undefined;
+          await this.refreshSelectedApi();
           break;
         }
         case 'api.delete': {
@@ -1560,6 +1569,15 @@ class Workbench {
           );
           if (answer === '移除 API') {
             await this.historyCall('api.delete', { method, host, path });
+            if (
+              this.selectedApi &&
+              this.selectedApi.method === method &&
+              this.selectedApi.host === host &&
+              this.selectedApi.path === path
+            ) {
+              this.selectedApi = undefined;
+              this.selected = undefined;
+            }
             await this.reloadHistory();
           }
           break;
@@ -1567,6 +1585,7 @@ class Workbench {
         case 'history.select':
           this.requireHistory();
           this.selectedSource = 'history';
+          this.selectedApi = undefined;
           this.selected = await this.historyCall<HistoryEntry>('history.get', { id: payload.id });
           break;
         case 'history.update':
@@ -1595,6 +1614,7 @@ class Workbench {
           );
           if (answer === '清空历史') {
             await this.historyCall('history.clear', {});
+            this.selectedApi = undefined;
             this.selected = undefined;
             await this.reloadHistory();
           }

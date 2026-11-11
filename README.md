@@ -6,9 +6,9 @@
 
 配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key 精确操作页面，减少逐步截图识别的耗时与 token 消耗。
 
-当前版本为 **0.0.9**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+当前版本为 **0.0.10**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
 
-**0.0.9 更新**：API 请求与请求历史拆为独立 Tab，默认全宽紧凑列表；点击查看详情，窄窗口可关闭详情返回列表。API 详情显示统计和最新请求，可跳转查看调用历史。
+**0.0.10 更新**：API 列表和详情展示当前规则配置标签；最近请求详情自动刷新；修复 Flutter 运行时重启或同步失败后的 Mock 接入状态与恢复。
 
 **MCP 全能力提示词**：21 个工具均有同名独立 Prompt，包括 `hot_reload` / `hot_restart`；保留四个场景模板，共 25 个。每个工具提示词提供操作步骤和生产参数定义，新增能力漏写模板会被检查发现。
 
@@ -119,7 +119,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 
 ### 从 VSIX 安装
 
-1. 获取 `flutter-pilot-0.0.9.vsix`。从源码构建见下方步骤。
+1. 获取 `flutter-pilot-0.0.10.vsix`。从源码构建见下方步骤。
 2. 在 VS Code 或 Cursor 扩展面板右上角菜单选择 **Install from VSIX… / 从 VSIX 安装…**。
 3. 选择安装包，按 IDE 提示重新加载窗口。
 4. 打开包含 `pubspec.yaml` 的 Flutter 项目根目录，并信任工作区。
@@ -129,7 +129,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 安装当前 Flutter Pilot 包，例如：
 
 ```sh
-cursor --install-extension artifacts/flutter-pilot-0.0.9.vsix --force
+cursor --install-extension artifacts/flutter-pilot-0.0.10.vsix --force
 # VS Code 使用 code --install-extension 同一文件 --force
 ```
 
@@ -152,7 +152,7 @@ npm test
 npm run package
 ```
 
-产物为 `artifacts/flutter-pilot-0.0.9.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
+产物为 `artifacts/flutter-pilot-0.0.10.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
 
 ### 使用已有引擎
 
@@ -312,7 +312,9 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 **API 请求** 独立展示按 **请求方法 + 主机 + 路径** 去重的 API 目录，查询参数不进入目录键。默认列表占满内容区，按最近调用时间从新到旧排列，紧凑展示方法、路径、域名、累计调用次数和最近调用时间，支持独立搜索和方法筛选。
 
-点击 API 打开详情，查看累计调用、首次和最近调用时间，以及最近一次请求的请求、响应、修改对比和备注。点击 **查看调用历史** 跳转到 **请求历史** Tab 并按该 API 筛选；浏览 API 不改变历史页已有的筛选和分页。
+点击 API 打开详情，查看累计调用、首次和最近调用时间，以及最近一次请求的请求、响应、修改对比和备注。新请求被采集后，已选 API 的详情自动跟随最新记录；请求历史中选中的单次记录保持固定。点击 **查看调用历史** 跳转到 **请求历史** Tab 并按该 API 筛选；浏览 API 不改变历史页已有的筛选和分页。
+
+域名旁显示当前启用且方法、域名、路径匹配的规则 tag，包括 **Mock、转发、修改请求、修改响应、断点**。列表显示首类规则和其余类型数量，详情展示全部类型；悬停查看规则名称与优先级。带查询参数或请求头条件的规则标为“条件”，需具体请求满足条件才可能命中。tag 表示当前规则配置，随规则启停、编辑和删除更新，不依赖历史记录；实际拦截仍需开启对应运行时功能，并按每阶段优先级选择规则。
 
 目录独立保存，即使对应历史过期或已清空，API 和累计次数仍会保留；此时详情提示暂无请求历史。可手动删除不再需要的目录项，该操作不删除请求历史或规则；未来同一 API 再次被当前模式采集时，会重新发现并从新的目录计数开始。旧版现存历史会在首次升级时迁移为目录，迁移只执行一次。
 
@@ -717,7 +719,7 @@ python3 tool/device_smoke.py --mitmdump /absolute/path/to/mitmdump --ios YOUR_SI
 
 ```sh
 npm run package
-shasum -a 256 artifacts/flutter-pilot-0.0.9.vsix
+shasum -a 256 artifacts/flutter-pilot-0.0.10.vsix
 ```
 
 VSIX 包含扩展构建产物、VM 注入模板、代理 addon、引擎清单及文档，不包含 Node 开发依赖、Flutter 示例构建结果或真实证书。首次引擎下载单独发生。源码中的 README 修改后，应重新打包，安装包内的文档才会更新。
