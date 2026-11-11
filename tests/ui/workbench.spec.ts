@@ -226,7 +226,7 @@ test('规则表单校验、JSON编辑与 CRUD 消息', async ({ page }) => {
 test('历史详情、对比、生成规则及备注', async ({ page }) => {
   await page.goto('/');
   await state(page, {}, entry);
-  await page.getByRole('button', { name: 'API 与历史' }).click();
+  await page.getByRole('button', { name: '请求历史' }).click();
   await expect(page.getByText('最终响应', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '生成 Mock', exact: true }).click();
   expect(await messages(page)).toContainEqual({
@@ -348,28 +348,28 @@ test('请求历史为空仍保留独立 API 目录与累计调用统计', async 
     history: { items: [], total: 0 },
     apis: [{ ...fixture.apis[0], count: 12, firstAt: Date.now() - 86400000 }],
   });
-  await page.getByRole('button', { name: 'API 与历史' }).click();
-  await expect(page.getByText('API 目录', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'API 请求' }).click();
   const api = page.getByRole('button', { name: '查看 API GET api.example.test/v1/orders', exact: true });
   await expect(api).toBeVisible();
   await expect(api).toContainText('12 次');
-  await expect(api).toContainText('最近');
   await expect(api).toHaveAttribute('title', /首次发现：[\s\S]*最近调用：/);
+  await expect(page.locator('.request-row:visible')).toHaveCount(0);
   await api.click();
   await expect(page.getByRole('heading', { name: '该 API 暂无请求历史' })).toBeVisible();
-  await expect(page.getByText('目录独立保存；清空或过期请求历史不会移除已发现的 API。')).toBeVisible();
-  await expect
-    .poll(async () => messages(page))
-    .toContainEqual({
-      action: 'history.query',
-      payload: { method: 'GET', host: 'api.example.test', path: '/v1/orders', offset: 0 },
-    });
+  await expect(page.getByRole('button', { name: '查看调用历史', exact: true })).toBeVisible();
+  expect(await messages(page)).toContainEqual({
+    action: 'api.select',
+    payload: { method: 'GET', host: 'api.example.test', path: '/v1/orders' },
+  });
+  await page.getByRole('button', { name: '请求历史' }).click();
+  await expect(page.getByRole('heading', { name: '暂无请求历史' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^查看 API / })).toHaveCount(0);
 });
 
-test('清空记录常驻排序栏，筛选结果为空仍可清空全部历史，繁忙时禁用', async ({ page }) => {
+test('清空记录常驻历史页，筛选结果为空仍可清空全部历史，繁忙时禁用', async ({ page }) => {
   await page.goto('/');
   await state(page);
-  await page.getByRole('button', { name: 'API 与历史' }).click();
+  await page.getByRole('button', { name: '请求历史' }).click();
   const clear = page.getByRole('button', { name: '清空记录', exact: true });
   await expect(clear).toBeVisible();
   await expect(page.getByLabel('筛选状态码')).not.toBeVisible();
@@ -378,31 +378,37 @@ test('清空记录常驻排序栏，筛选结果为空仍可清空全部历史�
   await state(page, { history: { items: [], total: 0 } });
   await clear.click();
   expect(await messages(page)).toContainEqual({ action: 'history.clear', payload: {} });
-  await expect(page.getByRole('button', { name: /^查看 API / })).toHaveCount(1);
   await state(page, { busy: true });
   await expect(clear).toBeDisabled();
+  await page.getByRole('button', { name: 'API 请求' }).click();
+  await expect(page.getByRole('button', { name: /^查看 API / })).toHaveCount(1);
+  await expect(clear).not.toBeVisible();
 });
 
-for (const width of [1280, 390]) {
-  test(`请求记录在 ${width}px 下保持紧凑三行，长路径不增加行高`, async ({ page }) => {
+for (const width of [1280, 760, 680, 390]) {
+  test(`请求历史在 ${width}px 下全宽展示，点击详情后可返回列表`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
-    const records = Array.from({ length: 12 }, (_, i) => ({
+    const records = Array.from({ length: 18 }, (_, i) => ({
       ...entry,
       id: `compact-${i}`,
       path: `/webapp/common/${'very-long-path/'.repeat(i === 0 ? 20 : 1)}${i}.png`,
       host: 'exio-cms-dev.oss-ap-southeast-1.aliyuncs.com',
       startedAt: entry.startedAt - i * 1000,
     }));
-    await state(page, { history: { items: records, total: records.length } }, entry);
-    await page.getByRole('button', { name: 'API 与历史' }).click();
-    await page.getByRole('button', { name: '收起 API 目录', exact: true }).click();
+    const overrides = { history: { items: records, total: records.length } };
+    await state(page, overrides);
+    await page.getByRole('button', { name: '请求历史' }).click();
     const rows = page.locator('.request-row');
-    await expect(rows).toHaveCount(12);
+    const list = page.locator('.request-list');
+    await expect(rows).toHaveCount(18);
     const first = await rows.nth(0).boundingBox();
     const second = await rows.nth(1).boundingBox();
+    const pane = await list.boundingBox();
+    expect(pane!.width).toBeGreaterThanOrEqual(width - 4);
     expect(first!.height).toBeLessThanOrEqual(68);
     expect(first!.height).toBe(second!.height);
+    await expect(page.locator('.request-detail')).not.toBeVisible();
     await expect(rows.nth(0).locator('strong')).toHaveAttribute('title', entry.url);
     expect(
       await rows
@@ -410,50 +416,84 @@ for (const width of [1280, 390]) {
         .locator('strong')
         .evaluate((el) => el.scrollWidth > el.clientWidth),
     ).toBe(true);
-    const pane = await page.locator('.request-list').boundingBox();
-    const eighth = await rows.nth(7).boundingBox();
-    if (width === 1280) expect(eighth!.y + eighth!.height).toBeLessThanOrEqual(pane!.y + pane!.height);
-    expect(await page.locator('.request-list').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    const tenth = await rows.nth(9).boundingBox();
+    expect(tenth!.y + tenth!.height).toBeLessThanOrEqual(pane!.y + pane!.height);
+    expect(await list.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await expect(page.getByRole('button', { name: '清空记录', exact: true })).toBeVisible();
+    await page.screenshot({ path: `artifacts/http-layout-${width}.png`, fullPage: true });
     await rows.nth(0).click();
     expect(await messages(page)).toContainEqual({ action: 'history.select', payload: { id: 'compact-0' } });
-    await page.screenshot({ path: `artifacts/history-compact-${width}.png`, fullPage: true });
+    await state(page, overrides, records[0]);
+    await expect(page.getByRole('region', { name: '最终响应', exact: true })).toBeVisible();
+    if (width <= 760) await expect(list).not.toBeVisible();
+    else await expect(list).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.getByRole('button', { name: '关闭详情', exact: true }).click();
+    await expect(list).toBeVisible();
+    await expect(page.locator('.request-detail')).not.toBeVisible();
+    expect((await list.boundingBox())!.width).toBeGreaterThanOrEqual(width - 4);
+  });
+
+  test(`API 请求在 ${width}px 下紧凑全宽展示，点击查看最新请求详情`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/');
+    const apis = Array.from({ length: 18 }, (_, i) => ({
+      ...fixture.apis[0],
+      path: i === 0 ? entry.path : `/v1/products/${'long-path/'.repeat(8)}${i}`,
+      count: 47 - i,
+      firstAt: entry.startedAt - 86400000,
+      lastAt: entry.startedAt - i * 1000,
+    }));
+    const overrides = { apis };
+    await state(page, overrides);
+    await page.getByRole('button', { name: 'API 请求' }).click();
+    const list = page.locator('.api-sidebar');
+    const rows = page.getByRole('button', { name: /^查看 API / });
+    await expect(rows).toHaveCount(18);
+    await expect(page.locator('.request-row:visible')).toHaveCount(0);
+    const pane = await list.boundingBox();
+    const first = await rows.nth(0).boundingBox();
+    const second = await rows.nth(1).boundingBox();
+    expect(pane!.width).toBeGreaterThanOrEqual(width - 4);
+    expect(first!.height).toBeLessThanOrEqual(68);
+    expect(second!.height).toBeLessThanOrEqual(68);
+    const tenth = await rows.nth(9).boundingBox();
+    expect(tenth!.y + tenth!.height).toBeLessThanOrEqual(pane!.y + pane!.height);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: `artifacts/api-layout-${width}.png`, fullPage: true });
+    await rows.nth(0).click();
+    expect(await messages(page)).toContainEqual({
+      action: 'api.select',
+      payload: { method: 'GET', host: entry.host, path: entry.path },
+    });
+    await state(page, overrides, entry);
+    await expect(page.getByRole('region', { name: '最终响应', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '查看调用历史', exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.getByRole('button', { name: '关闭详情', exact: true }).click();
+    await expect(list).toBeVisible();
+    expect((await list.boundingBox())!.width).toBeGreaterThanOrEqual(width - 4);
   });
 }
 
-test('目录删除不触发选中或删除历史，确认移除后清除分组过滤', async ({ page }) => {
+test('目录删除只发送移除目录消息，保留请求历史', async ({ page }) => {
   await page.goto('/');
   await state(page);
-  await page.getByRole('button', { name: 'API 与历史' }).click();
+  await page.getByRole('button', { name: 'API 请求' }).click();
   const api = page.getByRole('button', { name: '查看 API GET api.example.test/v1/orders', exact: true });
-  await api.click();
-  await expect(api).toHaveAttribute('aria-pressed', 'true');
-  await expect
-    .poll(async () => messages(page))
-    .toContainEqual({
-      action: 'history.query',
-      payload: { method: 'GET', host: 'api.example.test', path: '/v1/orders', offset: 0 },
-    });
   const before = (await messages(page)).length;
   await page.getByRole('button', { name: '删除 API GET api.example.test/v1/orders', exact: true }).click();
   expect((await messages(page)).slice(before)).toEqual([
     { action: 'api.delete', payload: { method: 'GET', host: 'api.example.test', path: '/v1/orders' } },
   ]);
-  await expect(api).toHaveAttribute('aria-pressed', 'true');
+  await expect(api).toHaveAttribute('aria-pressed', 'false');
   await state(page, { apis: [] });
   await expect(api).not.toBeVisible();
-  await expect
-    .poll(async () => (await messages(page)).at(-1))
-    .toEqual({
-      action: 'history.query',
-      payload: { offset: 0 },
-    });
-  await expect(page.getByRole('button', { name: /全部 API/ })).toHaveClass(/selected/);
-  await expect(page.getByRole('button', { name: /GET.*200.*MOCK/ })).toBeVisible();
+  await page.getByRole('button', { name: '请求历史' }).click();
+  await expect(page.locator('.request-row')).toHaveCount(1);
 });
 
-test('API 目录和请求记录按最近时间倒序，乱序输入也保持新到旧', async ({ page }) => {
+test('API 目录和请求历史各自按最近时间倒序，乱序输入也保持新到旧', async ({ page }) => {
   await page.goto('/');
   const time = Date.now();
   const records = [
@@ -471,56 +511,135 @@ test('API 目录和请求记录按最近时间倒序，乱序输入也保持新�
       lastAt: record.startedAt,
     })),
   });
-  await page.getByRole('button', { name: 'API 与历史' }).click();
+  await page.getByRole('button', { name: 'API 请求' }).click();
   const catalog = page.getByRole('button', { name: /^查看 API / });
   await expect(catalog).toHaveCount(3);
   await expect(catalog.nth(0)).toHaveAttribute('aria-label', '查看 API GET api.example.test/v1/latest');
   await expect(catalog.nth(1)).toHaveAttribute('aria-label', '查看 API GET api.example.test/v1/middle');
   await expect(catalog.nth(2)).toHaveAttribute('aria-label', '查看 API GET api.example.test/v1/older');
+  await page.getByRole('button', { name: '请求历史' }).click();
   const requests = page.locator('.request-row');
   await expect(requests.nth(0)).toContainText('/v1/latest');
   await expect(requests.nth(1)).toContainText('/v1/middle');
   await expect(requests.nth(2)).toContainText('/v1/older');
   await requests.nth(0).click();
   expect(await messages(page)).toContainEqual({ action: 'history.select', payload: { id: 'latest' } });
-  await page.screenshot({ path: 'artifacts/workbench-api-sorted.png', fullPage: true });
 });
 
-test('收起目录保留 API 过滤，切换页面后保留折叠偏好', async ({ page }) => {
+test('API 搜索和方法独立筛选，从详情进入历史时按该 API 查询', async ({ page }) => {
   await page.goto('/');
-  await state(page);
-  await page.getByRole('button', { name: 'API 与历史' }).click();
+  await state(page, {
+    apis: [fixture.apis[0], { ...fixture.apis[0], method: 'POST', path: '/v1/submit' }],
+  });
+  await page.getByRole('button', { name: 'API 请求' }).click();
   const api = page.getByRole('button', { name: '查看 API GET api.example.test/v1/orders', exact: true });
+  await page.getByRole('textbox', { name: '搜索 API 目录', exact: true }).fill('orders');
+  await page.getByLabel('筛选 API 方法', { exact: true }).selectOption('GET');
+  await expect(page.getByRole('button', { name: /^查看 API / })).toHaveCount(1);
+  const before = (await messages(page)).length;
   await api.click();
+  expect((await messages(page)).slice(before)).toContainEqual({
+    action: 'api.select',
+    payload: { method: 'GET', host: 'api.example.test', path: '/v1/orders' },
+  });
+  expect((await messages(page)).slice(before)).not.toContainEqual(
+    expect.objectContaining({ action: 'history.query' }),
+  );
+  await state(page, {}, entry);
+  await page.getByRole('button', { name: '查看调用历史', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: '搜索请求', exact: true })).toBeVisible();
   await expect
-    .poll(async () => messages(page))
+    .poll(() => messages(page))
     .toContainEqual({
       action: 'history.query',
       payload: { method: 'GET', host: 'api.example.test', path: '/v1/orders', offset: 0 },
     });
-  await page.getByRole('button', { name: '收起 API 目录', exact: true }).click();
-  await expect(api).not.toBeVisible();
-  await expect(page.getByRole('button', { name: '展开 API 目录', exact: true })).toBeVisible();
-  const queries = ((await messages(page)) as { action: string; payload: unknown }[]).filter(
-    (message) => message.action === 'history.query',
+  await page.getByRole('button', { name: 'API 请求' }).click();
+  await expect(page.getByRole('textbox', { name: '搜索 API 目录', exact: true })).toHaveValue('orders');
+  await expect(page.getByLabel('筛选 API 方法', { exact: true })).toHaveValue('GET');
+});
+
+test('浏览 API 详情保留请求历史的搜索条件和分页', async ({ page }) => {
+  await page.goto('/');
+  await state(page, { history: { items: [entry], total: 65 } });
+  await page.getByRole('button', { name: '请求历史' }).click();
+  await page.getByRole('textbox', { name: '搜索请求', exact: true }).fill('/orders');
+  await page.getByLabel('筛选请求方法', { exact: true }).selectOption('GET');
+  await page.getByRole('button', { name: '下一页', exact: true }).click();
+  const expectedQuery = { search: '/orders', method: 'GET', offset: 30 };
+  await expect.poll(() => messages(page)).toContainEqual({ action: 'history.query', payload: expectedQuery });
+  await page.getByRole('button', { name: 'API 请求' }).click();
+  const before = (await messages(page)).length;
+  await page.getByRole('button', { name: '查看 API GET api.example.test/v1/orders', exact: true }).click();
+  expect((await messages(page)).slice(before)).toEqual([
+    { action: 'api.select', payload: { method: 'GET', host: 'api.example.test', path: '/v1/orders' } },
+  ]);
+  await page.getByRole('button', { name: '请求历史' }).click();
+  await expect(page.getByRole('textbox', { name: '搜索请求', exact: true })).toHaveValue('/orders');
+  await expect(page.getByLabel('筛选请求方法', { exact: true })).toHaveValue('GET');
+  await expect(page.getByRole('button', { name: '上一页', exact: true })).toBeEnabled();
+  await expect(page.locator('.pagination:visible')).toContainText('31–60 / 65');
+  await expect
+    .poll(async () => (await messages(page)).at(-1))
+    .toEqual({ action: 'history.query', payload: expectedQuery });
+});
+
+test('清空历史清除两个 Tab 缓存的详情，API 统计继续保留', async ({ page }) => {
+  await page.goto('/');
+  await state(page, {}, entry);
+  await page.getByRole('button', { name: '请求历史' }).click();
+  await expect(page.getByRole('region', { name: '最终响应', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'API 请求' }).click();
+  await page.getByRole('button', { name: '查看 API GET api.example.test/v1/orders', exact: true }).click();
+  await state(page, {}, entry);
+  await expect(page.getByRole('region', { name: '最终响应', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '请求历史' }).click();
+  await page.getByRole('button', { name: '清空记录', exact: true }).click();
+  await state(page, { history: { items: [], total: 0 } }, null);
+  await expect(page.getByRole('region', { name: '最终响应', exact: true })).not.toBeVisible();
+  await expect(page.getByRole('heading', { name: '暂无请求历史' })).toBeVisible();
+  await page.getByRole('button', { name: 'API 请求' }).click();
+  await expect(page.getByRole('heading', { name: '该 API 暂无请求历史' })).toBeVisible();
+  await expect(page.getByRole('region', { name: '最终响应', exact: true })).not.toBeVisible();
+  await expect(page.locator('.api-facts')).toContainText('累计调用1 次');
+});
+
+test('跨 Tab 读取详情按宿主来源分发，较早的 API 结果不覆盖历史选择', async ({ page }) => {
+  await page.goto('/');
+  const second = { ...entry, id: 'second-request', path: '/v1/payments' };
+  const overrides = { history: { items: [entry, second], total: 2 } };
+  await state(page, overrides);
+  await page.getByRole('button', { name: 'API 请求' }).click();
+  await page.getByRole('button', { name: '查看 API GET api.example.test/v1/orders', exact: true }).click();
+  await page.getByRole('button', { name: '请求历史' }).click();
+  await page.locator('.request-row').filter({ hasText: '/v1/payments' }).click();
+  const publish = async (selected: unknown, selectedSource: string) =>
+    page.evaluate((message) => window.postMessage(message, '*'), {
+      type: 'state',
+      state: { ...fixture, ...overrides },
+      selected,
+      selectedSource,
+    });
+  await publish(entry, 'apis');
+  await expect(page.getByRole('region', { name: '请求详情', exact: true })).not.toBeVisible();
+  await publish(second, 'history');
+  await expect(page.locator('.request-detail:visible .detail-heading > div:first-child')).toContainText(
+    '/v1/payments',
   );
-  expect(queries.at(-1)?.payload).toMatchObject({
-    method: 'GET',
-    host: 'api.example.test',
-    path: '/v1/orders',
-  });
-  await page.getByRole('button', { name: 'Mock 规则' }).click();
-  await page.getByRole('button', { name: 'API 与历史' }).click();
-  await expect(page.getByRole('button', { name: '展开 API 目录', exact: true })).toBeVisible();
-  await expect(api).not.toBeVisible();
-  await page.getByRole('button', { name: '展开 API 目录', exact: true }).click();
-  await expect(api).toBeVisible();
+  await page.getByRole('button', { name: 'API 请求' }).click();
+  await expect(page.locator('.request-detail:visible .detail-heading > div:first-child')).toContainText(
+    '/v1/orders',
+  );
+  await page.getByRole('button', { name: '请求历史' }).click();
+  await expect(page.locator('.request-detail:visible .detail-heading > div:first-child')).toContainText(
+    '/v1/payments',
+  );
 });
 
 test('响应自动格式化 JSON，原文切换不改变请求事实，新记录优先响应', async ({ page }) => {
   await page.goto('/');
   await state(page, {}, entry);
-  await page.getByRole('button', { name: 'API 与历史' }).click();
+  await page.getByRole('button', { name: '请求历史' }).click();
   const responseView = page.getByRole('region', { name: '最终响应', exact: true });
   await expect(responseView).toBeVisible();
   await expect(responseView.locator('.body-content')).toHaveJSProperty(
@@ -557,7 +676,7 @@ test('未声明 JSON 的正文仍尝试解析，非法 JSON 回退原文并明�
     body: '{"nested":{"items":[1,2]}}',
   };
   await state(page, {}, { ...entry, response: textJson });
-  await page.getByRole('button', { name: 'API 与历史' }).click();
+  await page.getByRole('button', { name: '请求历史' }).click();
   const responseView = page.getByRole('region', { name: '最终响应', exact: true });
   await expect(responseView.locator('.body-content')).toHaveJSProperty(
     'textContent',
@@ -573,7 +692,7 @@ test('未声明 JSON 的正文仍尝试解析，非法 JSON 回退原文并明�
 test('空正文、二进制、截断与无响应记录不会误报成 JSON 或成功响应', async ({ page }) => {
   await page.goto('/');
   await state(page, {}, { ...entry, response: { ...response, status: 204, body: '', bodyBytes: 0 } });
-  await page.getByRole('button', { name: 'API 与历史' }).click();
+  await page.getByRole('button', { name: '请求历史' }).click();
   const responseView = page.getByRole('region', { name: '最终响应', exact: true });
   await expect(responseView).toContainText('空正文');
   await expect(responseView).not.toContainText('无法解析为 JSON');
@@ -623,7 +742,7 @@ test('空正文、二进制、截断与无响应记录不会误报成 JSON 或�
   await expect(page.locator('.request-detail')).not.toContainText('HTTP 200');
 });
 
-test('窄面板可展开和收起 API 目录，长路径与响应正文不横向溢出', async ({ page }) => {
+test('窄面板点击 API 后查看长地址和响应正文，关闭详情恢复列表', async ({ page }) => {
   await page.setViewportSize({ width: 680, height: 920 });
   await page.goto('/');
   const path = `/v1/${'long-api-segment-'.repeat(30)}`;
@@ -636,31 +755,27 @@ test('窄面板可展开和收起 API 目录，长路径与响应正文不横向
     request: { ...request, url },
     response: { ...response, body: JSON.stringify({ data: 'long-response-'.repeat(300) }) },
   };
-  await state(
-    page,
-    {
-      history: { items: [long], total: 1 },
-      apis: [{ ...fixture.apis[0], path }],
-    },
-    long,
-  );
-  await page.getByRole('button', { name: 'API 与历史' }).click();
-  const expand = page.getByRole('button', { name: '展开 API 目录', exact: true });
-  if (await expand.isVisible()) await expand.click();
-  await expect(
-    page.getByRole('button', { name: `查看 API GET api.example.test${path}`, exact: true }),
-  ).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-  await page.getByRole('button', { name: '收起 API 目录', exact: true }).click();
+  const overrides = {
+    history: { items: [long], total: 1 },
+    apis: [{ ...fixture.apis[0], path }],
+  };
+  await state(page, overrides);
+  await page.getByRole('button', { name: 'API 请求' }).click();
+  const api = page.getByRole('button', { name: `查看 API GET api.example.test${path}`, exact: true });
+  await expect(api).toBeVisible();
+  await api.click();
+  await state(page, overrides, long);
   await expect(page.getByRole('region', { name: '最终响应', exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.screenshot({ path: 'artifacts/workbench-api-narrow.png', fullPage: true });
+  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
+  await expect(api).toBeVisible();
 });
 
 test('放大详情隐藏列表并保留响应，返回后恢复请求列表', async ({ page }) => {
   await page.goto('/');
   await state(page, {}, entry);
-  await page.getByRole('button', { name: 'API 与历史' }).click();
+  await page.getByRole('button', { name: '请求历史' }).click();
   const list = page.locator('.request-list');
   const responseView = page.getByRole('region', { name: '最终响应', exact: true });
   await expect(list).toBeVisible();
@@ -692,7 +807,7 @@ test('复制正文遵循 JSON 与原文模式，复制失败显示提示且不�
   });
   await page.goto('/');
   await state(page, {}, entry);
-  await page.getByRole('button', { name: 'API 与历史' }).click();
+  await page.getByRole('button', { name: '请求历史' }).click();
   const responseView = page.getByRole('region', { name: '最终响应', exact: true });
   const copy = responseView.getByRole('button', { name: '复制正文', exact: true });
   const copiedBody = () => page.evaluate(() => (window as unknown as { __copiedBody?: string }).__copiedBody);
@@ -895,7 +1010,7 @@ test('VM 在引擎未运行时查询历史，窄面板可用并明确不支持�
   await expect(page.getByRole('heading', { name: '连接与诊断' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.screenshot({ path: 'artifacts/workbench-vm.png', fullPage: true });
-  await page.getByRole('button', { name: 'API 与历史' }).click();
+  await page.getByRole('button', { name: '请求历史' }).click();
   await expect
     .poll(async () => messages(page))
     .toContainEqual({ action: 'history.query', payload: { offset: 0 } });
@@ -1078,7 +1193,8 @@ for (const width of [1280, 390]) {
     );
     const panels = [
       ['连接与诊断', '.vm-card'],
-      ['API 与历史', '.history-layout'],
+      ['API 请求', '.api-layout'],
+      ['请求历史', '.history-layout'],
       ['WebSocket', '.ws-workspace'],
       ['Mock 规则', '.rule-list'],
       ['断点队列', '.breakpoints-page .empty'],
@@ -1096,7 +1212,7 @@ for (const width of [1280, 390]) {
       expect(await page.locator('main').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
       await page.screenshot({ path: `artifacts/compact-${width}-${selector.replace(/[^a-z-]/g, '')}.png` });
     }
-    await page.getByRole('button', { name: 'API 与历史' }).click();
+    await page.getByRole('button', { name: '请求历史' }).click();
     await expect(page.getByLabel('筛选状态码')).not.toBeVisible();
     await page.getByRole('button', { name: '筛选', exact: true }).click();
     await page.getByLabel('筛选状态码').fill('503');

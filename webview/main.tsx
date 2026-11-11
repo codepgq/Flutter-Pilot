@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
+  ApiCatalogEntry,
   HistoryEntry,
   HistoryQuery,
   PendingBreakpoint,
@@ -20,14 +21,11 @@ declare global {
   interface Window {
     acquireVsCodeApi?: () => {
       postMessage: (message: unknown) => void;
-      getState?: () => { catalogCollapsed?: boolean } | undefined;
-      setState?: (state: { catalogCollapsed?: boolean }) => void;
     };
     __FLUTTER_PILOT_TEST__?: boolean;
   }
 }
 const vscode = window.acquireVsCodeApi?.();
-let viewPreferences = vscode?.getState?.() ?? {};
 function send(action: string, payload: unknown = {}) {
   vscode?.postMessage({ action, payload });
 }
@@ -47,7 +45,7 @@ const initial: WorkbenchState = {
   logs: [],
   busy: false,
 };
-type Tab = 'history' | 'rules' | 'breakpoints' | 'connection' | 'websocket' | 'mcp';
+type Tab = 'apis' | 'history' | 'rules' | 'breakpoints' | 'connection' | 'websocket' | 'mcp';
 type Snapshot = RequestSnapshot | ResponseSnapshot;
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
@@ -321,6 +319,9 @@ function App() {
   const [state, setState] = useState(initial);
   const [tab, setTab] = useState<Tab>('connection');
   const [selected, setSelected] = useState<HistoryEntry>();
+  const [selectedApi, setSelectedApi] = useState<HistoryEntry>();
+  const selectionTarget = useRef<'apis' | 'history'>('history');
+  const [historyApiFilter, setHistoryApiFilter] = useState<ApiCatalogEntry>();
   const [edit, setEdit] = useState<Rule>();
   const [preview, setPreview] = useState<{
     id: string;
@@ -332,7 +333,19 @@ function App() {
       const m = event.data;
       if (m.type === 'state') {
         setState(m.state);
-        if ('selected' in m) setSelected(m.selected ?? undefined);
+        if ('selected' in m) {
+          if (!m.selected) {
+            setSelectedApi(undefined);
+            setSelected(undefined);
+          } else {
+            const source = m.selectedSource ?? selectionTarget.current;
+            if (source === 'apis') setSelectedApi(m.selected);
+            else setSelected(m.selected);
+            // The same request can be visible in either tab; keep edits in sync.
+            setSelectedApi((previous) => (previous?.id === m.selected.id ? m.selected : previous));
+            setSelected((previous) => (previous?.id === m.selected.id ? m.selected : previous));
+          }
+        }
         if ('preview' in m) setPreview(m.preview ?? undefined);
       }
       if (m.type === 'editRule') {
@@ -346,7 +359,8 @@ function App() {
   }, []);
   const nav: { id: Tab; label: string; icon: string; count?: number }[] = [
     { id: 'connection', label: '连接与诊断', icon: 'plug' },
-    { id: 'history', label: 'API 与历史', icon: 'history', count: state.history.total },
+    { id: 'apis', label: 'API 请求', icon: 'radar', count: state.apis?.length ?? 0 },
+    { id: 'history', label: '请求历史', icon: 'history', count: state.history.total },
     { id: 'websocket', label: 'WebSocket', icon: 'radar', count: state.ws?.messages.total ?? 0 },
     { id: 'rules', label: 'Mock 规则', icon: 'rules', count: state.rules.length },
     { id: 'breakpoints', label: '断点队列', icon: 'pause', count: state.pending.length },
@@ -481,7 +495,37 @@ function App() {
           </>
         )}
         {tab === 'mcp' && <McpPanel state={state} send={send} />}
-        {tab === 'history' && <History key={state.mode ?? 'vm'} state={state} selected={selected} />}
+        {(tab === 'apis' || tab === 'history') && (
+          <div className="http-workspace" key={state.mode ?? 'vm'}>
+            <div className="http-tab-panel" hidden={tab !== 'apis'}>
+              <ApiCatalog
+                state={state}
+                selected={selectedApi}
+                onSelect={(api) => {
+                  selectionTarget.current = 'apis';
+                  setSelectedApi(undefined);
+                  send('api.select', { method: api.method, host: api.host, path: api.path });
+                }}
+                onHistory={(api) => {
+                  setHistoryApiFilter({ ...api });
+                  setTab('history');
+                }}
+              />
+            </div>
+            <div className="http-tab-panel" hidden={tab !== 'history'}>
+              <History
+                state={state}
+                selected={selected}
+                active={tab === 'history'}
+                apiFilter={historyApiFilter}
+                onSelect={(id) => {
+                  selectionTarget.current = 'history';
+                  send('history.select', { id });
+                }}
+              />
+            </div>
+          </div>
+        )}
         {tab === 'websocket' && (
           <WebSocketPanel
             state={state.ws}
@@ -976,47 +1020,222 @@ function Connection({
     </div>
   );
 }
-function History({ state, selected }: { state: WorkbenchState; selected?: HistoryEntry }) {
+function apiKey(api: Pick<ApiCatalogEntry, 'method' | 'host' | 'path'>) {
+  return `${api.method} ${api.host}${api.path}`;
+}
+function formatRequestTime(value?: number) {
+  return value
+    ? new Date(value).toLocaleString('zh-CN', {
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      })
+    : '—';
+}
+function ApiCatalog({
+  state,
+  selected,
+  onSelect,
+  onHistory,
+}: {
+  state: WorkbenchState;
+  selected?: HistoryEntry;
+  onSelect: (api: ApiCatalogEntry) => void;
+  onHistory: (api: ApiCatalogEntry) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [method, setMethod] = useState('');
+  const [selectedKey, setSelectedKey] = useState('');
+  const [detailFocused, setDetailFocused] = useState(false);
+  const groups = useMemo(() => [...(state.apis ?? [])].sort((a, b) => b.lastAt - a.lastAt), [state.apis]);
+  const current = groups.find((api) => apiKey(api) === selectedKey);
+  const record = selected && current && apiKey(selected) === selectedKey ? selected : undefined;
+  const visible = groups.filter(
+    (api) => (!method || api.method === method) && apiKey(api).toLowerCase().includes(search.toLowerCase()),
+  );
+  const close = () => {
+    setSelectedKey('');
+    setDetailFocused(false);
+  };
+  return (
+    <div className="history-page api-page">
+      <div className="history-toolbar">
+        <div className="search-field">
+          <Icon name="search" size={16} />
+          <input
+            aria-label="搜索 API 目录"
+            placeholder="搜索路径、域名或方法…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <select aria-label="筛选 API 方法" value={method} onChange={(e) => setMethod(e.target.value)}>
+          <option value="">所有方法</option>
+          {['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((m) => (
+            <option key={m}>{m}</option>
+          ))}
+        </select>
+      </div>
+      <div className="history-viewbar">
+        <span className="http-list-count">
+          API 目录 <b>{visible.length}</b> / {groups.length} 个
+        </span>
+        <span className="sort-indicator">最近调用优先</span>
+      </div>
+      <div
+        className={`api-layout ${current ? 'has-detail' : ''} ${current && detailFocused ? 'detail-focused' : ''}`}
+      >
+        <section className="api-sidebar" aria-label="API 目录">
+          <div className="api-columns" aria-hidden="true">
+            <span>方法 / 请求路径</span>
+            <span>域名</span>
+            <span>累计调用</span>
+            <span>最近调用</span>
+            <span />
+          </div>
+          {visible.map((api) => {
+            const id = apiKey(api);
+            return (
+              <div className={`api-entry ${selectedKey === id ? 'selected' : ''}`} key={id}>
+                <button
+                  className="api-group"
+                  aria-label={`查看 API ${id}`}
+                  aria-pressed={selectedKey === id}
+                  title={`${id}\n累计调用 ${api.count} 次${api.firstAt ? `\n首次发现：${new Date(api.firstAt).toLocaleString('zh-CN')}` : ''}\n最近调用：${new Date(api.lastAt).toLocaleString('zh-CN')}`}
+                  onClick={() => {
+                    setSelectedKey(id);
+                    setDetailFocused(false);
+                    onSelect(api);
+                  }}
+                >
+                  <span className="api-request">
+                    <Method method={api.method} />
+                    <strong title={api.path}>{api.path}</strong>
+                  </span>
+                  <small className="api-host" title={api.host}>
+                    {api.host}
+                  </small>
+                  <b className="api-call-count">{api.count.toLocaleString()} 次</b>
+                  <time className="api-last-seen" title={new Date(api.lastAt).toLocaleString('zh-CN')}>
+                    {formatRequestTime(api.lastAt)}
+                  </time>
+                </button>
+                <button
+                  className="api-delete"
+                  aria-label={`删除 API ${id}`}
+                  title="只删除目录项，保留请求历史；下次请求会重新发现"
+                  disabled={state.busy}
+                  onClick={() => send('api.delete', { method: api.method, host: api.host, path: api.path })}
+                >
+                  <Icon name="close" size={12} />
+                </button>
+              </div>
+            );
+          })}
+          {!visible.length && (
+            <Empty
+              icon="radar"
+              title={groups.length ? '没有匹配的 API' : '暂无 API'}
+              description="在应用中触发请求后，按方法、域名和路径自动汇总。"
+            />
+          )}
+          <p className="sidebar-hint">目录独立保存；清空或过期请求历史不会移除已发现的 API。</p>
+        </section>
+        {current && (
+          <section className="request-detail api-detail" aria-label="API 详情">
+            <div className="api-detail-overview">
+              <div className="api-detail-title">
+                <strong>API 概览</strong>
+                <button aria-label="关闭 API 详情" title="关闭详情，返回列表" onClick={close}>
+                  <Icon name="close" size={16} />
+                </button>
+              </div>
+              <code>{apiKey(current)}</code>
+              <dl className="api-facts">
+                <div>
+                  <dt>累计调用</dt>
+                  <dd>{current.count.toLocaleString()} 次</dd>
+                </div>
+                <div>
+                  <dt>首次发现</dt>
+                  <dd>{formatRequestTime(current.firstAt)}</dd>
+                </div>
+                <div>
+                  <dt>最近调用</dt>
+                  <dd>{formatRequestTime(current.lastAt)}</dd>
+                </div>
+              </dl>
+              <Button onClick={() => onHistory(current)}>
+                <Icon name="history" size={14} />
+                查看调用历史
+              </Button>
+            </div>
+            {record ? (
+              <>
+                <div className="latest-request-label">最近一次请求详情</div>
+                <RequestDetails
+                  state={state}
+                  selected={record}
+                  detailFocused={detailFocused}
+                  setDetailFocused={setDetailFocused}
+                  onClose={close}
+                />
+              </>
+            ) : (
+              <Empty
+                icon="history"
+                title={state.busy ? '正在读取请求详情' : '该 API 暂无请求历史'}
+                description="API 统计独立保留。新的调用会继续记录，可在请求历史中查看每次请求。"
+              />
+            )}
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+function History({
+  state,
+  selected,
+  active,
+  apiFilter,
+  onSelect,
+}: {
+  state: WorkbenchState;
+  selected?: HistoryEntry;
+  active: boolean;
+  apiFilter?: ApiCatalogEntry;
+  onSelect: (id: string) => void;
+}) {
   const [query, setQuery] = useState<HistoryQuery>({});
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [group, setGroup] = useState('');
-  const [detailTab, setDetailTab] = useState<'request' | 'response' | 'diff' | 'info'>('response');
   const [offset, setOffset] = useState(0);
-  const [note, setNote] = useState('');
-  const [tags, setTags] = useState('');
-  const [catalogCollapsed, setCatalogCollapsed] = useState(viewPreferences.catalogCollapsed ?? false);
+  const [detailOpen, setDetailOpen] = useState(!!selected);
   const [detailFocused, setDetailFocused] = useState(false);
-  const detailRef = useRef<HTMLElement>(null);
-  const [catalogSearch, setCatalogSearch] = useState('');
   useEffect(() => {
-    setDetailTab('response');
-    if (selected && window.innerWidth <= 600) detailRef.current?.scrollIntoView({ block: 'start' });
+    setDetailOpen(!!selected);
   }, [selected?.id]);
   useEffect(() => {
-    setNote(selected?.note ?? '');
-    setTags(selected?.tags.join(', ') ?? '');
-  }, [selected?.id, selected?.note, selected?.tags.join(',')]);
+    if (apiFilter) {
+      setQuery({ method: apiFilter.method, host: apiFilter.host, path: apiFilter.path });
+      setOffset(0);
+      setDetailOpen(false);
+    }
+  }, [apiFilter]);
   useEffect(() => {
+    if (!active) return;
     if (state.mode !== 'vm' && state.engine.status !== 'running') return;
     const t = setTimeout(() => send('history.query', { ...query, offset }), 250);
     return () => clearTimeout(t);
-  }, [query, offset, state.engine.status, state.mode]);
-  const groups = useMemo(() => [...(state.apis ?? [])].sort((a, b) => b.lastAt - a.lastAt), [state.apis]);
+  }, [query, offset, state.engine.status, state.mode, active]);
   const records = useMemo(
     () => [...state.history.items].sort((a, b) => b.startedAt - a.startedAt),
     [state.history.items],
   );
-  const visibleGroups = groups.filter((g) =>
-    `${g.method} ${g.host}${g.path}`.toLowerCase().includes(catalogSearch.toLowerCase()),
-  );
-  const catalogKeys = JSON.stringify(groups.map((g) => `${g.method} ${g.host}${g.path}`));
-  useEffect(() => {
-    if (group && !(JSON.parse(catalogKeys) as string[]).includes(group)) {
-      setGroup('');
-      setQuery((q) => ({ ...q, host: undefined, path: undefined, method: undefined }));
-      setOffset(0);
-    }
-  }, [group, catalogKeys]);
+  const group = query.host && query.path ? `${query.method ?? ''} ${query.host}${query.path}` : '';
   function update(p: Partial<HistoryQuery>) {
     setQuery((q) => ({ ...q, ...p }));
     setOffset(0);
@@ -1112,36 +1331,21 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
         </label>
       </div>
       <div className="history-viewbar">
-        <button
-          aria-expanded={!catalogCollapsed}
-          aria-controls="api-catalog"
-          aria-label={catalogCollapsed ? '展开 API 目录' : '收起 API 目录'}
-          onClick={() => {
-            const next = !catalogCollapsed;
-            setCatalogCollapsed(next);
-            viewPreferences = { ...viewPreferences, catalogCollapsed: next };
-            vscode?.setState?.(viewPreferences);
-            setDetailFocused(false);
-          }}
-        >
-          <Icon name="sidebar" size={15} />
-          {catalogCollapsed ? '展开目录' : '收起目录'}
-          <span className="count">{groups.length}</span>
-        </button>
+        <span className="http-list-count">
+          请求记录 <b>{state.history.total.toLocaleString()}</b> 条
+        </span>
         {group && (
           <button
             className="active-api-filter"
             title={`清除 API 筛选：${group}`}
-            onClick={() => {
-              setGroup('');
-              update({ host: undefined, path: undefined, method: undefined });
-            }}
+            onClick={() => update({ host: undefined, path: undefined, method: undefined })}
           >
             <span>{group}</span>
             <Icon name="close" size={12} />
           </button>
         )}
         <div className="history-view-actions">
+          <span className="sort-indicator">最新在前 · 按请求时间倒序</span>
           <Button
             action="history.clear"
             danger
@@ -1150,86 +1354,16 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
           >
             清空记录
           </Button>
-          <span className="sort-indicator">最新在前 · 按请求时间倒序</span>
         </div>
       </div>
       <div
-        className={`history-layout ${catalogCollapsed ? 'catalog-collapsed' : ''} ${detailFocused ? 'detail-focused' : ''}`}
+        className={`history-layout ${detailOpen && selected ? 'has-detail' : ''} ${detailFocused ? 'detail-focused' : ''}`}
       >
-        <aside className="api-sidebar" id="api-catalog" aria-label="API 目录" hidden={catalogCollapsed}>
-          <div className="pane-heading">
-            API 目录 <span>最近调用优先</span>
-          </div>
-          <div className="catalog-search">
-            <input
-              aria-label="搜索 API 目录"
-              placeholder="筛选 API 目录…"
-              value={catalogSearch}
-              onChange={(e) => setCatalogSearch(e.target.value)}
-            />
-          </div>
-          <button
-            className={`api-all ${!group ? 'selected' : ''}`}
-            onClick={() => {
-              setGroup('');
-              update({ host: undefined, path: undefined, method: undefined });
-            }}
-          >
-            全部 API <span>{groups.length} 个</span>
-          </button>
-          {visibleGroups.map((g) => {
-            const id = `${g.method} ${g.host}${g.path}`;
-            return (
-              <div className={`api-entry ${group === id ? 'selected' : ''}`} key={id}>
-                <button
-                  className="api-group"
-                  aria-label={`查看 API ${g.method} ${g.host}${g.path}`}
-                  aria-pressed={group === id}
-                  title={`${g.method} ${g.host}${g.path}\n累计调用 ${g.count} 次${g.firstAt ? `\n首次发现：${new Date(g.firstAt).toLocaleString('zh-CN')}` : ''}\n最近调用：${new Date(g.lastAt).toLocaleString('zh-CN')}`}
-                  onClick={() => {
-                    setGroup(id);
-                    update({ method: g.method, host: g.host, path: g.path });
-                  }}
-                >
-                  <span>
-                    <Method method={g.method} />
-                    <b>{g.count} 次</b>
-                  </span>
-                  <strong>{g.path}</strong>
-                  <small>{g.host}</small>
-                  <small className="api-last-seen">
-                    最近{' '}
-                    {new Date(g.lastAt).toLocaleString('zh-CN', {
-                      month: '2-digit',
-                      day: '2-digit',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      hour12: false,
-                    })}
-                  </small>
-                </button>
-                <button
-                  className="api-delete"
-                  aria-label={`删除 API ${g.method} ${g.host}${g.path}`}
-                  title="只删除目录项，保留请求历史；下次请求会重新发现"
-                  disabled={state.busy}
-                  onClick={() => send('api.delete', { method: g.method, host: g.host, path: g.path })}
-                >
-                  <Icon name="close" size={12} />
-                </button>
-              </div>
-            );
-          })}
-          {groups.length > 0 && !visibleGroups.length && <p className="sidebar-hint">没有匹配的 API</p>}
-          <p className="sidebar-hint">
-            {groups.length
-              ? '目录独立保存；清空或过期请求历史不会移除已发现的 API。'
-              : '完成接入后自动发现 API，按方法、主机和路径独立保存。'}
-          </p>
-        </aside>
         <section className="request-list">
-          <div className="pane-heading">
-            请求记录 <span>{state.history.total} 条</span>
+          <div className="request-columns" aria-hidden="true">
+            <span>方法 / 请求路径</span>
+            <span>域名</span>
+            <span>时间 / 耗时</span>
           </div>
           {records.length ? (
             records.map((h) => (
@@ -1237,7 +1371,10 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
                 className={`request-row ${selected?.id === h.id ? 'selected' : ''}`}
                 key={h.id}
                 aria-pressed={selected?.id === h.id}
-                onClick={() => send('history.select', { id: h.id })}
+                onClick={() => {
+                  setDetailOpen(true);
+                  onSelect(h.id);
+                }}
               >
                 <div className="request-summary">
                   <Method method={h.method} />
@@ -1275,11 +1412,7 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
             <Empty
               icon="history"
               title={group ? '该 API 暂无请求历史' : '暂无请求历史'}
-              description={
-                groups.length
-                  ? '已发现的 API 保留在目录中。请求历史可能已清理，新的请求会继续记录。'
-                  : '完成设备接入后，在应用中触发请求；代理会自动记录，并建立 API 目录。'
-              }
+              description="在应用中触发请求后，这里会自动记录。已发现的 API 独立保留在 API 请求 Tab 中。"
             />
           )}
           <div className="pagination">
@@ -1296,176 +1429,202 @@ function History({ state, selected }: { state: WorkbenchState; selected?: Histor
             </Button>
           </div>
         </section>
-        <section className="request-detail" ref={detailRef} aria-label="请求详情">
-          {selected ? (
-            <>
-              <div className="detail-heading">
-                <div>
-                  <Method method={selected.method} />
-                  <strong title={selected.path}>{selected.path}</strong>
-                  <button
-                    className="detail-focus-button"
-                    aria-label={detailFocused ? '返回列表' : '放大详情'}
-                    title={detailFocused ? '返回列表' : '放大详情'}
-                    onClick={() => setDetailFocused(!detailFocused)}
-                  >
-                    <Icon name="expand" size={14} />
-                    {detailFocused ? '返回列表' : '放大'}
-                  </button>
-                </div>
-                <code>{selected.url}</code>
-                <div className="detail-summary">
-                  <span
-                    className={`status-summary ${selected.error || (selected.response?.status ?? 0) >= 400 ? 'failed' : ''}`}
-                  >
-                    {selected.response ? `HTTP ${selected.response.status}` : '未收到响应'}
-                  </span>
-                  <span>{Math.round(selected.duration).toLocaleString()} ms</span>
-                  <time>{new Date(selected.startedAt).toLocaleString('zh-CN', { hour12: false })}</time>
-                  {selected.mocked && <span className="mock-badge">MOCK</span>}
-                </div>
-                <div className="detail-actions">
-                  <Button onClick={() => send('history.toRule', { id: selected.id, kind: 'mock' })} primary>
-                    <Icon name="plus" size={14} />
-                    生成 Mock
-                  </Button>
-                  <select
-                    aria-label="从请求生成规则"
-                    value=""
-                    onChange={(e) => {
-                      if (e.target.value) send('history.toRule', { id: selected.id, kind: e.target.value });
-                    }}
-                  >
-                    <option value="">更多规则…</option>
-                    <option value="request">修改请求</option>
-                    <option value="response">修改响应</option>
-                    <option value="redirect">转发地址</option>
-                  </select>
-                  <Button danger onClick={() => send('history.delete', { id: selected.id })}>
-                    删除记录
-                  </Button>
-                </div>
-              </div>
-              <div className="detail-tabs">
-                {(['response', 'request', 'diff', 'info'] as const).map((t, i) => (
-                  <button
-                    aria-pressed={t === detailTab}
-                    title={
-                      t === 'response'
-                        ? 'Response · 最终响应'
-                        : t === 'request'
-                          ? 'Request · 最终请求'
-                          : undefined
-                    }
-                    className={t === detailTab ? 'active' : ''}
-                    key={t}
-                    onClick={() => setDetailTab(t)}
-                  >
-                    {['响应', '请求', '修改对比', '备注与信息'][i]}
-                  </button>
-                ))}
-              </div>
-              <div className="detail-body">
-                {selected.error && (
-                  <div className="notice request-error">
-                    <strong>请求未正常完成</strong>
-                    <div>{selected.error}</div>
-                    {!selected.response && <p>没有收到 HTTP 响应；此记录不能视为服务端返回的业务错误。</p>}
-                  </div>
-                )}
-                {detailTab === 'request' && (
-                  <SnapshotView key={`${selected.id}-request`} snapshot={selected.request} label="最终请求" />
-                )}
-                {detailTab === 'response' && (
-                  <SnapshotView
-                    key={`${selected.id}-response`}
-                    snapshot={selected.response}
-                    label="最终响应"
-                  />
-                )}
-                {detailTab === 'diff' && (
-                  <>
-                    <div className="diff-label">请求 · 原始 → 自动规则 → 最终</div>
-                    <div className="snapshot-grid">
-                      <SnapshotView snapshot={selected.originalRequest} label="原始" />
-                      <SnapshotView
-                        snapshot={selected.automaticRequest ?? selected.request}
-                        label="自动规则后"
-                      />
-                      <SnapshotView snapshot={selected.request} label="最终" />
-                    </div>
-                    <div className="diff-label">响应 · 原始 → 自动规则 → 最终</div>
-                    <div className="snapshot-grid">
-                      <SnapshotView snapshot={selected.originalResponse} label="原始" />
-                      <SnapshotView
-                        snapshot={selected.automaticResponse ?? selected.response}
-                        label="自动规则后"
-                      />
-                      <SnapshotView snapshot={selected.response} label="最终" />
-                    </div>
-                  </>
-                )}
-                {detailTab === 'info' && (
-                  <div className="info-form">
-                    <dl>
-                      <dt>目标地址</dt>
-                      <dd>{selected.targetUrl}</dd>
-                      <dt>耗时</dt>
-                      <dd>{selected.duration} ms</dd>
-                      <dt>请求规则</dt>
-                      <dd>
-                        {state.rules.find((r) => r.id === selected.requestRuleId)?.name ??
-                          selected.requestRuleId ??
-                          '未命中'}
-                      </dd>
-                      <dt>响应规则</dt>
-                      <dd>
-                        {state.rules.find((r) => r.id === selected.responseRuleId)?.name ??
-                          selected.responseRuleId ??
-                          '未命中'}
-                      </dd>
-                    </dl>
-                    <label>
-                      备注
-                      <textarea
-                        aria-label="历史备注"
-                        value={note}
-                        onChange={(e) => setNote(e.target.value)}
-                      />
-                    </label>
-                    <label>
-                      标签（英文逗号分隔）
-                      <input aria-label="历史标签" value={tags} onChange={(e) => setTags(e.target.value)} />
-                    </label>
-                    <Button
-                      primary
-                      onClick={() =>
-                        send('history.update', {
-                          id: selected.id,
-                          note,
-                          tags: tags
-                            .split(',')
-                            .map((t) => t.trim())
-                            .filter(Boolean),
-                        })
-                      }
-                    >
-                      保存备注
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <Empty
-              icon="radar"
-              title="每次请求，都有迹可循"
-              description="选择一条记录，查看请求与响应、修改对比，或一键生成 Mock 规则。"
+        {detailOpen && selected && (
+          <section className="request-detail" aria-label="请求详情">
+            <RequestDetails
+              state={state}
+              selected={selected}
+              detailFocused={detailFocused}
+              setDetailFocused={setDetailFocused}
+              onClose={() => {
+                setDetailOpen(false);
+                setDetailFocused(false);
+              }}
             />
-          )}
-        </section>
+          </section>
+        )}
       </div>
     </div>
+  );
+}
+function RequestDetails({
+  state,
+  selected,
+  detailFocused,
+  setDetailFocused,
+  onClose,
+}: {
+  state: WorkbenchState;
+  selected: HistoryEntry;
+  detailFocused: boolean;
+  setDetailFocused: (focused: boolean) => void;
+  onClose: () => void;
+}) {
+  const [detailTab, setDetailTab] = useState<'request' | 'response' | 'diff' | 'info'>('response');
+  const [note, setNote] = useState('');
+  const [tags, setTags] = useState('');
+  useEffect(() => {
+    setDetailTab('response');
+  }, [selected.id]);
+  useEffect(() => {
+    setNote(selected.note ?? '');
+    setTags(selected.tags.join(', '));
+  }, [selected.id, selected.note, selected.tags.join(',')]);
+  return (
+    <>
+      <div className="detail-heading">
+        <div>
+          <Method method={selected.method} />
+          <strong title={selected.path}>{selected.path}</strong>
+          <button
+            className="detail-focus-button"
+            aria-label={detailFocused ? '返回列表' : '放大详情'}
+            title={detailFocused ? '返回列表' : '放大详情'}
+            onClick={() => setDetailFocused(!detailFocused)}
+          >
+            <Icon name="expand" size={14} />
+            {detailFocused ? '返回列表' : '放大'}
+          </button>
+          <button
+            className="detail-close-button"
+            aria-label="关闭详情"
+            title="关闭详情，返回列表"
+            onClick={onClose}
+          >
+            <Icon name="close" size={16} />
+          </button>
+        </div>
+        <code>{selected.url}</code>
+        <div className="detail-summary">
+          <span
+            className={`status-summary ${selected.error || (selected.response?.status ?? 0) >= 400 ? 'failed' : ''}`}
+          >
+            {selected.response ? `HTTP ${selected.response.status}` : '未收到响应'}
+          </span>
+          <span>{Math.round(selected.duration).toLocaleString()} ms</span>
+          <time>{new Date(selected.startedAt).toLocaleString('zh-CN', { hour12: false })}</time>
+          {selected.mocked && <span className="mock-badge">MOCK</span>}
+        </div>
+        <div className="detail-actions">
+          <Button onClick={() => send('history.toRule', { id: selected.id, kind: 'mock' })} primary>
+            <Icon name="plus" size={14} />
+            生成 Mock
+          </Button>
+          <select
+            aria-label="从请求生成规则"
+            value=""
+            onChange={(e) => {
+              if (e.target.value) send('history.toRule', { id: selected.id, kind: e.target.value });
+            }}
+          >
+            <option value="">更多规则…</option>
+            <option value="request">修改请求</option>
+            <option value="response">修改响应</option>
+            <option value="redirect">转发地址</option>
+          </select>
+          <Button
+            danger
+            onClick={() => {
+              onClose();
+              send('history.delete', { id: selected.id });
+            }}
+          >
+            删除记录
+          </Button>
+        </div>
+      </div>
+      <div className="detail-tabs">
+        {(['response', 'request', 'diff', 'info'] as const).map((t, i) => (
+          <button
+            aria-pressed={t === detailTab}
+            title={
+              t === 'response' ? 'Response · 最终响应' : t === 'request' ? 'Request · 最终请求' : undefined
+            }
+            className={t === detailTab ? 'active' : ''}
+            key={t}
+            onClick={() => setDetailTab(t)}
+          >
+            {['响应', '请求', '修改对比', '备注与信息'][i]}
+          </button>
+        ))}
+      </div>
+      <div className="detail-body">
+        {selected.error && (
+          <div className="notice request-error">
+            <strong>请求未正常完成</strong>
+            <div>{selected.error}</div>
+            {!selected.response && <p>没有收到 HTTP 响应；此记录不能视为服务端返回的业务错误。</p>}
+          </div>
+        )}
+        {detailTab === 'request' && (
+          <SnapshotView key={`${selected.id}-request`} snapshot={selected.request} label="最终请求" />
+        )}
+        {detailTab === 'response' && (
+          <SnapshotView key={`${selected.id}-response`} snapshot={selected.response} label="最终响应" />
+        )}
+        {detailTab === 'diff' && (
+          <>
+            <div className="diff-label">请求 · 原始 → 自动规则 → 最终</div>
+            <div className="snapshot-grid">
+              <SnapshotView snapshot={selected.originalRequest} label="原始" />
+              <SnapshotView snapshot={selected.automaticRequest ?? selected.request} label="自动规则后" />
+              <SnapshotView snapshot={selected.request} label="最终" />
+            </div>
+            <div className="diff-label">响应 · 原始 → 自动规则 → 最终</div>
+            <div className="snapshot-grid">
+              <SnapshotView snapshot={selected.originalResponse} label="原始" />
+              <SnapshotView snapshot={selected.automaticResponse ?? selected.response} label="自动规则后" />
+              <SnapshotView snapshot={selected.response} label="最终" />
+            </div>
+          </>
+        )}
+        {detailTab === 'info' && (
+          <div className="info-form">
+            <dl>
+              <dt>目标地址</dt>
+              <dd>{selected.targetUrl}</dd>
+              <dt>耗时</dt>
+              <dd>{selected.duration} ms</dd>
+              <dt>请求规则</dt>
+              <dd>
+                {state.rules.find((r) => r.id === selected.requestRuleId)?.name ??
+                  selected.requestRuleId ??
+                  '未命中'}
+              </dd>
+              <dt>响应规则</dt>
+              <dd>
+                {state.rules.find((r) => r.id === selected.responseRuleId)?.name ??
+                  selected.responseRuleId ??
+                  '未命中'}
+              </dd>
+            </dl>
+            <label>
+              备注
+              <textarea aria-label="历史备注" value={note} onChange={(e) => setNote(e.target.value)} />
+            </label>
+            <label>
+              标签（英文逗号分隔）
+              <input aria-label="历史标签" value={tags} onChange={(e) => setTags(e.target.value)} />
+            </label>
+            <Button
+              primary
+              onClick={() =>
+                send('history.update', {
+                  id: selected.id,
+                  note,
+                  tags: tags
+                    .split(',')
+                    .map((t) => t.trim())
+                    .filter(Boolean),
+                })
+              }
+            >
+              保存备注
+            </Button>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 function newRule(kind: string): Rule {

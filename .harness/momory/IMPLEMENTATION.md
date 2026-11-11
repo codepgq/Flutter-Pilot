@@ -1,5 +1,21 @@
 # 实现与验证结论
 
+## 0.0.9 发布与 Cursor 安装（2026-11-11）
+
+- 用户授权提交全部当前改动、发布新版本、安装 Cursor 并推送远端；manifest、lockfile、MCP serverInfo、README、CHANGELOG和VSIX路径同步为0.0.9，交付API请求与历史独立Tab及全宽列表。
+- 本次布局已通过394项Vitest、51项Playwright；版本升级后类型、全仓格式、构建及VSIX打包通过，CLI安装0.0.9成功。28个分发文件与当前源码/构建、VSIX及安装目录逐项一致，manifest仅排除Cursor安装元数据。
+- 构建及安装桥接均通过真实SDK stdio握手：版本0.0.9、21工具、25 Prompts、5资源及离线指南。安装报告 artifacts/v0.0.9-install-report.json，安装包 artifacts/flutter-pilot-0.0.9.vsix。
+- 已fetch确认远端origin/main与发布前HEAD一致；本次授权在main提交并常规推送，不发布扩展商店。不启动IDE GUI、不强制重载窗口；当前Cursor窗口需用户方便时Reload Window加载新版。
+
+## API 与历史独立 Tab 及全宽请求布局（2026-11-11）
+
+- 顶级拆分“API 请求”“请求历史”。API 默认全宽紧凑列表，宽容器约37px/条，窄容器约52px/条；历史宽容器约35px/条，窄容器67px/条。未选中不占用详情空白区，点击后宽屏分栏、760px及以下切单栏详情，关闭恢复完整列表。
+- API 详情展示目录统计与最近完整请求，新增 api.select 按准确方法/主机/路径仅取最新记录再读取正文，不修改历史查询/分页；“查看调用历史”显式跳转筛选。selectedSource 保证异步详情按 Tab 来源分发，同请求编辑同步，清空清除两处缓存详情。
+- 沿用搜索、高级筛选、历史清空/删除/备注、JSON/原文、规则草稿及目录删除语义；移除同页三栏、折叠目录及互相冲突的响应式规则。README、CHANGELOG及需求记忆已更新。
+- 类型、构建、格式和 diff 检查通过；394项 Vitest、51项 Playwright 全部通过，覆盖最新API详情、查询隔离、空历史、窄屏密度/点击/关闭、Tab异步回写与清空。首次沙箱全量测试因回环监听 EPERM 失败，允许本机测试监听后全量通过。
+- 已目视检查浅色示例数据截图 artifacts/{api-request,request-history,api-detail,history-detail}-light-{1280,680,390}.png，以及1280/760/680/390深色布局；无横向溢出。1280可直接看到18条，390 API约14条、历史10条。截图生成记录 artifacts/http-layout-screenshot-report.json。
+- 版本保持0.0.8；此次未提交、安装新包或重载用户Cursor，未进行IDE GUI验收。
+
 ## 0.0.8 发布与规则卡片紧凑布局（2026-11-11）
 
 - 用户确认两行规则卡片，首行名称、类型、优先级与操作，第二行方法/URL；桌面约 64px、390px 窄窗口约 87px，长地址省略并提供完整 title，保留开关和全部操作。截图 artifacts/rules-compact-{1280,680,390}.png 已检查。

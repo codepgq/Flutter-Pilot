@@ -272,6 +272,7 @@ class Workbench {
   private pending = new Map<string, PendingBreakpoint>();
   private history: HistoryResult = { items: [], total: 0 };
   private selected?: HistoryEntry;
+  private selectedSource: 'apis' | 'history' = 'history';
   private sentSelected?: HistoryEntry;
   private sentPreview?: setup.SetupPreview;
   private apis: WorkbenchState['apis'] = [];
@@ -604,6 +605,7 @@ class Workbench {
     const message: Record<string, unknown> = { type: 'state', state };
     if (this.sentSelected !== this.selected) {
       message.selected = this.selected ?? null;
+      message.selectedSource = this.selectedSource;
       this.sentSelected = this.selected;
     }
     if (this.sentPreview !== this.preview) {
@@ -1528,6 +1530,24 @@ class Workbench {
           await this.reloadHistory();
           break;
         }
+        case 'api.select': {
+          this.requireHistory();
+          const { method, host, path } = payload;
+          if ([method, host, path].some((value) => typeof value !== 'string'))
+            throw new Error('API 标识无效');
+          const latest = await this.historyCall<HistoryResult>('history.list', {
+            method,
+            host,
+            path,
+            limit: 1,
+            offset: 0,
+          });
+          this.selectedSource = 'apis';
+          this.selected = latest.items[0]
+            ? await this.historyCall<HistoryEntry>('history.get', { id: latest.items[0].id })
+            : undefined;
+          break;
+        }
         case 'api.delete': {
           this.requireHistory();
           const { method, host, path } = payload;
@@ -1546,6 +1566,7 @@ class Workbench {
         }
         case 'history.select':
           this.requireHistory();
+          this.selectedSource = 'history';
           this.selected = await this.historyCall<HistoryEntry>('history.get', { id: payload.id });
           break;
         case 'history.update':

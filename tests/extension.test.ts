@@ -219,6 +219,11 @@ function latest() {
     .webview.messages.filter((m: any) => m.type === 'state')
     .at(-1);
 }
+function latestSelected() {
+  return fake.panels
+    .at(-1)
+    .webview.messages.findLast((message: any) => message.type === 'state' && 'selected' in message)?.selected;
+}
 function workspaceHash(workspace: string) {
   return createHash('sha256').update(pathToFileURL(workspace).toString()).digest('hex').slice(0, 24);
 }
@@ -438,6 +443,70 @@ describe('后台采集与独立API目录控制', () => {
       false,
     );
   });
+  it('点击 API 读取最新完整请求，不改变历史列表及其筛选和分页', async () => {
+    await open();
+    const engine = fake.engines[0];
+    const api = { method: 'POST', host: 'api.test', path: '/orders' };
+    const filtered = { items: [{ id: 'filtered-history' }], total: 61 };
+    const detail = { id: 'latest-api-history', response: { status: 201, body: '{"created":true}' } };
+    const original = engine.rpc.bind(engine);
+    vi.spyOn(engine, 'rpc').mockImplementation(async (...args: unknown[]) => {
+      const [method, params] = args as [string, any];
+      if (method === 'history.list') {
+        engine.calls.push({ method, params });
+        return params.limit === 1 ? { items: [{ id: detail.id }], total: 100 } : filtered;
+      }
+      if (method === 'history.get') {
+        engine.calls.push({ method, params });
+        return detail;
+      }
+      return original(method, params);
+    });
+    await message('history.query', { search: 'pending', status: 503, offset: 30 });
+    await vi.waitFor(() => expect(latest().state.history).toEqual(filtered));
+    const before = engine.calls.length;
+    await message('api.select', api);
+    await vi.waitFor(() => expect(latestSelected()).toEqual(detail));
+    expect(engine.calls.slice(before)).toEqual([
+      { method: 'history.list', params: { ...api, limit: 1, offset: 0 } },
+      { method: 'history.get', params: { id: detail.id } },
+    ]);
+    expect(latest().state.history).toEqual(filtered);
+    fake.confirm = '移除 API';
+    await message('api.delete', api);
+    expect(engine.calls.filter((call: any) => call.method === 'history.list').at(-1).params).toMatchObject({
+      search: 'pending',
+      status: 503,
+      offset: 30,
+      limit: 30,
+    });
+  });
+  it('API 没有历史时清除旧详情，不额外读取完整请求', async () => {
+    await open();
+    const engine = fake.engines[0];
+    await message('history.select', { id: 'previous-history' });
+    const before = engine.calls.length;
+    await message('api.select', { method: 'GET', host: 'api.test', path: '/empty' });
+    await vi.waitFor(() => expect(latestSelected()).toBeNull());
+    expect(engine.calls.slice(before)).toEqual([
+      {
+        method: 'history.list',
+        params: { method: 'GET', host: 'api.test', path: '/empty', limit: 1, offset: 0 },
+      },
+    ]);
+  });
+  it.each([
+    { host: 'api.test', path: '/orders' },
+    { method: 'GET', host: 123, path: '/orders' },
+    { method: 'GET', host: 'api.test', path: null },
+  ])('API 标识不是完整字符串时拒绝读取历史：%j', async (api) => {
+    await open();
+    const engine = fake.engines[0];
+    const before = engine.calls.length;
+    await message('api.select', api);
+    await vi.waitFor(() => expect(latest().state.lastError).toBe('API 标识无效'));
+    expect(engine.calls.slice(before)).toEqual([]);
+  });
   it('移除文件夹会退出对应后台引擎', async () => {
     const engine = fake.engines[0];
     fake.folderPresent = false;
@@ -647,6 +716,54 @@ describe('VM 连接模式扩展整合', () => {
     await activateCurrent();
     return privateStorage();
   }
+
+  it('VM 离线 API 点击按准确标识读取最新完整详情，保留历史筛选结果', async () => {
+    const storage = await activateVmMode();
+    const { VmHistoryStore } = await import('../src/vm/storage');
+    const db = new VmHistoryStore(storage, { retentionDays: 7, maxRecords: 10000 });
+    const api = { method: 'GET', host: 'api.test', path: '/orders' };
+    const request = {
+      method: api.method,
+      url: 'https://api.test/orders',
+      headers: [] as [string, string][],
+      body: '',
+      bodyEncoding: 'text' as const,
+      bodyBytes: 0,
+      truncated: false,
+      editable: true,
+    };
+    const response = { ...request, status: 200, body: '{"latest":true}', bodyBytes: 15 };
+    const now = Date.now();
+    for (const [i, id] of ['older-api', 'latest-api', 'different-host', 'different-path'].entries()) {
+      await db.put({
+        ...api,
+        host: id === 'different-host' ? 'other.test' : api.host,
+        path: id === 'different-path' ? '/other' : api.path,
+        id,
+        startedAt: now + i * 1000,
+        duration: 12,
+        url: request.url,
+        targetUrl: request.url,
+        originalRequest: request,
+        request,
+        response,
+        mocked: false,
+        note: '',
+        tags: [],
+      });
+    }
+    await db.close();
+    await open();
+    await message('history.query', { search: 'missing-record', offset: 30 });
+    await vi.waitFor(() => expect(latest().state.history.total).toBe(0));
+    await message('api.select', api);
+    await vi.waitFor(() => expect(latestSelected()?.id).toBe('latest-api'));
+    expect(latestSelected().response.body).toBe(response.body);
+    expect(latest().state.history).toEqual({ items: [], total: 0 });
+    await message('api.select', { ...api, path: '/no-history' });
+    await vi.waitFor(() => expect(latestSelected()).toBeNull());
+    expect(fake.engines[0].calls).toEqual([]);
+  });
 
   it('启动补查失败后，打开工作台重新发现并连接已运行的 Flutter，无需新调试事件', async () => {
     const { WebSocketServer } = await import('ws');
