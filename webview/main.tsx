@@ -52,6 +52,12 @@ type Tab = 'apis' | 'history' | 'rules' | 'breakpoints' | 'connection' | 'websoc
 type Snapshot = RequestSnapshot | ResponseSnapshot;
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
+    camera: (
+      <>
+        <path d="M3 7h4l2-3h6l2 3h4v13H3z" />
+        <circle cx="12" cy="13" r="4" />
+      </>
+    ),
     radar: (
       <>
         <circle cx="12" cy="12" r="9" />
@@ -389,6 +395,18 @@ function App() {
           {state.project?.name || state.workspace.split('/').filter(Boolean).at(-1) || '当前工作区'}
         </span>
         <div className="header-actions">
+          <Button
+            action="screenshot.capture"
+            disabled={state.busy || !vmMode || state.vm?.status !== 'connected'}
+            title={
+              vmMode && state.vm?.status === 'connected'
+                ? '截取 Flutter App，支持当前屏幕和滚动长图'
+                : '请先连接 Flutter Debug VM'
+            }
+          >
+            <Icon name="camera" size={15} />
+            截图
+          </Button>
           <span className={`status-pill ${running ? 'online' : ''}`}>
             <i />
             {vmMode

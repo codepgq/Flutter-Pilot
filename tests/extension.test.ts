@@ -303,6 +303,21 @@ afterEach(async () => {
   delete process.env.FLUTTER_PILOT_MCP_ROOT;
 });
 describe('扩展与工作台整合', () => {
+  it('侧栏与工作台截图共用连接校验，未连接时显示明确提示', async () => {
+    const manifest = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8'));
+    expect(manifest.contributes.viewsWelcome[0].contents).toContain('command:flutterPilot.screenshot');
+    expect(
+      manifest.contributes.commands.some((item: any) => item.command === 'flutterPilot.screenshot'),
+    ).toBe(true);
+    expect(fake.commands.has('flutterPilot.screenshot')).toBe(true);
+    await open();
+    await message('screenshot.capture');
+    expect(latest().state.lastError).toContain('Flutter Debug VM');
+    const vscode = await import('vscode');
+    vi.mocked(vscode.window.showErrorMessage).mockClear();
+    await fake.commands.get('flutterPilot.screenshot')?.();
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining('Flutter Debug VM'));
+  });
   it('仅放行原生设置链接，旧设置消息不能再触发编辑器返回值的跨进程序列化', async () => {
     const panel = await open();
     expect(panel.options.enableCommandUris).toEqual(['workbench.action.openSettings']);

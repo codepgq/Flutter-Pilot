@@ -88,6 +88,8 @@ describe('Flutter VM UI controller', () => {
       ['wait_for_widget', { key, state: 'unbounded' }],
       ['get_ui_snapshot', { maxNodes: 1001 }],
       ['evaluate', { expression: 'print(1)' }],
+      ['take_screenshot', { mode: 'unknown' }],
+      ['take_screenshot', { mode: 'long' }],
     ] as const)
       expect((await ui.execute(tool, args)).ok).toBe(false);
     expect(rpc.calls).toHaveLength(0);

@@ -1,5 +1,19 @@
 # 实现与验证结论
 
+## 0.0.11 发布（2026-11-12）
+
+- 按用户最新授权发布统一 Mock 场景与 App 截图，版本、MCP serverInfo、安装文档、CHANGELOG 与 VSIX 路径同步为 0.0.11，包含此前本地 Scene 提交与本轮截图改动。
+- 440 项 Vitest、63 项 Playwright、类型、全仓格式与 diff 检查通过；Python 代理 19 项通过、21 项缺 MITMDUMP 跳过。构建并生成 `artifacts/flutter-pilot-0.0.11.vsix`。
+- 远端检查确认 origin/main 为 2d72c92；按授权在 main 提交并常规推送。未要求安装用户 Cursor，继续采用本地 VSIX、不发布商店的既有流程。
+
+## App 截图与长图（2026-11-12）
+
+- 左侧原生 viewsWelcome、侧栏标题图标和工作台顶部“截图”接入 flutterPilot.screenshot / screenshot.capture，共用截图模式、区域选择、保存和预览流程；未连接 Debug VM、繁忙和代理模式阻止截图。
+- resources/vm/screenshot.dart.txt 经现有 VmUiController 注入，逐屏裁片覆盖懒加载列表；finally 在成功、失败或取消时恢复滚动位置。PNG 不进入工作台 state、历史或日志；可取消进度复用 UI 会话失效机制。
+- src/screenshot.ts 用 pngjs 校验并在扩展端无损拼接，规避真实模拟器中 GPU 长纹理被缩小到 8192 的问题；累计高度不全、尺寸不匹配和超限拒绝保存。补充第三方许可。
+- 类型、构建、相关格式与 diff 检查通过；438 项全量 Vitest 通过后新增入口集成回归（相关 71 项通过）；63 项全量 Playwright 通过。独立 iOS 模拟器 57 项检查通过，含屏幕 PNG、804×9082 长图、可见项位置恢复、取消恢复、多区域枚举、过期目标与超限拒绝；长图末尾 Item 79 和拼接处已目视检查。
+- README 记录入口、使用步骤与边界；Android、iOS 真机和真实 IDE 保存对话框尚未现场验收。保持 0.0.10，未提交、打包、发布或安装用户 Cursor。
+
 ## HTTP / WS Scene 实现（2026-11-12）
 
 - SceneStore 使用原子创建/替换、整份严格校验及外部编辑检测；SceneController 串行持久化、场景投影与运行时同步，包含连接标识/revision 防旧结果、租约等待重试、采集暂停及临时 WS 规则清理。

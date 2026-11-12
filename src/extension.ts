@@ -10,6 +10,7 @@ import { validateSceneDocument } from './scene-model';
 import { isFlutterWorkspace } from './discovery';
 import { VmSession } from './vm/session';
 import { VmUiController } from './vm/ui';
+import { takeAppScreenshot } from './screenshot';
 import { McpSessionServer } from './mcp/server';
 import { AgentAdapterManager, detectNodeRuntime } from './mcp/adapters';
 import { McpNetworkController } from './mcp/network';
@@ -137,6 +138,10 @@ export async function activate(context: vscode.ExtensionContext) {
       ),
     );
   command('flutterPilot.open', open);
+  command('flutterPilot.screenshot', async () => {
+    const session = await open();
+    await session?.screenshot();
+  });
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('flutterPilot.launcher', {
       getTreeItem: (item: vscode.TreeItem) => item,
@@ -910,6 +915,69 @@ class Workbench {
       this.push();
     }
   }
+  async screenshot(): Promise<void> {
+    if (this.busy) return;
+    await this.operation(async () => {
+      if (this.mode !== 'vm' || this.vm.state.status !== 'connected')
+        throw new Error('请先在“连接与诊断”连接 Flutter Debug VM，再截取 App 页面。');
+      await takeAppScreenshot({
+        execute: (tool, args) => this.ui.execute(tool, args),
+        chooseMode: async () =>
+          (
+            await vscode.window.showQuickPick(
+              [
+                { label: '当前屏幕', description: '截取 Flutter App 当前可见页面', mode: 'screen' as const },
+                {
+                  label: '滚动长截图',
+                  description: '从顶部滚动到底部，拼接后恢复滚动位置',
+                  mode: 'long' as const,
+                },
+              ],
+              { title: '截取 Flutter App', placeHolder: '选择截图模式' },
+            )
+          )?.mode,
+        chooseTarget: async (targets) =>
+          vscode.window.showQuickPick(targets, { title: '选择长截图的滚动区域' }),
+        destination: async (mode) =>
+          (
+            await vscode.window.showSaveDialog({
+              title: '保存 Flutter App 截图',
+              defaultUri: vscode.Uri.joinPath(
+                this.folder.uri,
+                `flutter-${mode}-${new Date().toISOString().replace(/[:.]/g, '-')}.png`,
+              ),
+              filters: { 'PNG 图片': ['png'] },
+              saveLabel: '截图并保存',
+            })
+          )?.fsPath,
+        capture: async (args) =>
+          vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title:
+                args.mode === 'long' ? '正在截取 Flutter 长图，请保持页面不变…' : '正在截取 Flutter App…',
+              cancellable: true,
+            },
+            async (_progress, token) => {
+              const cancellation = token.onCancellationRequested(() => this.ui.invalidate());
+              try {
+                if (token.isCancellationRequested) return { ok: false, code: 'CANCELLED' };
+                const result = await this.ui.execute('take_screenshot', args);
+                return token.isCancellationRequested ? { ok: false, code: 'CANCELLED' } : result;
+              } finally {
+                cancellation.dispose();
+              }
+            },
+          ),
+        save: async (path, png) => {
+          await vscode.workspace.fs.writeFile(vscode.Uri.file(path), png);
+        },
+        preview: async (path) => {
+          await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path));
+        },
+      });
+    });
+  }
   private requireEngine() {
     if (this.engine.state.status !== 'running')
       throw new Error('请先点击“安装 / 初始化引擎”，也可以在设置中指定本地 mitmdump。');
@@ -1246,6 +1314,10 @@ class Workbench {
       return;
     }
     await this.initialize();
+    if (action === 'screenshot.capture') {
+      await this.screenshot();
+      return;
+    }
     if (action === 'start') {
       if (this.mode === 'vm') throw new Error('请输入 Flutter VM WS 并点击“连接 VM”。');
       await this.operation(async () => {

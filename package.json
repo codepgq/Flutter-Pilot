@@ -3,7 +3,7 @@
   "displayName": "Flutter Pilot",
   "icon": "resources/flutter-pilot-icon.png",
   "description": "Flutter 运行时调试与 Agent 联调工作台：HTTP/WebSocket 采集与 Mock、UI 精确操作、热重载和 MCP。",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "publisher": "flutter-pilot",
   "license": "MIT",
   "engines": {
@@ -58,7 +58,7 @@
     "viewsWelcome": [
       {
         "view": "flutterPilot.launcher",
-        "contents": "Flutter 运行时调试与 Agent 联调工作台。\n[打开工作台](command:flutterPilot.open)\n请在受信任的本地 Flutter 工作区中使用。"
+        "contents": "Flutter 运行时调试与 Agent 联调工作台。\n[打开工作台](command:flutterPilot.open)\n[截取 App / 长截图](command:flutterPilot.screenshot)\n请在受信任的本地 Flutter 工作区中使用。"
       }
     ],
     "menus": {
@@ -67,6 +67,11 @@
           "command": "flutterPilot.open",
           "when": "view == flutterPilot.launcher",
           "group": "navigation"
+        },
+        {
+          "command": "flutterPilot.screenshot",
+          "when": "view == flutterPilot.launcher",
+          "group": "navigation@2"
         }
       ]
     },
@@ -75,6 +80,11 @@
         "command": "flutterPilot.open",
         "title": "Flutter Pilot: 打开工作台",
         "icon": "$(radio-tower)"
+      },
+      {
+        "command": "flutterPilot.screenshot",
+        "title": "Flutter Pilot: 截取 App / 长截图",
+        "icon": "$(device-camera)"
       },
       {
         "command": "flutterPilot.start",
@@ -150,7 +160,7 @@
     "test:proxy": "python3 -m unittest discover -s tests/proxy -v",
     "test:ui": "playwright test",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-pilot-0.0.10.vsix",
+    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-pilot-0.0.11.vsix",
     "test:ide": "node scripts/ide-test.mjs",
     "format:check": "prettier --check \"src/**/*.ts\" \"webview/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/*.{mjs,cjs}\" \"*.{json,ts,mts}\"",
     "test:vm": "node scripts/vm-injection-smoke.mjs",
@@ -167,6 +177,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
     "jsonc-parser": "^3.3.1",
+    "pngjs": "^7.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "smol-toml": "^1.9.1",
@@ -176,6 +187,7 @@
   "devDependencies": {
     "@playwright/test": "^1.56.0",
     "@types/node": "^22.0.0",
+    "@types/pngjs": "^6.0.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/vscode": "^1.96.0",

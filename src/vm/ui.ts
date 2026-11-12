@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { VmRpc } from './client';
 import { dartLiteral } from './injection';
 
@@ -31,6 +31,8 @@ const tools = new Set([
   'scroll',
   'wait_for_widget',
   'inspect_key_issues',
+  'screenshot_targets',
+  'take_screenshot',
 ]);
 const failure = (code: string, message: string): UiResult => ({ ok: false, code, message });
 
@@ -102,6 +104,12 @@ export class VmUiController {
 
   private validate(tool: string, args: Record<string, unknown>): UiResult | undefined {
     if (!tools.has(tool)) return failure('UNKNOWN_TOOL', '不支持此 UI 工具。');
+    if (
+      tool === 'take_screenshot' &&
+      ((args.mode !== 'screen' && args.mode !== 'long') ||
+        (args.mode === 'long' && typeof args.targetId !== 'string'))
+    )
+      return failure('INVALID_ARGUMENT', '请选择截图模式和长图滚动区域。');
     const validKey = (key: unknown): key is UiKey => {
       if (!key || typeof key !== 'object') return false;
       const item = key as UiKey;
@@ -205,6 +213,7 @@ export class VmUiController {
       if (!library || !developer || !convert) continue;
       const emitter = await this.evaluate(isolate.id, developer.id, 'postEvent');
       const decoder = await this.evaluate(isolate.id, convert.id, 'jsonDecode');
+      const encoder = await this.evaluate(isolate.id, convert.id, 'base64Encode');
       const inspector = info.libraries?.find(
         (item: any) => item.uri === 'package:flutter/src/widgets/widget_inspector.dart',
       );
@@ -228,7 +237,17 @@ export class VmUiController {
             'utf8',
           );
         }
+        const screenshotTemplate = await readFile(
+          join(
+            this.options.templatePath
+              ? dirname(this.options.templatePath)
+              : join(__dirname, '../../resources/vm'),
+            'screenshot.dart.txt',
+          ),
+          'utf8',
+        );
         const template = this.template
+          .replace('__SCREENSHOT__', screenshotTemplate)
           .split(/\r?\n/)
           .filter((line) => !line.trimStart().startsWith('//'))
           .join(' ')
@@ -241,6 +260,7 @@ export class VmUiController {
           {
             emitEvent: emitter.id,
             decodeArgs: decoder.id,
+            encodeBytes: encoder.id,
             ...(location ? { creationLocation: location.id } : {}),
           },
           zone.id,
@@ -264,7 +284,9 @@ export class VmUiController {
   private async dispatch(tool: string, args: Record<string, unknown>, generation: number): Promise<UiResult> {
     const anchor = this.anchor!;
     const operationId = randomUUID();
-    const timeout = this.options.timeoutMs ?? Math.max(20000, Number(args.timeoutMs ?? 0) + 2000);
+    const timeout =
+      this.options.timeoutMs ??
+      (tool === 'take_screenshot' ? 65000 : Math.max(20000, Number(args.timeoutMs ?? 0) + 2000));
     const result = new Promise<UiResult>((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(operationId);

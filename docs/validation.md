@@ -1,5 +1,12 @@
 # 验收记录
 
+## 0.0.11 本地 VSIX 发布（2026-11-12）
+
+- 统一发布 HTTP / WebSocket Mock 场景与 App 当前屏幕 / 滚动长截图；manifest、lockfile、MCP serverInfo、README、CHANGELOG 与 VSIX 命名统一为 0.0.11。
+- 本轮发布回归：440 项 Vitest、63 项 Playwright 全部通过，TypeScript / Webview 类型检查、Prettier、构建和 diff 检查通过；Python 代理 19 项通过、21 项因未设置 MITMDUMP 跳过。
+- 截图实现阶段已有独立 Flutter 3.47.8 / iOS 模拟器 57 项检查，报告 `artifacts/ui-flutter-smoke-report.json`：包含当前屏幕、804 × 9082 完整长图、原位置恢复、取消恢复、多区域枚举、过期目标和超限拒绝，fixture 源码哈希未变。本轮发布没有重复设备验收。
+- 安装包为 `artifacts/flutter-pilot-0.0.11.vsix`。本次沿用本地 VSIX 与 origin/main 常规推送流程；未安装用户 Cursor、未发布扩展商店。真实 IDE 保存对话框、Android / iOS 真机和完整 Scene 的设备恢复验收边界仍见下方记录。
+
 ## HTTP / WebSocket Mock Scene（2026-11-12，源码未发布）
 
 - 版本保持 0.0.10。429 项 Vitest、61 项 Playwright、TypeScript / Webview 类型检查、Prettier、构建和 diff 检查通过。
