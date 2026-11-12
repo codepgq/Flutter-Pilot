@@ -137,7 +137,7 @@
           "type": "boolean",
           "default": true,
           "scope": "resource",
-          "description": "VM 模式下自动发现本项目的 Flutter Debug 会话，唯一可用会话自动连接并记录 HTTP。Dio Mock、WS 采集和 WS Mock 仍需手动开启。"
+          "description": "VM 模式下自动发现本项目的 Flutter Debug 会话，唯一可用会话自动连接并记录 HTTP。已激活场景会在连接后自动应用；采集也可手动开启。"
         }
       }
     }

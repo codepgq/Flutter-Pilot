@@ -221,8 +221,11 @@ Future<void> main(List<String> args) async {
     const connection = connections[0];
     assert.equal(connection.capture, 'attached', JSON.stringify(warnings));
     assert.equal(connection.url, undefined, '接入前握手未知时不猜 URL');
-    await assert.rejects(injector.send(connection.id, 'mock-disabled'), /未确认/);
-    assert.ok(!received.includes('mock-disabled'), 'Mock关闭不允许手动发送');
+    await injector.send(connection.id, 'capture-only-send');
+    await until(() => received.includes('capture-only-send'), '无激活场景时手动发送');
+    await injector.push(connection.id, 'capture-only-push');
+    await until(() => app.some((m) => m.received === 'capture-only-push'), '无激活场景时手动推送');
+    assert.ok(!received.includes('capture-only-push'), '采集模式推送不发往服务端');
     const rule = (id, direction, contains, action) => ({
       id,
       name: id,

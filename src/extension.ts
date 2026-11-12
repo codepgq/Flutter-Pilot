@@ -4,7 +4,9 @@ import { readFile, mkdir, writeFile, rename, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { EngineManager } from './engine';
 import { RuntimeManager } from './runtime';
-import { RuleStore } from './store';
+import { SceneStore } from './scenes';
+import { SceneController } from './scene-controller';
+import { validateSceneDocument } from './scene-model';
 import { isFlutterWorkspace } from './discovery';
 import { VmSession } from './vm/session';
 import { VmUiController } from './vm/ui';
@@ -20,7 +22,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { VmDiscovery, createVscodeDiscoveryHost } from './vm/discovery';
 import { VmAutoConnector } from './vm/autoConnect';
 import { isWebSocketHandshake } from './vm/profiler';
-import { WsRuleStore, validateWsRuleDocument } from './ws/rules';
+import { validateWsRuleDocument, wsUrlMatches } from './ws/rules';
 import type { WsRule, WsMessageQuery } from './ws/model';
 import { openProjectBinding, type ProjectBinding, type ProjectSettings } from './project';
 import { prepareProjectStorage } from './projectStorage';
@@ -259,9 +261,10 @@ class Workbench {
   private initialized = false;
   private readonly engine = new EngineManager();
   private readonly runtime: RuntimeManager;
-  private readonly store: RuleStore;
-  private readonly wsRules: WsRuleStore;
-  private wsPersistentRules: WsRule[] = [];
+  private readonly store: SceneStore;
+  private readonly scenes: SceneController;
+  private sceneTimer?: ReturnType<typeof setTimeout>;
+  private vmEpoch = 0;
   private panel?: vscode.WebviewPanel;
   private initialization?: Promise<void>;
   private connectionDevices: string[] = [];
@@ -280,6 +283,7 @@ class Workbench {
   private apis: WorkbenchState['apis'] = [];
   private query: HistoryQuery = { limit: 30, offset: 0 };
   private proxyActive = false;
+  private engineEpoch = 0;
   private lan = false;
   private connectionHost = '127.0.0.1';
   private addresses = devices.discoverConnectionAddresses();
@@ -306,8 +310,7 @@ class Workbench {
   ) {
     this.projectSettings = { ...project.config.settings };
     this.configuredPort = project.config.connection.configuredPort;
-    this.store = new RuleStore(project.rulesDirectory);
-    this.wsRules = new WsRuleStore(project.rulesDirectory);
+    this.store = new SceneStore(project.rulesDirectory);
     this.vm = new VmSession(
       this.storage,
       {
@@ -320,41 +323,88 @@ class Workbench {
     this.ui = new VmUiController(this.vm.client, {
       templatePath: join(context.extensionPath, 'resources', 'vm', 'ui.dart.txt'),
     });
-    this.mcpNetwork = new McpNetworkController({
-      httpRulesPath: this.store.file,
-      wsRulesPath: this.wsRules.file,
-      readHttpRules: async () => (await this.store.load()).rules,
-      readWsRules: async () => (await this.wsRules.load()).rules,
-      applyHttpRules: async (rules) => {
-        this.rules = rules;
-        await this.syncSavedRules();
-      },
-      applyWsRules: async (rules) => {
-        this.wsPersistentRules = rules;
-        await this.vm.websocket.updateRules([
-          ...rules,
-          ...this.vm.websocket.state.rules.filter(
-            (r) =>
-              !!r.match.connectionId &&
-              this.vm.websocket.state.connections.some(
-                (c) => c.id === r.match.connectionId && c.status === 'open',
+    this.scenes = new SceneController(this.store, {
+      snapshot: () => ({
+        key: `${this.mode}:${this.vmEpoch}:${this.vm.state.status}:${this.vm.state.isolates}:${this.engineEpoch}:${this.proxyActive}`,
+        mode: this.mode,
+        connected:
+          this.mode === 'vm'
+            ? this.vm.state.status === 'connected'
+            : this.engine.state.status === 'running' && this.proxyActive,
+        httpApplied:
+          this.mode === 'vm'
+            ? this.vm.state.mockEnabled && this.vm.state.instances > 0
+            : this.proxyActive && !this.ruleSyncError,
+        wsApplied:
+          this.vm.websocket.state.mockEnabled &&
+          this.vm.websocket.state.connections.some(
+            (connection) =>
+              connection.status === 'open' &&
+              connection.capture === 'attached' &&
+              this.vm.websocket.state.rules.some(
+                (rule) =>
+                  rule.enabled &&
+                  (rule.match.connectionId === connection.id ||
+                    (!!connection.url && !!rule.match.url && wsUrlMatches(rule.match.url, connection.url))),
               ),
           ),
-        ]);
+        httpError: this.ruleSyncError,
+        wsError: this.vm.websocket.state.ruleSyncError ?? this.vm.websocket.state.error,
+      }),
+      disable: async (domain) => {
+        if (domain === 'http') {
+          await this.vm.setMockEnabled(false);
+          if (this.engine.state.status === 'running') {
+            try {
+              await this.engine.rpc('rules.sync', { version: 1, rules: [], revision: ++this.ruleRevision });
+            } catch (error) {
+              await this.engine.stop();
+              throw error;
+            }
+          }
+        } else await this.vm.websocket.setMockEnabled(false);
       },
+      project: async (http, ws) => {
+        this.rules = http;
+        this.ruleSyncError = undefined;
+        await this.vm.updateRules(http);
+        await this.vm.websocket.updateRules(ws);
+      },
+      enable: async (domain) => {
+        if (domain === 'http') {
+          if (this.mode === 'vm') {
+            await this.vm.setCaptureEnabled(true);
+            await this.vm.setMockEnabled(true);
+          } else await this.syncRules();
+        } else {
+          await this.vm.websocket.setCaptureEnabled(true);
+          await this.vm.websocket.setMockEnabled(true);
+        }
+      },
+      capture: (domain, enabled) =>
+        domain === 'http' ? this.vm.setCaptureEnabled(enabled) : this.vm.websocket.setCaptureEnabled(enabled),
+      changed: () => this.push(),
+    });
+    this.mcpNetwork = new McpNetworkController({
+      scenesPath: this.store.file,
+      listScenes: () => this.scenes.summary(),
+      activateScene: (id) => this.scenes.activate(id),
+      reloadScenes: () => this.scenes.reload(),
       status: () => ({
         vmConnected: this.vm.state.status === 'connected',
+        scene: { activeSceneId: this.scenes.document.activeSceneId, runtime: this.scenes.runtime },
         http: {
-          captureEnabled: !!this.vm.state.captureEnabled,
-          mockEnabled: this.vm.state.mockEnabled,
-          runtimeApplied: this.vm.state.mockEnabled && this.vm.state.instances > 0,
+          captureEnabled: this.mode === 'proxy' ? this.proxyActive : !!this.vm.state.captureEnabled,
+          mockEnabled:
+            this.mode === 'proxy' ? this.scenes.runtime.http.status === 'applied' : this.vm.state.mockEnabled,
+          runtimeApplied: this.scenes.runtime.http.status === 'applied',
           rules: this.rules.length,
           syncError: this.ruleSyncError,
         },
         ws: {
           captureEnabled: this.vm.websocket.state.captureEnabled,
           mockEnabled: this.vm.websocket.state.mockEnabled,
-          runtimeApplied: this.vm.websocket.state.mockEnabled && this.vm.websocket.state.status === 'active',
+          runtimeApplied: this.scenes.runtime.ws.status === 'applied',
           rules: this.vm.websocket.state.rules.length,
           syncError: this.vm.websocket.state.ruleSyncError,
         },
@@ -377,14 +427,12 @@ class Workbench {
             }
           : result;
       },
-      setCapture: (domain, enabled) =>
-        domain === 'http' ? this.vm.setCaptureEnabled(enabled) : this.vm.websocket.setCaptureEnabled(enabled),
-      setMock: (domain, enabled) =>
-        domain === 'http' ? this.vm.setMockEnabled(enabled) : this.vm.websocket.setMockEnabled(enabled),
+      setCapture: (domain, enabled) => this.scenes.setCapture(domain, enabled),
       injectWs: (connectionId, text, signal) => this.vm.websocket.push(connectionId, text, signal),
       sendWs: (connectionId, text, signal) => this.vm.websocket.send(connectionId, text, signal),
     });
     this.vm.client.on('disconnected', () => {
+      this.vmEpoch++;
       this.ui.invalidate();
       this.mcpState.ui = { supported: false, reason: 'VM 已断开，请连接后重新探测' };
     });
@@ -423,6 +471,12 @@ class Workbench {
     this.vmAuto.on('change', () => this.push());
     this.vm.on('change', () => {
       this.vmAuto.connectionChanged();
+      this.scenes.expireTemporary(
+        this.vm.websocket.state.connections
+          .filter((connection) => connection.status === 'open')
+          .map((connection) => connection.id),
+      );
+      this.scheduleSceneRestore();
       this.push();
     });
     this.vm.on('history', () => {
@@ -443,6 +497,7 @@ class Workbench {
     this.engine.on('status', (state) => {
       this.proxyActive = state.proxyActive;
       if (state.status !== 'running') this.pending.clear();
+      this.scheduleSceneRestore();
       if (state.error) this.lastError = state.error;
       this.push();
     });
@@ -581,6 +636,9 @@ class Workbench {
       ws: { ...this.vm.websocket.state },
       mcp: this.mcpState,
       rules: this.rules,
+      scenes: this.scenes.document,
+      selectedSceneId: this.scenes.selected?.id,
+      sceneRuntime: this.scenes.runtime,
       history: this.history,
       apis: this.apis,
       pending: [...this.pending.values()],
@@ -632,9 +690,7 @@ class Workbench {
   }
   private async initializeSession() {
     await mkdir(this.storage, { recursive: true, mode: 0o700 });
-    this.rules = (await this.store.load()).rules;
-    this.wsPersistentRules = (await this.wsRules.load()).rules;
-    await this.vm.websocket.updateRules(this.wsPersistentRules);
+    await this.scenes.initialize();
     await this.vm.websocket.init();
     // Existing HTTP facts stay intact; only positively identified upgrade records are projected.
     for (let offset = 0; offset < 100000; offset += 100) {
@@ -762,6 +818,7 @@ class Workbench {
     const file =
       executable ?? (await this.runtime.ensureExecutable(config.get<string>('enginePath') || undefined));
     if (this.disposed) throw new Error('工作台已关闭，未启动代理引擎。');
+    ++this.engineEpoch;
     await this.engine.start({
       executable: file,
       addonPath: join(this.context.extensionPath, 'proxy', 'addon.py'),
@@ -780,13 +837,15 @@ class Workbench {
       await this.engine.stop();
       return;
     }
-    await this.syncRules();
+    await this.engine.rpc('rules.sync', { version: 1, rules: [], revision: ++this.ruleRevision });
+    this.scheduleSceneRestore();
     await this.engine.rpc('breakpoint.setInteractive', { enabled: this.mode === 'proxy' && !!this.panel });
     await this.health();
   }
   private async health() {
     const h = await this.engine.rpc<{ proxyActive: boolean; caCertPath?: string }>('health', {});
     this.proxyActive = h.proxyActive;
+    this.scheduleSceneRestore();
     this.push();
     return h;
   }
@@ -947,17 +1006,21 @@ class Workbench {
       this.log(typeof event.data === 'string' ? event.data : JSON.stringify(event.data));
     this.push();
   }
-  private async saveRules(rules: unknown) {
+  private scheduleSceneRestore() {
+    if (this.sceneTimer || this.disposed) return;
+    this.sceneTimer = setTimeout(() => {
+      this.sceneTimer = undefined;
+      if (!this.disposed)
+        void this.enqueue(() => this.scenes.reconcile()).catch((error) => this.report(error));
+    }, 500);
+    this.sceneTimer.unref?.();
+  }
+  private async saveRules(rules: unknown, sceneId = this.scenes.selected?.id) {
     const document = validateRuleDocument({ version: 1, rules });
     await this.project.reload();
-    const disk = await this.store.load();
-    if (JSON.stringify(disk.rules) !== JSON.stringify(this.rules))
-      throw new Error('项目规则文件已被修改，请先在“连接与诊断”点击“读取项目文件”，再编辑规则。');
-    await this.store.save(document);
-    this.rules = document.rules;
-    await this.syncSavedRules();
+    await this.scenes.saveHttp(document.rules, sceneId);
   }
-  private async saveWsRules(rules: unknown) {
+  private async saveWsRules(rules: unknown, sceneId = this.scenes.selected?.id) {
     const document = validateWsRuleDocument({ version: 1, rules });
     for (const rule of document.rules) {
       if (
@@ -971,30 +1034,7 @@ class Workbench {
       )
         throw new Error('临时 WS 规则只能绑定当前已接入的在线连接');
     }
-    const persistent = document.rules.filter((rule) => !rule.match.connectionId);
-    await this.wsRules.save(persistent, this.wsPersistentRules);
-    this.wsPersistentRules = persistent;
-    await this.vm.websocket.updateRules(document.rules);
-  }
-  private async syncSavedRules() {
-    if (this.mode === 'vm') {
-      try {
-        const results = await Promise.allSettled([
-          this.vm.updateRules(this.rules),
-          ...(this.engine.state.status === 'running' ? [this.syncRules()] : []),
-        ]);
-        const failed = results.find((result) => result.status === 'rejected');
-        if (failed?.status === 'rejected') throw failed.reason;
-        this.ruleSyncError = this.vm.state.mockEnabled
-          ? undefined
-          : '已保存；连接 VM 并开启实验性 Dio Mock 后生效。';
-      } catch (error) {
-        this.ruleSyncError = `已保存，但运行中的会话未全部确认生效：${messageOf(error)}`;
-        throw error;
-      }
-    } else if (this.engine.state.status === 'running') await this.syncRules();
-    else this.ruleSyncError = '已保存；初始化引擎后生效。';
-    this.push();
+    await this.scenes.saveWs(document.rules, sceneId);
   }
   private adapters() {
     return new AgentAdapterManager({
@@ -1220,7 +1260,51 @@ class Workbench {
       return;
     }
     await this.operation(async () => {
+      if (
+        (action.startsWith('rules.') || action.startsWith('ws.rules.')) &&
+        typeof payload.sceneId === 'string' &&
+        payload.sceneId !== this.scenes.selected?.id
+      )
+        throw new Error('目标场景已切换，请重新打开规则编辑器');
       switch (action) {
+        case 'scenes.select':
+          this.scenes.select(String(payload.id));
+          break;
+        case 'scenes.activate':
+          await this.scenes.activate(String(payload.id));
+          break;
+        case 'scenes.deactivate':
+          await this.scenes.activate(null);
+          break;
+        case 'scenes.create':
+          await this.scenes.create(String(payload.name ?? '新场景'));
+          break;
+        case 'scenes.duplicate': {
+          const scene = this.scenes.document.scenes.find((item) => item.id === payload.id);
+          if (!scene) throw new Error('场景不存在');
+          await this.scenes.create(`${scene.name}（副本）`, scene);
+          break;
+        }
+        case 'scenes.rename':
+          await this.scenes.change((doc) => {
+            const scene = doc.scenes.find((item) => item.id === payload.id);
+            if (!scene) throw new Error('场景不存在');
+            scene.name = String(payload.name ?? '');
+          });
+          break;
+        case 'scenes.delete': {
+          const answer = await vscode.window.showWarningMessage(
+            '删除场景及其全部规则？激活场景将同时停用。',
+            { modal: true },
+            '删除场景',
+          );
+          if (answer === '删除场景')
+            await this.scenes.change((doc) => {
+              doc.scenes = doc.scenes.filter((item) => item.id !== payload.id);
+              if (doc.activeSceneId === payload.id) doc.activeSceneId = null;
+            });
+          break;
+        }
         case 'mcp.enable':
           await this.setMcpEnabled(payload.enabled === true);
           break;
@@ -1266,10 +1350,7 @@ class Workbench {
         }
         case 'ws.capture':
           if (this.mode !== 'vm') throw new Error('WS 采集仅支持 VM 模式');
-          await this.vm.websocket.setCaptureEnabled(payload.enabled === true);
-          break;
-        case 'ws.mock':
-          await this.vm.websocket.setMockEnabled(payload.enabled === true);
+          await this.scenes.setCapture('ws', payload.enabled === true);
           break;
         case 'ws.rescan':
           await this.vm.websocket.rescan();
@@ -1309,39 +1390,42 @@ class Workbench {
           break;
         }
         case 'ws.rules.open':
-          await vscode.window.showTextDocument(vscode.Uri.file(this.wsRules.file), { preview: false });
+          await vscode.window.showTextDocument(vscode.Uri.file(this.store.file), { preview: false });
           break;
         case 'ws.rules.save': {
           const rule = payload.rule as WsRule;
-          const current = this.vm.websocket.state.rules;
+          const targetId =
+            typeof payload.targetSceneId === 'string' ? payload.targetSceneId : this.scenes.selected?.id;
+          const target = this.scenes.document.scenes.find((scene) => scene.id === targetId);
+          if (!target) throw new Error('请选择目标场景');
+          const current = this.scenes.wsRules(target);
           await this.saveWsRules(
-            current.some((r) => r.id === rule?.id)
-              ? current.map((r) => (r.id === rule?.id ? rule : r))
+            current.some((item) => item.id === rule?.id)
+              ? current.map((item) => (item.id === rule.id ? rule : item))
               : [...current, rule],
+            target.id,
           );
           break;
         }
         case 'ws.rules.toggle':
           await this.saveWsRules(
-            this.vm.websocket.state.rules.map((r) =>
-              r.id === payload.id ? { ...r, enabled: !r.enabled } : r,
-            ),
+            this.scenes.wsRules().map((r) => (r.id === payload.id ? { ...r, enabled: !r.enabled } : r)),
           );
           break;
         case 'ws.rules.delete':
-          await this.saveWsRules(this.vm.websocket.state.rules.filter((r) => r.id !== payload.id));
+          await this.saveWsRules(this.scenes.wsRules().filter((r) => r.id !== payload.id));
           break;
         case 'ws.rules.duplicate': {
-          const rule = this.vm.websocket.state.rules.find((r) => r.id === payload.id);
+          const rule = this.scenes.wsRules().find((r) => r.id === payload.id);
           if (!rule) throw new Error('WS 规则不存在');
           await this.saveWsRules([
-            ...this.vm.websocket.state.rules,
+            ...this.scenes.wsRules(),
             { ...structuredClone(rule), id: randomUUID(), name: `${rule.name}（副本）`, enabled: false },
           ]);
           break;
         }
         case 'ws.rules.move': {
-          const rules = [...this.vm.websocket.state.rules].sort((a, b) => b.priority - a.priority);
+          const rules = [...this.scenes.wsRules()].sort((a, b) => b.priority - a.priority);
           const i = rules.findIndex((r) => r.id === payload.id);
           const target = i + (payload.delta === -1 ? -1 : 1);
           if (i >= 0 && target >= 0 && target < rules.length) {
@@ -1373,7 +1457,6 @@ class Workbench {
           if (mode === 'proxy') {
             this.vmAuto.setMode('proxy');
             await this.vm.disconnect();
-            if (this.engine.state.status === 'running') await this.syncRules();
           }
           if (this.engine.state.status === 'running')
             await this.engine.rpc('breakpoint.setInteractive', { enabled: mode === 'proxy' && !!this.panel });
@@ -1386,6 +1469,7 @@ class Workbench {
           this.apis = [];
           if (mode === 'vm') await this.vm.store.init();
           await this.saveConnection();
+          await this.scenes.reconcile();
           await this.reloadHistory();
           break;
         }
@@ -1395,6 +1479,7 @@ class Workbench {
             throw new Error('VM 已连接或正在连接，请先断开当前连接后再更换地址。');
           await this.vmAuto.manualConnect();
           await this.vm.connect(String(payload.url ?? ''), this.rules);
+          await this.scenes.reconcile();
           await this.reloadHistory();
           break;
         case 'vm.discovery.connect':
@@ -1404,9 +1489,8 @@ class Workbench {
         case 'vm.disconnect':
           await this.vmAuto.manualDisconnect();
           break;
-        case 'vm.mock':
-          await this.vm.setMockEnabled(payload.enabled === true);
-          this.ruleSyncError = this.vm.state.mockEnabled ? undefined : '规则已保存；仅采集模式不执行 Mock。';
+        case 'vm.capture':
+          await this.scenes.setCapture('http', payload.enabled === true);
           break;
         case 'vm.rescan':
           await this.vm.rescan();
@@ -1471,31 +1555,40 @@ class Workbench {
         }
         case 'rules.save': {
           const rule = payload.rule as Rule;
-          const index = this.rules.findIndex((r) => r.id === rule?.id);
+          const targetId =
+            typeof payload.targetSceneId === 'string' ? payload.targetSceneId : this.scenes.selected?.id;
+          const target = this.scenes.document.scenes.find((scene) => scene.id === targetId);
+          if (!target) throw new Error('请选择目标场景');
+          const index = target.httpRules.findIndex((item) => item.id === rule?.id);
           await this.saveRules(
-            index < 0 ? [...this.rules, rule] : this.rules.map((r, i) => (i === index ? rule : r)),
+            index < 0
+              ? [...target.httpRules, rule]
+              : target.httpRules.map((item, i) => (i === index ? rule : item)),
+            target.id,
           );
           break;
         }
         case 'rules.toggle':
           await this.saveRules(
-            this.rules.map((r) => (r.id === payload.id ? { ...r, enabled: !r.enabled } : r)),
+            (this.scenes.selected?.httpRules ?? []).map((r) =>
+              r.id === payload.id ? { ...r, enabled: !r.enabled } : r,
+            ),
           );
           break;
         case 'rules.delete':
-          await this.saveRules(this.rules.filter((r) => r.id !== payload.id));
+          await this.saveRules((this.scenes.selected?.httpRules ?? []).filter((r) => r.id !== payload.id));
           break;
         case 'rules.duplicate': {
-          const r = this.rules.find((r) => r.id === payload.id);
+          const r = (this.scenes.selected?.httpRules ?? []).find((r) => r.id === payload.id);
           if (r)
             await this.saveRules([
-              ...this.rules,
+              ...(this.scenes.selected?.httpRules ?? []),
               { ...r, id: randomUUID(), name: `${r.name} 副本`, enabled: false },
             ]);
           break;
         }
         case 'rules.move': {
-          const list = [...this.rules];
+          const list = [...(this.scenes.selected?.httpRules ?? [])];
           const i = list.findIndex((r) => r.id === payload.id);
           const next = i + (payload.direction === 'up' ? -1 : 1);
           if (i >= 0 && next >= 0 && next < list.length) {
@@ -1507,24 +1600,29 @@ class Workbench {
         case 'rules.import': {
           const uris = await vscode.window.showOpenDialog({
             canSelectMany: false,
-            filters: { 'API Mock 规则': ['json'] },
-            title: '导入规则（以禁用状态追加，保留现有规则）',
+            filters: { 'Mock 场景': ['json'] },
+            title: '导入场景（追加，不改变激活场景）',
           });
           if (!uris?.[0]) break;
-          const document = validateRuleDocument(JSON.parse(await readFile(uris[0].fsPath, 'utf8')));
-          await this.saveRules([
-            ...this.rules,
-            ...document.rules.map((r) => ({ ...r, id: randomUUID(), enabled: false })),
-          ]);
+          const document = validateSceneDocument(JSON.parse(await readFile(uris[0].fsPath, 'utf8')));
+          await this.scenes.change((doc) => {
+            doc.scenes.push(
+              ...document.scenes.map((scene) => ({
+                ...scene,
+                id: randomUUID(),
+                httpRules: scene.httpRules.map((rule) => ({ ...rule, id: randomUUID() })),
+                wsRules: scene.wsRules.map((rule) => ({ ...rule, id: randomUUID() })),
+              })),
+            );
+          });
           break;
         }
         case 'rules.export': {
           const uri = await vscode.window.showSaveDialog({
-            defaultUri: vscode.Uri.file(join(this.folder.uri.fsPath, 'flutter-pilot.rules.json')),
-            filters: { 'API Mock 规则': ['json'] },
+            defaultUri: vscode.Uri.file(join(this.folder.uri.fsPath, 'flutter-pilot.scenes.json')),
+            filters: { 'Mock 场景': ['json'] },
           });
-          if (uri)
-            await writeFile(uri.fsPath, JSON.stringify({ version: 1, rules: this.rules }, null, 2), 'utf8');
+          if (uri) await writeFile(uri.fsPath, JSON.stringify(this.scenes.document, null, 2), 'utf8');
           break;
         }
         case 'history.query': {
@@ -1726,6 +1824,8 @@ class Workbench {
     await this.mcpServer?.stop().catch(() => undefined);
     await this.ui.dispose();
     this.vmAuto.dispose();
+    this.scenes.dispose();
+    if (this.sceneTimer) clearTimeout(this.sceneTimer);
     if (this.historyTimer) clearTimeout(this.historyTimer);
     if (this.eventTimer) clearTimeout(this.eventTimer);
     await this.vm.dispose().catch((e) => output.appendLine(messageOf(e)));

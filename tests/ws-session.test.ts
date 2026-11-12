@@ -210,9 +210,9 @@ describe('independent WS session lifecycle', () => {
     'rejects stale and unknown connections for %s without reconnecting',
     async (action) => {
       session.connected();
+      await expect(session[action](connection.id, 'one')).rejects.toThrow('开启 WS 采集');
       await session.setCaptureEnabled(true);
-      await expect(session[action](connection.id, 'one')).rejects.toThrow('开启 WS Mock');
-      await session.setMockEnabled(true);
+      expect(session.state.mockEnabled).toBe(false);
       await session[action](connection.id, 'one');
       expect(injector[action]).toHaveBeenCalledWith(connection.id, 'one', undefined);
       await expect(session[action]('another', 'two')).rejects.toThrow('失效');

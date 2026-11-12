@@ -73,6 +73,7 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
           'wait_for_widget',
           'inspect_key_issues',
           'get_network_status',
+          'list_scenes',
           'get_requests',
           'get_request',
           'get_ws_connections',

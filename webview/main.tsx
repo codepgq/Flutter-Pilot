@@ -16,6 +16,8 @@ import './style.css';
 import { inspectJson } from './body';
 import { WebSocketPanel } from './websocket';
 import { McpPanel } from './mcp';
+import type { WsRule } from '../src/ws/model';
+import type { Scene } from '../src/scene-model';
 import { apiRuleTags, type ApiRuleTag } from './api-rules';
 
 declare global {
@@ -324,6 +326,7 @@ function App() {
   const selectionTarget = useRef<'apis' | 'history'>('history');
   const [historyApiFilter, setHistoryApiFilter] = useState<ApiCatalogEntry>();
   const [edit, setEdit] = useState<Rule>();
+  const [wsDraft, setWsDraft] = useState<WsRule>();
   const [preview, setPreview] = useState<{
     id: string;
     files: { path: string; before: string | null; after: string }[];
@@ -349,6 +352,9 @@ function App() {
         }
         if ('preview' in m) setPreview(m.preview ?? undefined);
       }
+      if (m.type === 'showScenes') {
+        setTab('rules');
+      }
       if (m.type === 'editRule') {
         setEdit(m.rule);
         setTab('rules');
@@ -363,7 +369,7 @@ function App() {
     { id: 'apis', label: 'API 请求', icon: 'radar', count: state.apis?.length ?? 0 },
     { id: 'history', label: '请求历史', icon: 'history', count: state.history.total },
     { id: 'websocket', label: 'WebSocket', icon: 'radar', count: state.ws?.messages.total ?? 0 },
-    { id: 'rules', label: 'Mock 规则', icon: 'rules', count: state.rules.length },
+    { id: 'rules', label: 'Mock 场景', icon: 'rules', count: state.scenes?.scenes.length ?? 0 },
     { id: 'breakpoints', label: '断点队列', icon: 'pause', count: state.pending.length },
     { id: 'mcp', label: 'MCP', icon: 'plug' },
   ];
@@ -534,17 +540,30 @@ function App() {
             vmMode={vmMode}
             busy={state.busy}
             send={send}
+            openScenes={() => setTab('rules')}
+            createInScene={(rule) => {
+              setWsDraft(rule);
+              setTab('rules');
+            }}
           />
         )}
-        {tab === 'rules' && <Rules state={state} edit={edit} setEdit={setEdit} />}
+        {tab === 'rules' && (
+          <Scenes
+            state={state}
+            edit={edit}
+            setEdit={setEdit}
+            wsDraft={wsDraft}
+            clearWsDraft={() => setWsDraft(undefined)}
+          />
+        )}
         {tab === 'breakpoints' && (
           <>
             {vmMode && (
               <details className="compact-disclosure breakpoint-help">
                 <summary>VM 模式 · 手动断点需使用代理</summary>
                 <p>
-                  VM 模式暂不支持手动断点。自动 Mock 和双向修改请开启实验性 Dio
-                  Mock；手动暂停请使用代理模式。工作台关闭后自动跳过人工暂停，继续后台记录和自动规则。
+                  VM 模式暂不支持手动断点。自动 Mock
+                  和双向修改请激活场景；手动暂停请使用代理模式。工作台关闭后自动跳过人工暂停，继续后台记录和自动规则。
                 </p>
               </details>
             )}
@@ -598,7 +617,7 @@ function VmDiscovery({ state }: { state: WorkbenchState }) {
         {discovery.enabled
           ? '当前项目只有一个可用会话时自动连接；多个会话请选择。'
           : '可选择已发现的会话连接，或在项目配置 / IDE 设置中开启 autoConnectVm。'}
-        Dio Mock、WS 采集与 WS Mock 仍需手动开启。
+        已激活场景会在连接后自动应用；采集也可手动开启。
       </p>
       {discovery.message && (
         <div className="notice" role="status">
@@ -734,41 +753,38 @@ function VmConnection({ state }: { state: WorkbenchState }) {
           </div>
         )}
       </section>
-      <section className="card vm-card vm-mock-card" aria-labelledby="dio-mock-title">
-        <div className="card-heading">
-          <h3 id="dio-mock-title">
-            Dio Mock <span className="tag warm">实验性</span>
-          </h3>
-          <button
-            type="button"
-            className="rule-switch"
-            role="switch"
-            aria-label="开启运行时 Dio Mock"
-            aria-checked={vm?.mockEnabled ?? false}
-            aria-describedby="dio-mock-description"
-            title={!connected ? '请先连接 VM' : vm?.mockEnabled ? '关闭 Dio Mock' : '开启 Dio Mock'}
-            disabled={state.busy || !connected}
-            onClick={() => send('vm.mock', { enabled: !vm?.mockEnabled })}
+      <section className="card vm-card vm-mock-card" aria-label="场景 Mock 控制">
+        <h3>Mock 场景</h3>
+        <p>
+          当前场景：
+          {state.scenes?.scenes.find((scene) => scene.id === state.scenes?.activeSceneId)?.name ?? '未激活'}
+          。在 Mock 场景中统一控制 HTTP / WebSocket Mock，重连后自动恢复。
+        </p>
+        <div className="card-actions">
+          <Button
+            onClick={() =>
+              window.dispatchEvent(new MessageEvent('message', { data: { type: 'showScenes' } }))
+            }
           >
-            <span className="rule-switch-track" aria-hidden="true">
-              <span className="rule-switch-thumb" />
-            </span>
-          </button>
-        </div>
-        <p id="dio-mock-description">开启后执行已启用的 Mock 规则，关闭后恢复仅采集。需先连接 VM。</p>
-        {vm?.mockEnabled && (
-          <div className="card-actions">
+            管理 Mock 场景
+          </Button>
+          <Button
+            onClick={() => send('vm.capture', { enabled: vm?.captureEnabled === false })}
+            disabled={state.busy || !connected}
+          >
+            {vm?.captureEnabled === false ? '开启 HTTP 采集' : '关闭 HTTP 采集'}
+          </Button>
+          {vm?.mockEnabled && (
             <Button action="vm.rescan" disabled={state.busy || !connected}>
               重新发现并同步
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </section>
       {state.proxyActive && (
         <div className="notice">
           旧代理仍在运行。要验证纯 VM 接入，请先用不含 FLUTTER_PILOT_PROXY 的原启动项重新运行
-          App，再停止旧代理。 规则共用，保存改动也会同步到仍在运行的代理；关闭运行时 Dio Mock 只移除 VM
-          拦截器。
+          App，再停止旧代理。场景只应用到当前接入模式；切换后旧代理的自动规则会清除。
           <div className="card-actions">
             <Button action="proxy.stop">停止旧代理</Button>
           </div>
@@ -1270,6 +1286,7 @@ function History({
     [state.history.items],
   );
   const group = query.host && query.path ? `${query.method ?? ''} ${query.host}${query.path}` : '';
+  const historyRules = state.scenes?.scenes.flatMap((scene) => scene.httpRules) ?? state.rules;
   function update(p: Partial<HistoryQuery>) {
     setQuery((q) => ({ ...q, ...p }));
     setOffset(0);
@@ -1339,7 +1356,10 @@ function History({
           onChange={(e) => update({ ruleId: e.target.value || undefined })}
         >
           <option value="">全部规则</option>
-          {state.rules.map((r) => (
+          {query.ruleId && !historyRules.some((rule) => rule.id === query.ruleId) && (
+            <option value={query.ruleId}>已删除规则（{query.ruleId}）</option>
+          )}
+          {historyRules.map((r) => (
             <option key={r.id} value={r.id}>
               {r.name}
             </option>
@@ -1621,13 +1641,17 @@ function RequestDetails({
               <dd>{selected.duration} ms</dd>
               <dt>请求规则</dt>
               <dd>
-                {state.rules.find((r) => r.id === selected.requestRuleId)?.name ??
+                {(state.scenes?.scenes.flatMap((scene) => scene.httpRules) ?? state.rules).find(
+                  (r) => r.id === selected.requestRuleId,
+                )?.name ??
                   selected.requestRuleId ??
                   '未命中'}
               </dd>
               <dt>响应规则</dt>
               <dd>
-                {state.rules.find((r) => r.id === selected.responseRuleId)?.name ??
+                {(state.scenes?.scenes.flatMap((scene) => scene.httpRules) ?? state.rules).find(
+                  (r) => r.id === selected.responseRuleId,
+                )?.name ??
                   selected.responseRuleId ??
                   '未命中'}
               </dd>
@@ -1695,22 +1719,203 @@ const kindLabels: Record<string, string> = {
   redirect: '转发地址',
   breakpoint: '手动断点',
 };
+const sceneStatusLabels = {
+  unneeded: '不需要',
+  pending: '待应用',
+  applied: '已应用',
+  error: '失败',
+  unsupported: '不支持',
+  paused: '已暂停',
+};
+function Scenes({
+  state,
+  edit,
+  setEdit,
+  wsDraft,
+  clearWsDraft,
+}: {
+  state: WorkbenchState;
+  edit?: Rule;
+  setEdit: (rule: Rule | undefined) => void;
+  wsDraft?: WsRule;
+  clearWsDraft: () => void;
+}) {
+  const scenes = state.scenes?.scenes ?? [];
+  const selected = scenes.find((scene) => scene.id === state.selectedSceneId) ?? scenes[0];
+  const active = scenes.find((scene) => scene.id === state.scenes?.activeSceneId);
+  const [name, setName] = useState('');
+  useEffect(() => setName(selected?.name ?? ''), [selected?.id, selected?.name]);
+  const choose = (id: string) => {
+    setEdit(undefined);
+    clearWsDraft();
+    send('scenes.select', { id });
+  };
+  const runtime = state.sceneRuntime;
+  const applied =
+    runtime && [runtime.http, runtime.ws].every((domain) => ['unneeded', 'applied'].includes(domain.status));
+  return (
+    <div className="scenes-page">
+      <div className="page-title compact">
+        <h2>
+          Mock 场景 <span className="count">{scenes.length}</span>
+        </h2>
+        <div className="toolbar-actions">
+          <Button disabled={state.busy} onClick={() => send('scenes.create', { name: '新场景' })}>
+            新建场景
+          </Button>
+          <Button action="rules.import" disabled={state.busy}>
+            导入场景
+          </Button>
+          <Button action="rules.export">导出场景</Button>
+        </div>
+      </div>
+      <section className="card scene-runtime" aria-label="场景运行状态">
+        <strong>{active ? `当前激活：${active.name}` : '当前未激活场景'}</strong>
+        {active && <span className="tag">{applied ? '已应用 · 待业务验证' : '尚未全部应用'}</span>}
+        {runtime &&
+          (['http', 'ws'] as const).map((domain) => (
+            <span key={domain} title={runtime[domain].message}>
+              {domain.toUpperCase()}：{sceneStatusLabels[runtime[domain].status]}{' '}
+              {['pending', 'error', 'unsupported', 'paused'].includes(runtime[domain].status) &&
+                runtime[domain].message}
+            </span>
+          ))}
+        {active && (
+          <>
+            <Button disabled={state.busy} onClick={() => send('scenes.activate', { id: active.id })}>
+              重新应用
+            </Button>
+            <Button disabled={state.busy} action="scenes.deactivate">
+              停用场景
+            </Button>
+          </>
+        )}
+        {!active && runtime && [runtime.http, runtime.ws].some((domain) => domain.status === 'error') && (
+          <Button disabled={state.busy} action="scenes.deactivate">
+            重试停用
+          </Button>
+        )}
+        <small>激活状态会保存，重连或重开 IDE 后自动恢复。实际命中请查看新请求和消息。</small>
+      </section>
+      <div className="scene-selector">
+        <label>
+          浏览 / 目标场景
+          <select
+            aria-label="目标场景"
+            value={selected?.id ?? ''}
+            disabled={state.busy}
+            onChange={(event) => choose(event.target.value)}
+          >
+            {scenes.map((scene) => (
+              <option key={scene.id} value={scene.id}>
+                {scene.name}
+                {active?.id === scene.id ? ' · 已激活' : ''} · HTTP {scene.httpRules.length} / WS{' '}
+                {scene.wsRules.length}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {selected ? (
+        <>
+          <div className="scene-actions">
+            <input
+              aria-label="场景名称"
+              value={name}
+              maxLength={256}
+              onChange={(event) => setName(event.target.value)}
+            />
+            <Button
+              disabled={state.busy || !name.trim()}
+              onClick={() => send('scenes.rename', { id: selected.id, name: name.trim() })}
+            >
+              保存名称
+            </Button>
+            <Button
+              primary
+              disabled={state.busy}
+              onClick={() => send('scenes.activate', { id: selected.id })}
+            >
+              {active?.id === selected.id ? '应用此场景' : '激活此场景'}
+            </Button>
+            <Button disabled={state.busy} onClick={() => send('scenes.duplicate', { id: selected.id })}>
+              复制场景
+            </Button>
+            <Button danger disabled={state.busy} onClick={() => send('scenes.delete', { id: selected.id })}>
+              删除场景
+            </Button>
+          </div>
+          {state.lastError && (
+            <div className="notice" role="alert">
+              {state.lastError}
+            </div>
+          )}
+          <Rules
+            key={selected.id}
+            scene={selected}
+            state={{ ...state, rules: selected.httpRules }}
+            edit={edit}
+            setEdit={setEdit}
+          />
+          <WebSocketPanel
+            key={`${selected.id}:${wsDraft?.id ?? ''}`}
+            rulesOnly
+            scenes={scenes}
+            sceneId={selected.id}
+            initialDraft={wsDraft}
+            onDraftClosed={clearWsDraft}
+            state={{
+              ...(state.ws ?? {
+                captureEnabled: false,
+                mockEnabled: false,
+                status: 'off',
+                connections: [],
+                messages: { items: [], total: 0 },
+                omitted: 0,
+                warnings: [],
+              }),
+              rules: selected.wsRules.concat(
+                selected.id === active?.id
+                  ? (state.ws?.rules.filter((rule) => !!rule.match.connectionId) ?? [])
+                  : [],
+              ),
+            }}
+            connected={state.vm?.status === 'connected'}
+            vmMode={state.mode !== 'proxy'}
+            busy={state.busy}
+            send={(action, payload) => send(action, { ...((payload as object) ?? {}), sceneId: selected.id })}
+          />
+        </>
+      ) : (
+        <Empty
+          icon="rules"
+          title="创建第一个场景"
+          description="一个场景可以同时组织多个 HTTP 和 WebSocket Mock。"
+        />
+      )}
+    </div>
+  );
+}
 function Rules({
   state,
   edit,
   setEdit,
+  scene,
 }: {
+  scene?: Scene;
   state: WorkbenchState;
   edit?: Rule;
   setEdit: (r: Rule | undefined) => void;
 }) {
   const [search, setSearch] = useState('');
+  const send = (action: string, payload = {}) =>
+    vscode?.postMessage({ action, payload: { ...payload, sceneId: scene?.id } });
   return (
     <div className="rules-page">
       <div className="page-title compact">
         <div>
           <h2>
-            Mock 规则 <span className="count">{state.rules.length}</span>
+            HTTP 规则 <span className="count">{state.rules.length}</span>
           </h2>
         </div>
         <div className="toolbar-actions">
@@ -1817,7 +2022,7 @@ function Rules({
       ) : (
         <Empty
           icon="rules"
-          title="为每个场景，准备一条规则"
+          title="为此场景添加 HTTP 规则"
           description="模拟空数据、异常状态、边界情况，或将线上接口转发到本地。也可从请求历史生成规则。"
         >
           <Button primary onClick={() => setEdit(newRule('mock'))}>
@@ -1826,7 +2031,16 @@ function Rules({
           </Button>
         </Empty>
       )}
-      {edit && <RuleEditor key={edit.id} rule={edit} onClose={() => setEdit(undefined)} busy={state.busy} />}
+      {edit && (
+        <RuleEditor
+          key={`${scene?.id}:${edit.id}`}
+          sceneId={scene?.id}
+          scenes={state.scenes?.scenes}
+          rule={edit}
+          onClose={() => setEdit(undefined)}
+          busy={state.busy}
+        />
+      )}
     </div>
   );
 }
@@ -1841,8 +2055,22 @@ function parseMap(text: string, nullable = true): Record<string, string | null> 
     throw new Error('键值配置必须为 JSON 对象，值使用字符串，删除使用 null');
   return value;
 }
-function RuleEditor({ rule, onClose, busy }: { rule: Rule; onClose: () => void; busy: boolean }) {
+function RuleEditor({
+  rule,
+  onClose,
+  busy,
+  sceneId,
+  scenes = [],
+}: {
+  scenes?: Scene[];
+  sceneId?: string;
+  rule: Rule;
+  onClose: () => void;
+  busy: boolean;
+}) {
   const [draft, setDraft] = useState<Rule>(rule);
+  const [targetSceneId, setTargetSceneId] = useState(sceneId);
+  const existingRule = scenes.some((scene) => scene.httpRules.some((item) => item.id === rule.id));
   const [kind, setKind] = useState(kindOf(rule));
   const [advanced, setAdvanced] = useState(false);
   const [raw, setRaw] = useState(JSON.stringify(rule, null, 2));
@@ -1853,6 +2081,19 @@ function RuleEditor({ rule, onClose, busy }: { rule: Rule; onClose: () => void; 
   const [matchHeaders, setMatchHeaders] = useState(JSON.stringify(rule.match.headers ?? {}, null, 2));
   const [matchQuery, setMatchQuery] = useState(JSON.stringify(rule.match.query ?? {}, null, 2));
   const [error, setError] = useState('');
+  const [pendingSave, setPendingSave] = useState<Rule>();
+  useEffect(() => {
+    const listener = (event: MessageEvent) => {
+      const scene = event.data?.state?.scenes?.scenes.find((item: Scene) => item.id === targetSceneId);
+      if (
+        pendingSave &&
+        scene?.httpRules.some((item: Rule) => JSON.stringify(item) === JSON.stringify(pendingSave))
+      )
+        onClose();
+    };
+    window.addEventListener('message', listener);
+    return () => window.removeEventListener('message', listener);
+  }, [pendingSave, targetSceneId, onClose]);
   const change = (p: Partial<Rule>) => setDraft((d) => ({ ...d, ...p }));
   const body = draft.mock?.body ?? draft.request?.body ?? draft.response?.body ?? '';
   function assembled() {
@@ -1953,6 +2194,22 @@ function RuleEditor({ rule, onClose, busy }: { rule: Rule; onClose: () => void; 
                     onChange={(e) => change({ name: e.target.value })}
                   />
                 </label>
+                {!existingRule && (
+                  <label>
+                    目标场景
+                    <select
+                      aria-label="保存到场景"
+                      value={targetSceneId ?? ''}
+                      onChange={(event) => setTargetSceneId(event.target.value)}
+                    >
+                      {scenes.map((scene) => (
+                        <option key={scene.id} value={scene.id}>
+                          {scene.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <label>
                   规则动作
                   <select aria-label="规则动作" value={kind} onChange={(e) => switchKind(e.target.value)}>
@@ -2203,7 +2460,7 @@ function RuleEditor({ rule, onClose, busy }: { rule: Rule; onClose: () => void; 
           )}
         </div>
         <div className="modal-footer">
-          <span>保存后由引擎确认生效</span>
+          <span>保存到场景；激活场景后执行</span>
           <Button onClick={onClose}>取消</Button>
           <Button
             primary
@@ -2211,8 +2468,8 @@ function RuleEditor({ rule, onClose, busy }: { rule: Rule; onClose: () => void; 
             onClick={() => {
               try {
                 const r = validateRuleDocument({ version: 1, rules: [assembled()] }).rules[0];
-                send('rules.save', { rule: r });
-                onClose();
+                setPendingSave(r);
+                send('rules.save', { rule: r, sceneId, targetSceneId });
               } catch (e) {
                 setError((e as Error).message);
               }

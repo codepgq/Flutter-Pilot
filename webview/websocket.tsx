@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { WsConnection, WsDirection, WsMessage, WsRule, WsState } from '../src/ws/model';
+import type { Scene } from '../src/scene-model';
 import { inspectJson } from './body';
 
 const emptyState: WsState = {
@@ -62,14 +63,28 @@ export function WebSocketPanel({
   vmMode,
   busy,
   send,
+  rulesOnly = false,
+  openScenes,
+  createInScene,
+  initialDraft,
+  onDraftClosed,
+  scenes = [],
+  sceneId,
 }: {
+  scenes?: Scene[];
+  sceneId?: string;
+  initialDraft?: WsRule;
+  onDraftClosed?: () => void;
+  rulesOnly?: boolean;
+  openScenes?: () => void;
+  createInScene?: (rule: WsRule) => void;
   state?: WsState;
   connected: boolean;
   vmMode: boolean;
   busy: boolean;
   send: Send;
 }) {
-  const [section, setSection] = useState<'messages' | 'rules'>('messages');
+  const [section, setSection] = useState<'messages' | 'rules'>(rulesOnly ? 'rules' : 'messages');
   const [connectionId, setConnectionId] = useState<string>();
   const [direction, setDirection] = useState<WsDirection | ''>('');
   const [search, setSearch] = useState('');
@@ -78,17 +93,17 @@ export function WebSocketPanel({
   const [detail, setDetail] = useState<WsMessage>();
   const selectedId = useRef<string | undefined>(undefined);
   const [pushText, setPushText] = useState('');
-  const [draft, setDraft] = useState<WsRule>();
+  const [draft, setDraft] = useState<WsRule | undefined>(initialDraft);
   const pendingRule = useRef<WsRule | undefined>(undefined);
   const sortedRules = useMemo(() => [...state.rules].sort((a, b) => b.priority - a.priority), [state.rules]);
   const [pushError, setPushError] = useState('');
   const connection = state.connections.find((item) => item.id === connectionId);
   const canCapture = vmMode && connected;
-  const canMock = canCapture && state.captureEnabled && state.status === 'active';
   const canPush =
-    canMock && state.mockEnabled && connection?.status === 'open' && connection.capture === 'attached';
+    canCapture && state.captureEnabled && connection?.status === 'open' && connection.capture === 'attached';
 
   useEffect(() => {
+    if (rulesOnly) return;
     const timer = setTimeout(() => {
       setQuerySearch(search);
       setOffset(0);
@@ -96,6 +111,7 @@ export function WebSocketPanel({
     return () => clearTimeout(timer);
   }, [search]);
   useEffect(() => {
+    if (rulesOnly) return;
     selectedId.current = undefined;
     setDetail(undefined);
     send('ws.query', {
@@ -118,15 +134,21 @@ export function WebSocketPanel({
 
   useEffect(() => {
     const pending = pendingRule.current;
-    if (pending && state.rules.some((rule) => JSON.stringify(rule) === JSON.stringify(pending))) {
+    if (
+      pending &&
+      [...state.rules, ...scenes.flatMap((scene) => scene.wsRules)].some(
+        (rule) => JSON.stringify(rule) === JSON.stringify(pending),
+      )
+    ) {
       pendingRule.current = undefined;
       setDraft(undefined);
+      onDraftClosed?.();
     }
-  }, [state.rules]);
+  }, [state.rules, scenes, onDraftClosed]);
 
   const newRule = () => {
     pendingRule.current = undefined;
-    setDraft({
+    const rule: WsRule = {
       id: crypto.randomUUID(),
       name: '',
       enabled: true,
@@ -136,7 +158,12 @@ export function WebSocketPanel({
           ? { connectionId: connection.id }
           : { url: connection?.url ?? '' },
       action: { type: 'replace', text: '' },
-    });
+    };
+    if (createInScene) {
+      createInScene(rule);
+      return;
+    }
+    setDraft(rule);
     setSection('rules');
   };
   const changeConnection = (id?: string) => {
@@ -147,59 +174,54 @@ export function WebSocketPanel({
   };
   return (
     <div className="ws-page">
-      <section className="card ws-controls" aria-label="WebSocket 采集控制">
-        <div className="ws-control-actions">
-          <h2>WebSocket</h2>
-          <span className={`status-pill ${state.captureEnabled && connected ? 'online' : ''}`}>
-            <i />
-            {state.status === 'unsupported'
-              ? '当前运行时不支持'
-              : state.captureEnabled && connected
-                ? 'WS 采集中'
-                : 'WS 采集未开启'}
-          </span>
-          <button
-            className={state.captureEnabled ? '' : 'primary'}
-            disabled={busy || (!state.captureEnabled && !canCapture)}
-            onClick={() => send('ws.capture', { enabled: !state.captureEnabled })}
-          >
-            {state.captureEnabled ? '关闭 WS 采集' : '开启 WS 采集'}
-          </button>
-          <button
-            role="switch"
-            aria-label="WS Mock"
-            aria-checked={state.mockEnabled}
-            className={`ws-mock-toggle ${state.mockEnabled ? 'on' : ''}`}
-            disabled={busy || (!canMock && !state.mockEnabled)}
-            onClick={() => send('ws.mock', { enabled: !state.mockEnabled })}
-          >
-            <span className="ws-switch-track">
-              <span />
+      {!rulesOnly && (
+        <section className="card ws-controls" aria-label="WebSocket 采集控制">
+          <div className="ws-control-actions">
+            <h2>WebSocket</h2>
+            <span className={`status-pill ${state.captureEnabled && connected ? 'online' : ''}`}>
+              <i />
+              {state.status === 'unsupported'
+                ? '当前运行时不支持'
+                : state.captureEnabled && connected
+                  ? 'WS 采集中'
+                  : 'WS 采集未开启'}
             </span>
-            WS Mock
-          </button>
-          <details className="secondary-details ws-capture-details">
-            <summary>采集设置与说明</summary>
-            <div className="secondary-content">
-              <button
-                disabled={busy || !canCapture || !state.captureEnabled}
-                onClick={() => send('ws.rescan')}
-              >
-                重新发现连接
-              </button>
-              <p>采集会安装实验性运行时处理器，无需改源码。WS Mock 独立开启，关闭工作台后继续运行。</p>
-              <small>仅接入受支持的 dart:io 客户端连接；新连接在扫描后接入，接入前消息无法补抓或修改。</small>
-            </div>
-          </details>
-        </div>
-        {(!vmMode || !connected) && (
-          <p>
-            {!vmMode
-              ? 'WS 消息功能需要 VM 接入，请先在“连接与诊断”切换到 VM 模式。'
-              : '先在“连接与诊断”连接运行中的 Flutter Debug VM，再手动开启 WS 采集。'}
-          </p>
-        )}
-      </section>
+            <button
+              className={state.captureEnabled ? '' : 'primary'}
+              disabled={busy || (!state.captureEnabled && !canCapture)}
+              onClick={() => send('ws.capture', { enabled: !state.captureEnabled })}
+            >
+              {state.captureEnabled ? '关闭 WS 采集' : '开启 WS 采集'}
+            </button>
+            <span className="tag">{state.mockEnabled ? '场景 WS Mock 已开启' : '场景 WS Mock 未开启'}</span>
+            <button onClick={openScenes}>管理 Mock 场景</button>
+            <details className="secondary-details ws-capture-details">
+              <summary>采集设置与说明</summary>
+              <div className="secondary-content">
+                <button
+                  disabled={busy || !canCapture || !state.captureEnabled}
+                  onClick={() => send('ws.rescan')}
+                >
+                  重新发现连接
+                </button>
+                <p>
+                  采集会安装实验性运行时处理器，无需改源码。WS Mock 由激活场景控制，关闭工作台后继续运行。
+                </p>
+                <small>
+                  仅接入受支持的 dart:io 客户端连接；新连接在扫描后接入，接入前消息无法补抓或修改。
+                </small>
+              </div>
+            </details>
+          </div>
+          {(!vmMode || !connected) && (
+            <p>
+              {!vmMode
+                ? 'WS 消息功能需要 VM 接入，请先在“连接与诊断”切换到 VM 模式。'
+                : '先在“连接与诊断”连接运行中的 Flutter Debug VM，再手动开启 WS 采集。'}
+            </p>
+          )}
+        </section>
+      )}
       {(state.error || state.ruleSyncError) && (
         <div className="notice" role="alert">
           {state.error || state.ruleSyncError}
@@ -215,22 +237,24 @@ export function WebSocketPanel({
           采集负载过高，已遗漏 {state.omitted} 条记录；业务消息继续传递。
         </div>
       )}
-      <div className="ws-section-tabs" aria-label="WebSocket 页面">
-        <button
-          className={section === 'messages' ? 'active' : ''}
-          aria-pressed={section === 'messages'}
-          onClick={() => setSection('messages')}
-        >
-          消息 <span className="count">{state.messages.total}</span>
-        </button>
-        <button
-          className={section === 'rules' ? 'active' : ''}
-          aria-pressed={section === 'rules'}
-          onClick={() => setSection('rules')}
-        >
-          WS 规则 <span className="count">{state.rules.length}</span>
-        </button>
-      </div>
+      {!rulesOnly && (
+        <div className="ws-section-tabs" aria-label="WebSocket 页面">
+          <button
+            className={section === 'messages' ? 'active' : ''}
+            aria-pressed={section === 'messages'}
+            onClick={() => setSection('messages')}
+          >
+            消息 <span className="count">{state.messages.total}</span>
+          </button>
+          <button
+            className={section === 'rules' ? 'active' : ''}
+            aria-pressed={section === 'rules'}
+            onClick={() => openScenes?.()}
+          >
+            WS 规则 <span className="count">{state.rules.length}</span>
+          </button>
+        </div>
+      )}
       {section === 'messages' ? (
         <>
           <div className="ws-workspace">
@@ -471,7 +495,7 @@ export function WebSocketPanel({
                   为此连接新建规则
                 </button>
               </div>
-              {!state.mockEnabled && <small>开启 WS Mock 后可推送。断线后不会自动重发。</small>}
+              <small>连接已接入且采集开启即可推送。断线后不会自动重发。</small>
             </section>
           </div>
         </>
@@ -490,19 +514,25 @@ export function WebSocketPanel({
             </div>
           </div>
           {!state.mockEnabled && (
-            <div className="notice">规则可独立保存；开启采集及 WS Mock 后执行。二进制与控制帧保持直通。</div>
+            <div className="notice">规则可独立保存；激活所属场景后执行。二进制与控制帧保持直通。</div>
           )}
           {draft && (
             <RuleEditor
               key={draft.id}
               rule={draft}
+              scenes={scenes}
+              sceneId={sceneId}
               connections={state.connections}
               busy={busy}
-              save={(rule) => {
+              save={(rule, targetSceneId) => {
                 pendingRule.current = rule;
-                send('ws.rules.save', { rule });
+                send('ws.rules.save', { rule, targetSceneId });
               }}
-              cancel={() => setDraft(undefined)}
+              cancel={() => {
+                pendingRule.current = undefined;
+                setDraft(undefined);
+                onDraftClosed?.();
+              }}
             />
           )}
           {!state.rules.length && !draft && (
@@ -584,14 +614,20 @@ function RuleEditor({
   busy,
   save,
   cancel,
+  scenes = [],
+  sceneId,
 }: {
+  scenes?: Scene[];
+  sceneId?: string;
   rule: WsRule;
   connections: WsConnection[];
   busy: boolean;
-  save: (rule: WsRule) => void;
+  save: (rule: WsRule, targetSceneId?: string) => void;
   cancel: () => void;
 }) {
   const [name, setName] = useState(rule.name);
+  const [targetSceneId, setTargetSceneId] = useState(sceneId);
+  const existingRule = scenes.some((scene) => scene.wsRules.some((item) => item.id === rule.id));
   const [priority, setPriority] = useState(String(rule.priority));
   const [scope, setScope] = useState(rule.match.connectionId ? 'connection' : 'url');
   const [url, setUrl] = useState(rule.match.url ?? '');
@@ -633,17 +669,20 @@ function RuleEditor({
           setError('替换文本不能超过 256 KiB');
           return;
         }
-        save({
-          ...rule,
-          name: name.trim(),
-          priority: Number(priority),
-          match: {
-            ...(scope === 'url' ? { url } : { connectionId }),
-            ...(direction ? { direction: direction as WsDirection } : {}),
-            ...(contains ? { contains } : {}),
+        save(
+          {
+            ...rule,
+            name: name.trim(),
+            priority: Number(priority),
+            match: {
+              ...(scope === 'url' ? { url } : { connectionId }),
+              ...(direction ? { direction: direction as WsDirection } : {}),
+              ...(contains ? { contains } : {}),
+            },
+            action: action === 'drop' ? { type: 'drop' } : { type: 'replace', text },
           },
-          action: action === 'drop' ? { type: 'drop' } : { type: 'replace', text },
-        });
+          targetSceneId,
+        );
       }}
     >
       <div className="ws-section-heading">
@@ -653,6 +692,22 @@ function RuleEditor({
         </button>
       </div>
       <div className="ws-form-grid">
+        {!existingRule && scenes.length > 0 && (
+          <label>
+            目标场景
+            <select
+              aria-label="WS 保存到场景"
+              value={targetSceneId ?? ''}
+              onChange={(event) => setTargetSceneId(event.target.value)}
+            >
+              {scenes.map((scene) => (
+                <option key={scene.id} value={scene.id}>
+                  {scene.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label>
           规则名称
           <input aria-label="WS 规则名称" value={name} onChange={(e) => setName(e.target.value)} />

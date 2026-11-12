@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { link, lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { validateRuleDocument } from './model';
+import { SceneStore } from './scenes';
 
 export interface ProjectConnection {
   mode: 'vm' | 'proxy';
@@ -150,7 +150,7 @@ export class ProjectBinding {
   }
   async reload(): Promise<ProjectConfig> {
     await checkDirectory(this.directory);
-    if ((await readText(join(this.rulesDirectory, 'rules.json'), 64 * 1024 * 1024)) === undefined)
+    if ((await readText(join(this.rulesDirectory, 'scenes.json'), 64 * 1024 * 1024)) === undefined)
       throw new Error('项目规则文件已移除，请重新打开工作区初始化');
     const config = await readProject(this.file);
     if (!config) throw new Error('项目绑定文件已移除，请重新打开工作区初始化');
@@ -231,28 +231,6 @@ export async function openProjectBinding(
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(claim.projectId)
   )
     throw new Error('旧项目存储绑定标识无效，请修复后重试');
-  const ownsLegacy = claim.projectId.toLowerCase() === config.projectId.toLowerCase();
-  const rulesFile = join(directory, 'rules.json');
-  let rules = await readText(rulesFile, 64 * 1024 * 1024);
-  if (rules === undefined) {
-    const legacy = ownsLegacy
-      ? await readText(join(legacyStoragePath, 'rules.json'), 64 * 1024 * 1024)
-      : undefined;
-    let document;
-    try {
-      document = validateRuleDocument(
-        legacy === undefined ? { version: 1, rules: [] } : parseJson(legacy, '旧版规则文件'),
-      );
-    } catch {
-      throw new Error('旧版规则文件无效，请修复后重试迁移；原文件已保留');
-    }
-    await createOnce(directory, rulesFile, serialize(document));
-    rules = await readText(rulesFile, 64 * 1024 * 1024);
-  }
-  try {
-    validateRuleDocument(parseJson(rules!, '.flutter-pilot/rules.json'));
-  } catch {
-    throw new Error('.flutter-pilot/rules.json 无效，请修复后重新打开工作区；不会覆盖已有规则');
-  }
+  await new SceneStore(directory).load();
   return new ProjectBinding(directory, config);
 }

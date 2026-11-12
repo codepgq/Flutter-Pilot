@@ -1,5 +1,5 @@
 import { runTests } from '@vscode/test-electron';
-import { mkdtemp, mkdir, writeFile, access } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -33,7 +33,7 @@ await writeFile(
     'flutterPilot.proxyPort': 18080,
   }),
 );
-// Seed only the legacy location: activation must migrate these project files.
+// Seed a persistent active scene for the isolated proxy fixture.
 const legacyStorage = join(
   user,
   'User',
@@ -59,6 +59,16 @@ await writeFile(
         breakpoint: { request: true, response: true, timeout: 60 },
       },
     ],
+  }),
+);
+await mkdir(join(workspace, '.flutter-pilot'), { recursive: true });
+const seededRules = JSON.parse(await readFile(join(legacyStorage, 'rules.json'), 'utf8')).rules;
+await writeFile(
+  join(workspace, '.flutter-pilot', 'scenes.json'),
+  JSON.stringify({
+    version: 1,
+    activeSceneId: 'ide-scene',
+    scenes: [{ id: 'ide-scene', name: 'IDE smoke', httpRules: seededRules, wsRules: [] }],
   }),
 );
 await runTests({

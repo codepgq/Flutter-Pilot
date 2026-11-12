@@ -234,7 +234,7 @@ function projectFile(workspace = fake.workspace) {
   return join(workspace, '.flutter-pilot', 'project.json');
 }
 function rulesFile(workspace = fake.workspace) {
-  return join(workspace, '.flutter-pilot', 'rules.json');
+  return join(workspace, '.flutter-pilot', 'scenes.json');
 }
 async function readProject(workspace = fake.workspace) {
   return JSON.parse(await readFile(projectFile(workspace), 'utf8'));
@@ -323,7 +323,7 @@ describe('扩展与工作台整合', () => {
       tool: 'get_network_status',
       args: { sessionId: descriptor.sessionId },
     })) as any;
-    expect(result.files.http).toMatch(/\/project\/\.flutter-pilot\/rules\.json$/);
+    expect(result.files.scenes).toMatch(/\/project\/\.flutter-pilot\/scenes\.json$/);
     expect(result.http.mockEnabled).toBe(false);
     const panel = fake.panels.at(-1);
     panel.dispose();
@@ -351,16 +351,18 @@ describe('扩展与工作台整合', () => {
     expect(latest().state.proxyActive).toBe(false);
     expect(engine.stops).toBe(0);
   });
-  it('规则先保存再同步，拒绝非法导入且保留已保存但未生效状态', async () => {
+  it('场景规则保存后才激活，同步失败明确显示而不回退旧规则', async () => {
     await open();
     await message('rules.save', { rule: { ...rule, mock: { ...rule.mock, status: 999 } } });
     expect(latest().state.lastError).toContain('状态码');
-    expect(fake.engines[0].calls.filter((c: any) => c.method === 'rules.sync')).toHaveLength(1);
-    fake.rejectSync = true;
     await message('rules.save', { rule });
-    await vi.waitFor(() => expect(latest().state.ruleSyncError).toContain('未生效'));
-    const file = rulesFile();
-    expect(JSON.parse(await readFile(file, 'utf8')).rules[0].id).toBe('test');
+    expect(JSON.parse(await readFile(rulesFile(), 'utf8')).scenes[0].httpRules[0].id).toBe('test');
+    expect(latest().state.rules).toEqual([]);
+    const id = latest().state.scenes.scenes[0].id;
+    fake.rejectSync = true;
+    await message('scenes.activate', { id });
+    expect(latest().state.scenes.activeSceneId).toBe(id);
+    expect(latest().state.sceneRuntime.http.status).toBe('error');
   });
   it('选中完整历史仅发送一次，后续状态不重复传正文', async () => {
     await open();
@@ -878,8 +880,10 @@ describe('VM 连接模式扩展整合', () => {
       // No Flutter start/URI events or DTD ServiceRegistered notification are emitted.
       await new Promise((resolve) => setTimeout(resolve, 20));
       await open();
-      await vi.waitFor(() => expect(latest().state.vm.status).toBe('connected'));
-      expect(latest().state.vmDiscovery.connectedSessionId).toBe('already-running');
+      await vi.waitFor(() => {
+        expect(latest().state.vm.status).toBe('connected');
+        expect(latest().state.vmDiscovery.connectedSessionId).toBe('already-running');
+      });
       expect(latest().state.vm.mockEnabled).toBe(false);
       expect(latest().state.ws.captureEnabled).toBe(false);
       expect(latest().state.ws.mockEnabled).toBe(false);
@@ -1193,7 +1197,7 @@ describe('VM 连接模式扩展整合', () => {
     }
   });
 
-  it('VM 页保存共用规则也同步旧代理，代理重连不重新启用人工断点', async () => {
+  it('编辑未激活场景不会同步旧代理，代理重连不重新启用人工断点', async () => {
     const engine = fake.engines[0];
     await open();
     await message('connection.mode', { mode: 'vm' });
@@ -1206,17 +1210,54 @@ describe('VM 连接模式扩展整合', () => {
       }),
     );
     await message('rules.save', { rule: { ...rule, enabled: false } });
-    await vi.waitFor(() => {
-      const synced = engine.calls.filter((call: any) => call.method === 'rules.sync').at(-1);
-      expect(synced?.params.rules).toMatchObject([{ id: 'test', enabled: false }]);
-    });
+    expect(latest().state.scenes.scenes[0].httpRules).toMatchObject([{ id: 'test', enabled: false }]);
+    expect(latest().state.rules).toEqual([]);
     await message('connection.mode', { mode: 'proxy' });
     expect(latest().state.mode).toBe('proxy');
-    expect(engine.calls.filter((call: any) => call.method === 'rules.sync')).toHaveLength(2);
+    expect(
+      engine.calls
+        .filter((call: any) => call.method === 'rules.sync')
+        .every((call: any) => call.params.rules.length === 0),
+    ).toBe(true);
   });
 });
 
 describe('项目文件与工作区绑定整合', () => {
+  it('代理引擎快速重启后重新应用激活场景', async () => {
+    await open();
+    await message('rules.save', { rule });
+    const id = latest().state.scenes.scenes[0].id;
+    await message('scenes.activate', { id });
+    const engine = fake.engines[0];
+    const previousSyncs = engine.calls.filter((call: any) => call.method === 'rules.sync').length;
+    await message('setLan', { enabled: true });
+    await vi.waitFor(() => {
+      const syncs = engine.calls.filter((call: any) => call.method === 'rules.sync');
+      expect(syncs.length).toBeGreaterThan(previousSyncs);
+      expect(syncs.at(-1).params.rules).toEqual([rule]);
+    });
+  });
+  it('MCP returns proxy capture and Mock status with scene summaries', async () => {
+    await open();
+    await message('rules.save', { rule });
+    const id = latest().state.scenes.scenes[0].id;
+    await message('scenes.activate', { id });
+    await message('mcp.enable', { enabled: true });
+    const [descriptor] = await discoverSessions(join(directory, 'bridge', 'sessions'), fake.workspace);
+    const status = (await requestSession(descriptor, {
+      kind: 'call',
+      tool: 'get_network_status',
+      args: { sessionId: descriptor.sessionId },
+    })) as any;
+    expect(status.http).toMatchObject({ captureEnabled: true, mockEnabled: true, runtimeApplied: true });
+    const summary = (await requestSession(descriptor, {
+      kind: 'call',
+      tool: 'list_scenes',
+      args: { sessionId: descriptor.sessionId },
+    })) as any;
+    expect(summary.scenes[0]).toMatchObject({ id, httpRuleCount: 1 });
+    expect(summary.scenes[0].httpRules).toBeUndefined();
+  });
   it('首次生成稳定 UUID，工作台展示项目文件路径且重新激活复用身份', async () => {
     await open();
     const config = await readProject();
@@ -1226,7 +1267,7 @@ describe('项目文件与工作区绑定整合', () => {
       id: config.projectId,
       name: 'project',
       configPath: expect.stringContaining('/.flutter-pilot/project.json'),
-      rulesPath: expect.stringContaining('/.flutter-pilot/rules.json'),
+      rulesPath: expect.stringContaining('/.flutter-pilot/scenes.json'),
     });
     expect(fake.engines[0].starts[0].storagePath).toBe(await privateStorage());
     await deactivate();
@@ -1239,7 +1280,7 @@ describe('项目文件与工作区绑定整合', () => {
     await open();
     await message('rules.save', { rule });
     await message('connection.mode', { mode: 'vm' });
-    expect(JSON.parse(await readFile(rulesFile(), 'utf8')).rules).toEqual([rule]);
+    expect(JSON.parse(await readFile(rulesFile(), 'utf8')).scenes[0].httpRules).toEqual([rule]);
     expect((await readProject()).connection).toMatchObject({ mode: 'vm', connectionHost: '127.0.0.1' });
     expect(JSON.parse(await readFile(join(await privateStorage(), 'connection.json'), 'utf8'))).toEqual({
       androidDevices: [],
@@ -1255,14 +1296,17 @@ describe('项目文件与工作区绑定整合', () => {
     await message('project.open', { kind: 'rules' });
     expect(fake.shownDocuments.map((file) => file.slice(file.indexOf('/.flutter-pilot/')))).toEqual([
       '/.flutter-pilot/project.json',
-      '/.flutter-pilot/rules.json',
+      '/.flutter-pilot/scenes.json',
     ]);
   });
 
   it('显式读取外部规则后同步引擎，配置变更保持当前会话并提示重载', async () => {
     await open();
     const external = { ...rule, id: 'external', name: 'external' };
-    await writeFile(rulesFile(), JSON.stringify({ version: 1, rules: [external] }));
+    const doc = JSON.parse(await readFile(rulesFile(), 'utf8'));
+    doc.scenes[0].httpRules = [external];
+    doc.activeSceneId = doc.scenes[0].id;
+    await writeFile(rulesFile(), JSON.stringify(doc));
     await writeProject({ connection: { mode: 'vm' }, settings: { autoStart: false } });
     await message('project.reload');
     expect(latest().state.rules).toEqual([external]);
@@ -1281,17 +1325,20 @@ describe('项目文件与工作区绑定整合', () => {
   it('外部修改规则后拒绝旧内存覆盖，读取后允许继续编辑', async () => {
     await open();
     const external = { ...rule, id: 'external', name: 'external' };
-    await writeFile(rulesFile(), JSON.stringify({ version: 1, rules: [external] }));
+    const doc = JSON.parse(await readFile(rulesFile(), 'utf8'));
+    doc.scenes[0].httpRules = [external];
+    doc.activeSceneId = doc.scenes[0].id;
+    await writeFile(rulesFile(), JSON.stringify(doc));
     const previousSyncs = fake.engines[0].calls.filter((call: any) => call.method === 'rules.sync').length;
     await message('rules.save', { rule });
     expect(latest().state.lastError).toContain('读取项目文件');
-    expect(JSON.parse(await readFile(rulesFile(), 'utf8')).rules).toEqual([external]);
+    expect(JSON.parse(await readFile(rulesFile(), 'utf8')).scenes[0].httpRules).toEqual([external]);
     expect(fake.engines[0].calls.filter((call: any) => call.method === 'rules.sync')).toHaveLength(
       previousSyncs,
     );
     await message('project.reload');
     await message('rules.save', { rule });
-    expect(JSON.parse(await readFile(rulesFile(), 'utf8')).rules).toEqual([external, rule]);
+    expect(JSON.parse(await readFile(rulesFile(), 'utf8')).scenes[0].httpRules).toEqual([external, rule]);
   });
 
   it('项目采集设置优先于 IDE 默认值，未指定参数仍使用默认值', async () => {
@@ -1325,7 +1372,14 @@ describe('项目文件与工作区绑定整合', () => {
     );
     await writeFile(projectFile(fake.extraWorkspace), JSON.stringify(config));
     const copiedRule = { ...rule, id: 'copied' };
-    await writeFile(rulesFile(fake.extraWorkspace), JSON.stringify({ version: 1, rules: [copiedRule] }));
+    await writeFile(
+      rulesFile(fake.extraWorkspace),
+      JSON.stringify({
+        version: 1,
+        activeSceneId: 'copy-scene',
+        scenes: [{ id: 'copy-scene', name: '副本', httpRules: [copiedRule], wsRules: [] }],
+      }),
+    );
     fake.engines = [];
     await activateCurrent();
     expect(fake.engines).toHaveLength(2);
@@ -1337,7 +1391,11 @@ describe('项目文件与工作区绑定整合', () => {
     expect(copy.starts[0].storagePath).toBe(await privateStorage(fake.extraWorkspace));
     expect(original.starts[0].storagePath).not.toBe(copy.starts[0].storagePath);
     expect(original.calls.find((call: any) => call.method === 'rules.sync').params.rules).toEqual([]);
-    expect(copy.calls.find((call: any) => call.method === 'rules.sync').params.rules).toEqual([copiedRule]);
+    await vi.waitFor(() =>
+      expect(copy.calls.filter((call: any) => call.method === 'rules.sync').at(-1).params.rules).toEqual([
+        copiedRule,
+      ]),
+    );
     fake.selectedWorkspace = fake.extraWorkspace;
     await open();
     expect(latest().state.project.id).toBe(config.projectId);

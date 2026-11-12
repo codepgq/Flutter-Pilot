@@ -1,5 +1,14 @@
 # Flutter Pilot 项目记忆
 
+## HTTP / WebSocket Mock 场景（2026-11-12）
+
+- 用户批准破坏式引入 Scene，随后要求子代理审查、修复问题并本地提交。版本保持 0.0.10，不推送、发布或安装；此范围覆盖下方历史发布授权。
+- `.flutter-pilot/scenes.json` 统一持久化 `{version:1, activeSceneId, scenes:[{id,name,httpRules,wsRules}]}`。首次缺文件才一次性导入项目旧规则到不激活的默认场景；生成后旧文件不再加载或写入。无效文件保留上次有效配置，外部编辑须先重载，禁止 UI 覆盖。
+- 单一激活场景与浏览场景分离；激活选择持久保存，连接、重连、IDE 重开后自动应用，遵守自动连接设置。独立 Mock 开关移除，采集关闭暂停对应域 Mock，重新开启恢复；停用保留采集。
+- 工作台与 MCP 共用 SceneController，切换先卸载两域，再应用新场景；按协议显示待连接、待接入、失败、不支持、暂停和已应用。激活及已应用均不等同新请求实际命中。代理仅应用 HTTP。
+- MCP 增加 list_scenes / activate_scene / deactivate_scene，移除 set_mock_enabled；reload_rules 不接收 domain。get_network_status 返回 files.scenes。现为 23 个工具、27 个 Prompts。
+- 临时 WS connectionId 规则仅归属激活场景的内存，切换或连接失效后清除；手动推送与真实发送只要求 WS 采集已接入，不要求场景或自动规则；无自动推送、定时和重放。
+
 ## 0.0.10 发布与 Cursor 安装授权（2026-11-11）
 
 - 用户要求发布新版本、推送 GitHub 并安装 Cursor，覆盖此前本轮仅修改源码、不提交与不安装限制。

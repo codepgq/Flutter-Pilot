@@ -1,4 +1,5 @@
 // Independent Flutter fixture + SDK debug adapter; never starts an IDE or controls a user app.
+import { createSceneNetwork } from './scene-network-fixture.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -64,7 +65,8 @@ await build({
     'src/vm/session.ts',
     'src/vm/ui.ts',
     'src/mcp/network.ts',
-    'src/store.ts',
+    'src/scenes.ts',
+    'src/scene-controller.ts',
   ],
   outdir: join(temp, 'js'),
   platform: 'node',
@@ -79,7 +81,8 @@ const { McpSessionServer } = load('mcp/server');
 const { VmSession } = load('vm/session');
 const { VmUiController } = load('vm/ui');
 const { McpNetworkController } = load('mcp/network');
-const { RuleStore } = load('store');
+const { SceneStore } = load('scenes');
+const { SceneController } = load('scene-controller');
 const child = spawn(flutter, ['debug_adapter'], { stdio: ['pipe', 'pipe', 'pipe'] });
 let buffer = Buffer.alloc(0),
   sequence = 0,
@@ -163,31 +166,11 @@ try {
   if (!address.pathname.endsWith('/ws')) address.pathname = address.pathname.replace(/\/?$/, '/ws');
   await vm.connect(address.toString(), []);
   check((await ui.probe()).supported, 'Flutter UI available through Debug VM');
-  const store = new RuleStore(join(temp, '.flutter-pilot'));
-  const network = new McpNetworkController({
-    httpRulesPath: store.file,
-    wsRulesPath: join(temp, '.flutter-pilot/ws-rules.json'),
-    readHttpRules: async () => (await store.load()).rules,
-    readWsRules: async () => [],
-    applyHttpRules: (rules) => vm.updateRules(rules),
-    applyWsRules: async () => {},
-    status: () => ({
-      vmConnected: vm.state.status === 'connected',
-      http: {
-        captureEnabled: vm.state.captureEnabled,
-        mockEnabled: vm.state.mockEnabled,
-        runtimeApplied: vm.state.mockEnabled && vm.state.instances > 0,
-      },
-    }),
-    listHttp: (query) => vm.store.list(query),
-    getHttp: (id) => vm.store.get(id),
-    connections: async () => [],
-    messages: async () => ({ items: [], total: 0 }),
-    setCapture: (_, enabled) => vm.setCaptureEnabled(enabled),
-    setMock: (_, enabled) => vm.setMockEnabled(enabled),
-    injectWs: async () => {},
-    sendWs: async () => {},
-  });
+  const { store, scenes, network, writeHttpRules } = await createSceneNetwork(
+    vm,
+    join(temp, '.flutter-pilot'),
+    { SceneStore, SceneController, McpNetworkController },
+  );
   const lifecycle = new McpLifecycleController({
     target: () => ({ debugSessionId: 'independent-flutter-dap' }),
     connected: () => vm.state.status === 'connected',
@@ -264,15 +247,15 @@ try {
       },
     ],
   };
-  await store.save(document);
-  await call('reload_rules', { domain: 'http' });
-  await call('set_mock_enabled', { domain: 'http', enabled: true });
+  await writeHttpRules(document);
+  await call('reload_rules');
+  await call('activate_scene', { sceneId: scenes.document.scenes[0].id });
   await call('tap', { key: 'fetch' });
   await wait(async () => (await text('response')) === 'first-state');
   check(true, 'first Mock scenario reaches UI');
   document.rules[0].mock.body = JSON.stringify({ marker: 'second-state' });
-  await store.save(document);
-  check((await call('reload_rules', { domain: 'http' })).ok, 'edited API rules reload before restart');
+  await writeHttpRules(document);
+  check((await call('reload_rules')).ok, 'edited API rules reload before restart');
   const restart = await call('hot_restart');
   check(restart.completed && !restart.statePreserved, 'hot_restart confirmed through MCP');
   check((await text('count')) === 'count:0', 'hot_restart resets application memory');
@@ -292,6 +275,7 @@ try {
     failed.isError && failed.structuredContent.completed === false,
     'compile failure does not report successful reload',
   );
+  scenes.dispose();
   await mkdir(join(root, 'artifacts'), { recursive: true });
   await writeFile(
     join(root, 'artifacts/mcp-lifecycle-flutter-report.json'),
