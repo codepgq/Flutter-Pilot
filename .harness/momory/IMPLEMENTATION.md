@@ -1,5 +1,12 @@
 # 实现与验证结论
 
+## 0.0.11 更新与 Cursor 安装（2026-11-12）
+
+- 用户要求更新新版本并安装 Cursor，沿用已确认的补丁递增与本地 VSIX 流程；工作区原本干净，0.0.11 功能沿用 0.0.10。manifest、lockfile、MCP 版本、README、CHANGELOG 与打包路径已同步。
+- 类型、全仓格式、构建与打包通过，402 项 Vitest 全部通过。首次沙箱运行因本机监听限制失败，允许测试监听后全量通过；此次仅版本与文档变更，未重跑 UI 或真实 Flutter/IDE GUI 验收。
+- Cursor CLI --force 安装成功；28 个分发文件与源码/构建、VSIX、安装目录逐项一致（manifest 排除 Cursor 元数据）。构建与安装桥接真实 SDK stdio 均验证 0.0.11、21 工具、25 Prompts、5 资源及离线指南。
+- 安装包 artifacts/flutter-pilot-0.0.11.vsix，报告 artifacts/v0.0.11-install-report.json。未自动重载用户窗口；需方便时执行 Developer: Reload Window 加载新版。此次未提交或推送。
+
 ## 0.0.10 发布与 Cursor 安装（2026-11-11）
 
 - 用户要求发布新版本、推送GitHub并安装Cursor，沿用记忆中的补丁版本与VSIX流程，包含API规则配置标签、API最新详情自动刷新及Mock运行时恢复修复。manifest、lockfile、MCP版本、README、CHANGELOG与打包路径统一0.0.10。

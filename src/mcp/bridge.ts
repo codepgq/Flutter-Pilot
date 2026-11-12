@@ -28,7 +28,7 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
   const connectionId = randomUUID();
   const announced = new Map<string, SessionDescriptor>();
   const server = new Server(
-    { name: 'flutter-pilot', version: '0.0.10' },
+    { name: 'flutter-pilot', version: '0.0.11' },
     {
       capabilities: { tools: {}, resources: {}, prompts: {} },
       instructions: agentInstructions,
