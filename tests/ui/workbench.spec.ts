@@ -131,6 +131,7 @@ test('规则启停只显示 switch，支持鼠标和键盘，繁忙时禁用', a
   await page.goto('/');
   await state(page);
   await page.getByRole('button', { name: 'Mock 场景' }).click();
+  await page.getByRole('button', { name: '查看场景 默认场景' }).click();
   const toggle = page.getByRole('switch', { name: `启用 ${rule.name}`, exact: true });
   await expect(toggle).toBeChecked();
   await expect(toggle).toHaveText('');
@@ -178,6 +179,7 @@ test('规则卡片紧凑布局与长地址在桌面和窄窗口可用', async ({
     ],
   });
   await page.getByRole('button', { name: 'Mock 场景' }).click();
+  await page.getByRole('button', { name: '查看场景 默认场景' }).click();
   for (const width of [1280, 680, 390]) {
     await page.setViewportSize({ width, height: 900 });
     const card = page.locator('.rule-card').first();
@@ -205,6 +207,7 @@ test('转发规则支持路径及完整 URL 并说明凭证保留', async ({ pag
   await page.goto('/');
   await state(page);
   await page.getByRole('button', { name: 'Mock 场景' }).click();
+  await page.getByRole('button', { name: '查看场景 默认场景' }).click();
   for (const target of ['/api/private/new', 'https://target.example.test/private?x=1']) {
     await page.getByRole('button', { name: '新建规则' }).click();
     await page.getByLabel('规则名称', { exact: true }).fill('私有接口转发');
@@ -227,6 +230,7 @@ test('规则表单校验、JSON编辑与 CRUD 消息', async ({ page }) => {
   await page.goto('/');
   await state(page);
   await page.getByRole('button', { name: 'Mock 场景' }).click();
+  await page.getByRole('button', { name: '查看场景 默认场景' }).click();
   await page.getByRole('button', { name: '新建规则' }).click();
   await page.getByRole('button', { name: '保存规则' }).click();
   await expect(page.getByRole('alert')).toContainText('规则名称不能为空');
@@ -338,6 +342,7 @@ test('仅改请求头保留正文，关闭全部断点仍可保存 Mock', async 
   await page.goto('/');
   await state(page);
   await page.getByRole('button', { name: 'Mock 场景' }).click();
+  await page.getByRole('button', { name: '查看场景 默认场景' }).click();
   await page.getByText('规则模板与说明', { exact: true }).click();
   await page.getByRole('button', { name: '修改请求', exact: true }).click();
   await page.getByLabel('规则名称', { exact: true }).fill('只修改请求头');

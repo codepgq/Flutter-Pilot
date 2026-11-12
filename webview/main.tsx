@@ -1759,13 +1759,30 @@ function Scenes({
   clearWsDraft: () => void;
 }) {
   const scenes = state.scenes?.scenes ?? [];
-  const selected = scenes.find((scene) => scene.id === state.selectedSceneId) ?? scenes[0];
+  const [openId, setOpenId] = useState<string | undefined>(
+    edit || wsDraft ? (state.selectedSceneId ?? scenes[0]?.id) : undefined,
+  );
+  const previousSelectedId = useRef(state.selectedSceneId);
+  const awaitingNewScene = useRef(false);
+  useEffect(() => {
+    if (
+      state.selectedSceneId &&
+      state.selectedSceneId !== previousSelectedId.current &&
+      (previousSelectedId.current || awaitingNewScene.current)
+    ) {
+      setOpenId(state.selectedSceneId);
+      awaitingNewScene.current = false;
+    }
+    previousSelectedId.current = state.selectedSceneId;
+  }, [state.selectedSceneId]);
+  const selected = scenes.find((scene) => scene.id === openId);
   const active = scenes.find((scene) => scene.id === state.scenes?.activeSceneId);
   const [name, setName] = useState('');
   useEffect(() => setName(selected?.name ?? ''), [selected?.id, selected?.name]);
   const choose = (id: string) => {
     setEdit(undefined);
     clearWsDraft();
+    setOpenId(id);
     send('scenes.select', { id });
   };
   const runtime = state.sceneRuntime;
@@ -1778,7 +1795,13 @@ function Scenes({
           Mock 场景 <span className="count">{scenes.length}</span>
         </h2>
         <div className="toolbar-actions">
-          <Button disabled={state.busy} onClick={() => send('scenes.create', { name: '新场景' })}>
+          <Button
+            disabled={state.busy}
+            onClick={() => {
+              awaitingNewScene.current = true;
+              send('scenes.create', { name: '新场景' });
+            }}
+          >
             新建场景
           </Button>
           <Button action="rules.import" disabled={state.busy}>
@@ -1815,102 +1838,144 @@ function Scenes({
         )}
         <small>激活状态会保存，重连或重开 IDE 后自动恢复。实际命中请查看新请求和消息。</small>
       </section>
-      <div className="scene-selector">
-        <label>
-          浏览 / 目标场景
-          <select
-            aria-label="目标场景"
-            value={selected?.id ?? ''}
-            disabled={state.busy}
-            onChange={(event) => choose(event.target.value)}
-          >
-            {scenes.map((scene) => (
-              <option key={scene.id} value={scene.id}>
-                {scene.name}
-                {active?.id === scene.id ? ' · 已激活' : ''} · HTTP {scene.httpRules.length} / WS{' '}
-                {scene.wsRules.length}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {selected ? (
-        <>
-          <div className="scene-actions">
-            <input
-              aria-label="场景名称"
-              value={name}
-              maxLength={256}
-              onChange={(event) => setName(event.target.value)}
-            />
-            <Button
-              disabled={state.busy || !name.trim()}
-              onClick={() => send('scenes.rename', { id: selected.id, name: name.trim() })}
-            >
-              保存名称
-            </Button>
-            <Button
-              primary
-              disabled={state.busy}
-              onClick={() => send('scenes.activate', { id: selected.id })}
-            >
-              {active?.id === selected.id ? '应用此场景' : '激活此场景'}
-            </Button>
-            <Button disabled={state.busy} onClick={() => send('scenes.duplicate', { id: selected.id })}>
-              复制场景
-            </Button>
-            <Button danger disabled={state.busy} onClick={() => send('scenes.delete', { id: selected.id })}>
-              删除场景
-            </Button>
-          </div>
-          {state.lastError && (
-            <div className="notice" role="alert">
-              {state.lastError}
-            </div>
-          )}
-          <Rules
-            key={selected.id}
-            scene={selected}
-            state={{ ...state, rules: selected.httpRules }}
-            edit={edit}
-            setEdit={setEdit}
-          />
-          <WebSocketPanel
-            key={`${selected.id}:${wsDraft?.id ?? ''}`}
-            rulesOnly
-            scenes={scenes}
-            sceneId={selected.id}
-            initialDraft={wsDraft}
-            onDraftClosed={clearWsDraft}
-            state={{
-              ...(state.ws ?? {
-                captureEnabled: false,
-                mockEnabled: false,
-                status: 'off',
-                connections: [],
-                messages: { items: [], total: 0 },
-                omitted: 0,
-                warnings: [],
-              }),
-              rules: selected.wsRules.concat(
-                selected.id === active?.id
-                  ? (state.ws?.rules.filter((rule) => !!rule.match.connectionId) ?? [])
-                  : [],
-              ),
-            }}
-            connected={state.vm?.status === 'connected'}
-            vmMode={state.mode !== 'proxy'}
-            busy={state.busy}
-            send={(action, payload) => send(action, { ...((payload as object) ?? {}), sceneId: selected.id })}
-          />
-        </>
-      ) : (
-        <Empty
-          icon="rules"
-          title="创建第一个场景"
-          description="一个场景可以同时组织多个 HTTP 和 WebSocket Mock。"
-        />
+      {state.lastError && (
+        <div className="notice" role="alert">
+          {state.lastError}
+        </div>
       )}
+      <div className={`scene-layout ${selected ? 'has-detail' : ''}`}>
+        <section className="scene-list" aria-label="场景列表">
+          <div className="scene-list-heading">
+            场景列表 <span className="count">{scenes.length}</span>
+          </div>
+          {scenes.map((scene) => (
+            <div className={`scene-row ${selected?.id === scene.id ? 'selected' : ''}`} key={scene.id}>
+              <button
+                type="button"
+                className="rule-switch scene-switch"
+                role="switch"
+                aria-label={`启用场景 ${scene.name}`}
+                aria-checked={active?.id === scene.id}
+                title={active?.id === scene.id ? '停用此场景' : '激活此场景'}
+                disabled={state.busy}
+                onClick={() =>
+                  active?.id === scene.id
+                    ? send('scenes.deactivate')
+                    : send('scenes.activate', { id: scene.id })
+                }
+              >
+                <span className="rule-switch-track" aria-hidden="true">
+                  <span className="rule-switch-thumb" />
+                </span>
+              </button>
+              <button
+                type="button"
+                className="scene-row-content"
+                aria-label={`查看场景 ${scene.name}`}
+                aria-pressed={selected?.id === scene.id}
+                disabled={state.busy}
+                onClick={() => choose(scene.id)}
+              >
+                <strong title={scene.name}>{scene.name}</strong>
+                {active?.id === scene.id && <span className="tag scene-active">已激活</span>}
+                <span className="scene-counts">
+                  HTTP {scene.httpRules.length} / WS {scene.wsRules.length}
+                </span>
+                <span aria-hidden="true">›</span>
+              </button>
+            </div>
+          ))}
+          {!scenes.length && (
+            <Empty
+              icon="rules"
+              title="创建第一个场景"
+              description="一个场景可以同时组织多个 HTTP 和 WebSocket Mock。"
+            />
+          )}
+        </section>
+        {selected && (
+          <section className="scene-detail" aria-label="场景详情">
+            <div className="scene-detail-heading">
+              <strong title={selected.name}>{selected.name}</strong>
+              <button
+                aria-label="关闭场景详情"
+                title="关闭详情，返回列表"
+                onClick={() => {
+                  setOpenId(undefined);
+                  setEdit(undefined);
+                  clearWsDraft();
+                }}
+              >
+                <Icon name="close" size={16} />
+              </button>
+            </div>
+            <div className="scene-actions">
+              <input
+                aria-label="场景名称"
+                value={name}
+                maxLength={256}
+                onChange={(event) => setName(event.target.value)}
+              />
+              <Button
+                disabled={state.busy || !name.trim()}
+                onClick={() => send('scenes.rename', { id: selected.id, name: name.trim() })}
+              >
+                保存名称
+              </Button>
+              <Button
+                primary
+                disabled={state.busy}
+                onClick={() => send('scenes.activate', { id: selected.id })}
+              >
+                {active?.id === selected.id ? '应用此场景' : '激活此场景'}
+              </Button>
+              <Button disabled={state.busy} onClick={() => send('scenes.duplicate', { id: selected.id })}>
+                复制场景
+              </Button>
+              <Button danger disabled={state.busy} onClick={() => send('scenes.delete', { id: selected.id })}>
+                删除场景
+              </Button>
+            </div>
+            <Rules
+              key={selected.id}
+              scene={selected}
+              state={{ ...state, rules: selected.httpRules }}
+              edit={edit}
+              setEdit={setEdit}
+            />
+            <WebSocketPanel
+              key={`${selected.id}:${wsDraft?.id ?? ''}`}
+              rulesOnly
+              scenes={scenes}
+              sceneId={selected.id}
+              initialDraft={wsDraft}
+              onDraftClosed={clearWsDraft}
+              state={{
+                ...(state.ws ?? {
+                  captureEnabled: false,
+                  mockEnabled: false,
+                  status: 'off',
+                  connections: [],
+                  messages: { items: [], total: 0 },
+                  omitted: 0,
+                  warnings: [],
+                }),
+                rules: selected.wsRules.concat(
+                  selected.id === active?.id
+                    ? (state.ws?.rules.filter((rule) => !!rule.match.connectionId) ?? [])
+                    : [],
+                ),
+              }}
+              connected={state.vm?.status === 'connected'}
+              vmMode={state.mode !== 'proxy'}
+              busy={state.busy}
+              send={(action, payload) =>
+                send(action, { ...((payload as object) ?? {}), sceneId: selected.id })
+              }
+            />
+          </section>
+        )}
+      </div>
     </div>
   );
 }

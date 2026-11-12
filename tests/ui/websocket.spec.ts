@@ -205,6 +205,7 @@ test('WS 规则编辑、启停、排序与未知 URL 的临时规则', async ({ 
     .filter({ hasText: /^WS 规则/ })
     .first()
     .click();
+  await page.getByRole('button', { name: '查看场景 默认场景' }).click();
   await page.getByRole('switch', { name: `启用 WS 规则 ${rule.name}` }).click();
   expect(await messages(page)).toContainEqual({
     action: 'ws.rules.toggle',

@@ -3080,16 +3080,89 @@ footer {
 .scene-runtime small {
   flex-basis: 100%;
 }
-.scene-selector label {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
+.scene-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
-.scene-selector select {
+.scene-layout.has-detail {
+  grid-template-columns: minmax(240px, 35%) minmax(0, 1fr);
+}
+.scene-list,
+.scene-detail {
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.scene-list-heading {
+  padding: 8px 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+}
+.scene-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid transparent;
+}
+.scene-switch {
+  margin-left: 12px;
+  flex-shrink: 0;
+}
+.scene-row-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   flex: 1;
   min-width: 0;
-  max-width: 100%;
+  padding: 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+.scene-row:hover,
+.scene-row.selected {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.1));
+}
+.scene-row.selected {
+  border-left-color: var(--focus);
+}
+.scene-row strong,
+.scene-detail-heading strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scene-row strong {
+  flex: 1;
+}
+.scene-counts {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.scene-active {
+  white-space: nowrap;
+}
+.scene-detail {
+  border-left: 1px solid var(--line);
+  padding: 0 16px 16px;
+}
+.scene-detail-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0 12px;
+}
+.scene-detail-heading button {
+  flex-shrink: 0;
 }
 .scene-actions {
   display: flex;
@@ -3110,9 +3183,15 @@ footer {
   padding: 0;
 }
 @media (max-width: 760px) {
-  .scene-selector label {
-    align-items: stretch;
-    flex-direction: column;
+  .scene-layout.has-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .scene-layout.has-detail > .scene-list {
+    display: none;
+  }
+  .scene-detail {
+    border-left: 0;
+    padding: 0 0 16px;
   }
   .scene-runtime > span {
     overflow-wrap: anywhere;
