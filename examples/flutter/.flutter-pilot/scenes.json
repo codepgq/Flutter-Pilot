@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "activeSceneId": null,
+  "scenes": [
+    {
+      "id": "69a4d4d3-2633-4c6c-b6c6-313d57517626",
+      "name": "订单成功 · HTTP + WS",
+      "httpRules": [
+        {
+          "id": "76d2523d-75c9-4ef1-b253-24533d6aa8de",
+          "name": "订单列表 · 两笔已支付订单",
+          "enabled": true,
+          "priority": 10,
+          "match": {
+            "method": "GET",
+            "host": "api.example.com",
+            "path": "/v1/orders"
+          },
+          "mock": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": "{\"code\": 0, \"data\": [{\"id\": \"DEMO-1001\", \"product\": \"旅行背包\", \"amount\": 299, \"status\": \"paid\"}, {\"id\": \"DEMO-1002\", \"product\": \"无线耳机\", \"amount\": 599, \"status\": \"paid\"}]}"
+          }
+        },
+        {
+          "id": "dae49c3b-a6e6-4e8a-81f9-85d05b3ee2e6",
+          "name": "账户信息 · 演示用户",
+          "enabled": true,
+          "priority": 10,
+          "match": {
+            "method": "GET",
+            "host": "api.example.com",
+            "path": "/v1/profile"
+          },
+          "mock": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": "{\"code\": 0, \"data\": {\"name\": \"Scene 演示用户\", \"level\": \"VIP\"}}"
+          }
+        }
+      ],
+      "wsRules": [
+        {
+          "id": "c37e6293-38bc-43b4-a477-d10379c7b8f3",
+          "name": "订单事件 · 替换为支付成功",
+          "enabled": true,
+          "priority": 10,
+          "match": {
+            "url": "wss://api.example.com/orders*",
+            "direction": "inbound",
+            "contains": "order_status"
+          },
+          "action": {
+            "type": "replace",
+            "text": "{\"type\": \"order_status\", \"orderId\": \"DEMO-1001\", \"status\": \"paid\"}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "3fe7849e-23a0-4f9e-8529-fd3b791fff74",
+      "name": "服务异常 · HTTP + WS",
+      "httpRules": [
+        {
+          "id": "ff847b6c-708c-46a9-9f5c-9311428f68e3",
+          "name": "订单列表 · 服务暂不可用",
+          "enabled": true,
+          "priority": 10,
+          "match": {
+            "method": "GET",
+            "host": "api.example.com",
+            "path": "/v1/orders"
+          },
+          "mock": {
+            "status": 503,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": "{\"code\": \"SERVICE_UNAVAILABLE\", \"message\": \"服务维护中，请稍后重试\"}"
+          }
+        },
+        {
+          "id": "468675d4-af69-44e3-ac45-59c082b5871f",
+          "name": "账户信息 · 登录已过期",
+          "enabled": true,
+          "priority": 10,
+          "match": {
+            "method": "GET",
+            "host": "api.example.com",
+            "path": "/v1/profile"
+          },
+          "mock": {
+            "status": 401,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": "{\"code\": \"TOKEN_EXPIRED\", \"message\": \"登录已过期，请重新登录\"}"
+          }
+        }
+      ],
+      "wsRules": [
+        {
+          "id": "065e5104-002c-45d4-aa86-c1a267a4a512",
+          "name": "订单事件 · 丢弃状态通知",
+          "enabled": true,
+          "priority": 10,
+          "match": {
+            "url": "wss://api.example.com/orders*",
+            "direction": "inbound",
+            "contains": "order_status"
+          },
+          "action": {
+            "type": "drop"
+          }
+        }
+      ]
+    }
+  ]
+}
