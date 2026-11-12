@@ -54,7 +54,8 @@ exports.run = async () => {
   const sql = async (query) => (await exec('/usr/bin/sqlite3', [database, query])).stdout.trim();
   try {
     await fs.access(certificate);
-    // No workbench or start command: workspace activation must already listen.
+    // Workspace activation restores the explicitly active fixture scene.
+    await new Promise((resolve) => setTimeout(resolve, 750));
     assert.deepEqual(await get('https://ide.flutter-pilot.test/ping'), { ide: true });
     await vscode.commands.executeCommand('flutterPilot.open');
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
@@ -103,7 +104,8 @@ exports.run = async () => {
       ]),
     );
     assert.equal(
-      JSON.parse(await fs.readFile(path.join(projectDirectory, 'rules.json'), 'utf8')).rules[0].id,
+      JSON.parse(await fs.readFile(path.join(projectDirectory, 'scenes.json'), 'utf8')).scenes[0].httpRules[0]
+        .id,
       'ide-smoke',
     );
     assert.equal(

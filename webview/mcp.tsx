@@ -73,7 +73,7 @@ export function McpPanel({
             </div>
           </dl>
           <p className="muted">
-            开启 MCP 后继续由插件维护 VM 连接。关闭工作台可继续使用；采集与 Mock 开关独立控制。
+            开启 MCP 后继续由插件维护 VM 连接。关闭工作台可继续使用；Mock 统一由场景控制，采集可独立暂停。
           </p>
           <button
             disabled={state.busy || !mcp?.running || state.vm?.status !== 'connected'}
@@ -179,10 +179,10 @@ export function McpPanel({
         </p>
         <ul>
           <li>
-            <code>topic: http</code>：rules.json 字段、JSON 正文及请求／响应修改示例。
+            <code>topic: http</code>：scenes.json 中 httpRules 字段、JSON 正文及请求／响应修改示例。
           </li>
           <li>
-            <code>topic: ws</code>：ws-rules.json 的 URL、方向、文本替换／丢弃与消息验证。
+            <code>topic: ws</code>：scenes.json 中 wsRules 的 URL、方向、文本替换／丢弃与消息验证。
           </li>
           <li>
             <code>topic: ui</code>：快照发现 Key、父范围定位、点击、输入、滚动及 Key 问题处理。
@@ -196,8 +196,8 @@ export function McpPanel({
           MCP 并连接 VM。
         </p>
         <p>
-          编辑 <code>.flutter-pilot/rules.json</code> 或 <code>.flutter-pilot/ws-rules.json</code> → 调用{' '}
-          <code>reload_rules</code> → 显式开启 Mock → 按 Key 操作 UI → 查询网络记录。
+          编辑 <code>.flutter-pilot/scenes.json</code> → 调用 <code>reload_rules</code> →{' '}
+          <code>activate_scene</code> 激活场景 → 按 Key 操作 UI → 查询网络记录。
         </p>
         <p>缺少稳定 Key 时由 MCP 返回诊断，由编码 Agent 修复源码。正式交互不会回退到文本定位。</p>
         <p className="muted">

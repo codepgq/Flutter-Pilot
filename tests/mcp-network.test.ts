@@ -4,19 +4,16 @@ import { parseTool } from '../src/mcp/tools';
 
 function fixture() {
   const host: NetworkHost = {
-    httpRulesPath: '/project/.flutter-pilot/rules.json',
-    wsRulesPath: '/project/.flutter-pilot/ws-rules.json',
-    readHttpRules: vi.fn(async () => []),
-    readWsRules: vi.fn(async () => []),
-    applyHttpRules: vi.fn(async () => {}),
-    applyWsRules: vi.fn(async () => {}),
+    scenesPath: '/project/.flutter-pilot/scenes.json',
+    listScenes: vi.fn(() => ({ version: 1, activeSceneId: null, scenes: [] })),
+    activateScene: vi.fn(async () => {}),
+    reloadScenes: vi.fn(async () => {}),
     status: () => ({ http: { mockEnabled: false }, ws: { mockEnabled: false } }),
     listHttp: vi.fn(async () => ({ items: [], total: 0 })),
     getHttp: vi.fn(),
     connections: vi.fn(async () => []),
     messages: vi.fn(async () => ({ items: [], total: 0 })),
     setCapture: vi.fn(async () => {}),
-    setMock: vi.fn(async () => {}),
     injectWs: vi.fn(async () => {}),
     sendWs: vi.fn(async () => {}),
   };
@@ -47,7 +44,7 @@ describe('MCP file-backed network workflow', () => {
     );
     expect(host.injectWs).toHaveBeenCalledWith('exact', '{"event":"custom","payload":null}', undefined);
     expect(host.setCapture).not.toHaveBeenCalled();
-    expect(host.setMock).not.toHaveBeenCalled();
+    expect(host.activateScene).not.toHaveBeenCalled();
   });
 
   it('rejects ambiguous, incomplete, non-JSON or oversized messages before dispatch', async () => {
@@ -86,48 +83,34 @@ describe('MCP file-backed network workflow', () => {
     expect(host.injectWs).not.toHaveBeenCalled();
   });
 
-  it('invalid HTTP file preserves previous rules while WS can load independently', async () => {
+  it('invalid scene file preserves the previous document and does not activate anything', async () => {
     const { host, controller } = fixture();
-    vi.mocked(host.readHttpRules).mockRejectedValue(new Error('规则 JSON 无效'));
-    const result = await controller.reload();
-    expect(result.ok).toBe(false);
-    expect(result.results.http).toMatchObject({ loaded: false, synchronized: false });
-    expect(result.results.ws).toMatchObject({ loaded: true, synchronized: true });
-    expect(host.applyHttpRules).not.toHaveBeenCalled();
-    expect(host.applyWsRules).toHaveBeenCalledOnce();
-    expect(host.setMock).not.toHaveBeenCalled();
-    expect(host.setCapture).not.toHaveBeenCalled();
+    vi.mocked(host.reloadScenes).mockRejectedValue(new Error('场景 JSON 无效'));
+    expect(await controller.reload()).toMatchObject({ ok: false, loaded: false, error: '场景 JSON 无效' });
+    expect(host.activateScene).not.toHaveBeenCalled();
   });
-  it('separates accepted configuration from failed runtime synchronization', async () => {
+  it('reloads the complete document and exposes scene runtime state', async () => {
     const { host, controller } = fixture();
-    vi.mocked(host.applyHttpRules).mockRejectedValue(new Error('VM 同步失败'));
-    expect((await controller.reload('http')).results.http).toMatchObject({
-      loaded: true,
-      synchronized: false,
-    });
-    expect(host.readWsRules).not.toHaveBeenCalled();
+    expect(await controller.reload()).toMatchObject({ ok: true, loaded: true });
+    expect(host.reloadScenes).toHaveBeenCalledOnce();
+    expect(controller.status()).toMatchObject({ files: { scenes: host.scenesPath } });
+    expect(() => parseTool('reload_rules', { sessionId: 's', domain: 'http' })).toThrow();
+    expect(() => parseTool('set_mock_enabled', { sessionId: 's', domain: 'ws', enabled: true })).toThrow();
   });
-  it('reports pending application when rules load while VM or Mock is off', async () => {
+  it('routes scene activation and capture, and strips session identity from queries', async () => {
     const { host, controller } = fixture();
-    expect((await controller.reload('http')).results.http).toMatchObject({
-      loaded: true,
-      runtimeApplied: false,
-      pending: true,
-    });
-    host.status = () => ({ vmConnected: true, http: { mockEnabled: true } });
-    expect((await controller.reload('http')).results.http).toMatchObject({
-      loaded: true,
-      runtimeApplied: true,
-      pending: false,
-    });
-  });
-  it('routes explicit switches independently and strips session identity from queries', async () => {
-    const { host, controller } = fixture();
-    await controller.execute('set_mock_enabled', { domain: 'ws', enabled: true });
-    expect(host.setMock).toHaveBeenCalledWith('ws', true);
-    expect(host.setCapture).not.toHaveBeenCalled();
+    await controller.execute(
+      'activate_scene',
+      parseTool('activate_scene', { sessionId: 's', sceneId: 'mixed' }),
+    );
+    expect(host.activateScene).toHaveBeenLastCalledWith('mixed');
+    await controller.execute('deactivate_scene', { sessionId: 's' });
+    expect(host.activateScene).toHaveBeenLastCalledWith(null);
+    await controller.execute('list_scenes', { sessionId: 's' });
+    expect(host.listScenes).toHaveBeenCalledTimes(3);
+    await controller.execute('set_capture_enabled', { domain: 'ws', enabled: false });
+    expect(host.setCapture).toHaveBeenCalledWith('ws', false);
     await controller.execute('get_requests', { sessionId: 'private', limit: 20, search: 'orders' });
     expect(host.listHttp).toHaveBeenCalledWith({ limit: 20, search: 'orders' });
-    expect(controller.status()).toMatchObject({ files: { http: host.httpRulesPath, ws: host.wsRulesPath } });
   });
 });

@@ -326,8 +326,7 @@ export class WsSession extends EventEmitter {
   private dispatch(action: 'push' | 'send', connectionId: string, text: string, signal?: AbortSignal) {
     return this.enqueue(async () => {
       if (signal?.aborted) throw new Error('WS 消息操作已取消，未执行发送');
-      if (!this.online || !this.state.captureEnabled || !this.state.mockEnabled)
-        throw new Error('请先连接 VM 并开启 WS Mock');
+      if (!this.online || !this.state.captureEnabled) throw new Error('请先连接 VM 并开启 WS 采集');
       const connection = this.state.connections.find((c) => c.id === connectionId);
       if (!connection || connection.status !== 'open' || connection.capture !== 'attached')
         throw new Error('所选 WS 连接已失效，不能向旧连接或同址新连接发送消息');

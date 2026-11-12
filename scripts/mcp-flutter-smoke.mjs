@@ -1,4 +1,5 @@
 // Independent fixture only: no connection to or edits of the user's application.
+import { createSceneNetwork } from './scene-network-fixture.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -62,7 +63,8 @@ await build({
     'src/vm/session.ts',
     'src/mcp/server.ts',
     'src/mcp/network.ts',
-    'src/store.ts',
+    'src/scenes.ts',
+    'src/scene-controller.ts',
     'src/mcp/bridge.ts',
   ],
   outdir: join(temp, 'js'),
@@ -76,7 +78,8 @@ const { VmUiController } = require(join(temp, 'js/vm/ui.cjs'));
 const { VmSession } = require(join(temp, 'js/vm/session.cjs'));
 const { McpSessionServer } = require(join(temp, 'js/mcp/server.cjs'));
 const { McpNetworkController } = require(join(temp, 'js/mcp/network.cjs'));
-const { RuleStore } = require(join(temp, 'js/store.cjs'));
+const { SceneStore } = require(join(temp, 'js/scenes.cjs'));
+const { SceneController } = require(join(temp, 'js/scene-controller.cjs'));
 const hash = async () =>
   createHash('sha256')
     .update(await readFile(source))
@@ -156,39 +159,11 @@ try {
   await waitFor(() => uri && started);
   await vm.connect(uri, []);
   check((await ui.probe()).supported, 'VM UI capability');
-  const store = new RuleStore(join(temp, '.flutter-pilot'));
-  const network = new McpNetworkController({
-    httpRulesPath: store.file,
-    wsRulesPath: join(temp, '.flutter-pilot/ws-rules.json'),
-    readHttpRules: async () => (await store.load()).rules,
-    readWsRules: async () => [],
-    applyHttpRules: async (rules) => {
-      await vm.updateRules(rules);
-    },
-    applyWsRules: async () => {},
-    status: () => ({
-      vmConnected: vm.state.status === 'connected',
-      http: {
-        captureEnabled: vm.state.captureEnabled,
-        mockEnabled: vm.state.mockEnabled,
-        instances: vm.state.instances,
-      },
-    }),
-    listHttp: (query) => vm.store.list(query),
-    getHttp: (id) => vm.store.get(id),
-    connections: async () => [],
-    messages: async () => ({ items: [], total: 0 }),
-    injectWs: (connectionId, text, signal) => vm.websocket.push(connectionId, text, signal),
-    sendWs: (connectionId, text, signal) => vm.websocket.send(connectionId, text, signal),
-    setCapture: async (domain, enabled) => {
-      assert.equal(domain, 'http');
-      await vm.setCaptureEnabled(enabled);
-    },
-    setMock: async (domain, enabled) => {
-      assert.equal(domain, 'http');
-      await vm.setMockEnabled(enabled);
-    },
-  });
+  const { store, scenes, network, writeHttpRules } = await createSceneNetwork(
+    vm,
+    join(temp, '.flutter-pilot'),
+    { SceneStore, SceneController, McpNetworkController },
+  );
   const registry = join(temp, 'registry');
   const sessionId = 'fixture-mcp-session';
   const uiTools = new Set([
@@ -240,8 +215,8 @@ try {
   check((await call('list_sessions')).sessions[0].sessionId === sessionId, 'MCP stdio session discovery');
   check((await call('find_widget', { key: 'fetch' })).ok, 'MCP Key lookup');
   const state = await call('get_network_status');
-  check(state.files.http === store.file, 'MCP exposes rule file location');
-  await store.save({
+  check(state.files.scenes === store.file, 'MCP exposes rule file location');
+  await writeHttpRules({
     version: 1,
     rules: [
       {
@@ -258,9 +233,13 @@ try {
       },
     ],
   });
-  const reload = await call('reload_rules', { domain: 'http' });
-  check(reload.ok && reload.results.http.count === 1, 'edited rule file reloads via MCP');
-  const mock = await call('set_mock_enabled', { domain: 'http', enabled: true });
+  const reload = await call('reload_rules');
+  check(
+    reload.ok && (await call('list_scenes')).scenes[0].httpRuleCount === 1,
+    'edited rule file reloads via MCP',
+  );
+  await call('activate_scene', { sceneId: scenes.document.scenes[0].id });
+  const mock = await call('get_network_status');
   check(mock.http.mockEnabled && mock.http.instances === 1, 'MCP explicitly enables runtime mock');
   check((await call('tap', { key: 'fetch' })).ok, 'MCP pointer click triggers business request');
   await waitFor(async () => (await call('find_widget', { key: 'echo' })).widget?.text === 'mcp-first', 10000);
@@ -275,19 +254,20 @@ try {
     'MCP network history identifies applied rule',
   );
   check(JSON.parse(detail.response.body).marker === 'mcp-first', 'MCP response detail matches UI');
-  const rules = await store.load();
-  rules.rules[0].mock.body = JSON.stringify({ marker: 'mcp-updated' });
-  await store.save(rules);
-  check((await call('reload_rules', { domain: 'http' })).ok, 'MCP resynchronizes edited active rule');
+  const rules = await store.read();
+  rules.scenes[0].httpRules[0].mock.body = JSON.stringify({ marker: 'mcp-updated' });
+  await store.save(rules, await store.read());
+  check((await call('reload_rules')).ok, 'MCP resynchronizes edited active rule');
   check((await call('tap', { key: 'fetch' })).ok, 'MCP second action');
   await waitFor(
     async () => (await call('find_widget', { key: 'echo' })).widget?.text === 'mcp-updated',
     10000,
   );
   check(true, 'updated rule affects next UI action');
-  await call('set_mock_enabled', { domain: 'http', enabled: false });
+  await call('deactivate_scene');
   check(!vm.state.mockEnabled, 'MCP disables runtime mock');
   check((await hash()) === before, 'fixture source unchanged during MCP operations');
+  scenes.dispose();
   await mkdir(join(root, 'artifacts'), { recursive: true });
   await writeFile(
     join(root, 'artifacts/mcp-flutter-smoke-report.json'),

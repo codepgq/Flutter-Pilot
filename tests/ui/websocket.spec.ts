@@ -75,6 +75,19 @@ async function state(page: Page, wsOverrides = {}, overrides = {}) {
   await page.evaluate((state) => window.postMessage({ type: 'state', state }, '*'), {
     ...fixture,
     ...overrides,
+    scenes: {
+      version: 1,
+      activeSceneId: 'scene',
+      scenes: [
+        {
+          id: 'scene',
+          name: '默认场景',
+          httpRules: [],
+          wsRules: (wsOverrides as { rules?: unknown[] }).rules ?? ws.rules,
+        },
+      ],
+    },
+    selectedSceneId: 'scene',
     ws: { ...ws, ...wsOverrides },
   });
 }
@@ -100,18 +113,17 @@ async function open(page: Page, wsOverrides = {}, overrides = {}) {
   await page.locator('nav').getByRole('button', { name: 'WebSocket' }).click();
 }
 
-test('WS 独立采集与 Mock 控制，断线及代理模式阻止推送', async ({ page }) => {
+test('WS 采集与场景状态分开，手动推送不依赖场景，断线及代理模式阻止推送', async ({ page }) => {
   await open(page, { captureEnabled: false, mockEnabled: false, status: 'off' });
   await expect(page.getByRole('heading', { name: 'WebSocket', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '重新发现连接' })).not.toBeVisible();
   await expect(page.getByRole('region', { name: 'WebSocket 消息', exact: true })).toBeVisible();
-  await expect(page.getByRole('switch', { name: 'WS Mock', exact: true })).toBeDisabled();
+  await expect(page.getByRole('switch', { name: 'WS Mock', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '开启 WS 采集', exact: true }).click();
   expect(await messages(page)).toContainEqual({ action: 'ws.capture', payload: { enabled: true } });
   await state(page, { mockEnabled: false });
-  await page.getByRole('switch', { name: 'WS Mock', exact: true }).click();
-  expect(await messages(page)).toContainEqual({ action: 'ws.mock', payload: { enabled: true } });
-  await state(page);
+  await expect(page.getByText('场景 WS Mock 未开启', { exact: true })).toBeVisible();
+  await state(page, { mockEnabled: false });
   await page.getByText('采集设置与说明', { exact: true }).click();
   await page.getByRole('button', { name: '重新发现连接' }).click();
   await page.getByRole('button', { name: '关闭 WS 采集' }).click();
@@ -194,13 +206,16 @@ test('WS 规则编辑、启停、排序与未知 URL 的临时规则', async ({ 
     .first()
     .click();
   await page.getByRole('switch', { name: `启用 WS 规则 ${rule.name}` }).click();
-  expect(await messages(page)).toContainEqual({ action: 'ws.rules.toggle', payload: { id: rule.id } });
+  expect(await messages(page)).toContainEqual({
+    action: 'ws.rules.toggle',
+    payload: { id: rule.id, sceneId: 'scene' },
+  });
   await page.getByRole('switch', { name: `启用 WS 规则 ${rule.name}` }).focus();
   await page.keyboard.press('Space');
   await page.getByRole('button', { name: `下移 WS 规则 ${rule.name}` }).click();
   expect(await messages(page)).toContainEqual({
     action: 'ws.rules.move',
-    payload: { id: rule.id, delta: 1 },
+    payload: { id: rule.id, delta: 1, sceneId: 'scene' },
   });
   const card = page
     .locator('.ws-rule')
@@ -209,8 +224,8 @@ test('WS 规则编辑、启停、排序与未知 URL 的临时规则', async ({ 
   await card.getByRole('button', { name: '删除', exact: true }).click();
   expect(await messages(page)).toEqual(
     expect.arrayContaining([
-      { action: 'ws.rules.duplicate', payload: { id: rule.id } },
-      { action: 'ws.rules.delete', payload: { id: rule.id } },
+      { action: 'ws.rules.duplicate', payload: { id: rule.id, sceneId: 'scene' } },
+      { action: 'ws.rules.delete', payload: { id: rule.id, sceneId: 'scene' } },
     ]),
   );
   await page.getByRole('button', { name: '新建 WS 规则', exact: true }).click();
@@ -230,6 +245,8 @@ test('WS 规则编辑、启停、排序与未知 URL 的临时规则', async ({ 
   expect(await messages(page)).toContainEqual({
     action: 'ws.rules.save',
     payload: {
+      sceneId: 'scene',
+      targetSceneId: 'scene',
       rule: expect.objectContaining({
         name: '服务端消息替换',
         match: { url: 'wss://stream.example.test/*', direction: 'inbound', contains: 'price' },
@@ -237,7 +254,7 @@ test('WS 规则编辑、启停、排序与未知 URL 的临时规则', async ({ 
       }),
     },
   });
-  await page.getByRole('button', { name: '消息', exact: false }).filter({ hasText: /^消息/ }).first().click();
+  await page.locator('nav').getByRole('button', { name: 'WebSocket' }).click();
   await page.getByRole('button', { name: unknown.endpoint, exact: true }).click();
   await expect(page.getByRole('complementary', { name: 'WebSocket 连接' })).toContainText('URL 未知');
   await page.getByRole('button', { name: '为此连接新建规则' }).click();
@@ -250,6 +267,8 @@ test('WS 规则编辑、启停、排序与未知 URL 的临时规则', async ({ 
   expect(await messages(page)).toContainEqual({
     action: 'ws.rules.save',
     payload: {
+      sceneId: 'scene',
+      targetSceneId: 'scene',
       rule: expect.objectContaining({
         name: '临时丢弃',
         match: { connectionId: unknown.id },
@@ -257,6 +276,29 @@ test('WS 规则编辑、启停、排序与未知 URL 的临时规则', async ({ 
       }),
     },
   });
+});
+
+test('取消和保存连接生成的 WS 草稿后切换页面不会重新打开', async ({ page }) => {
+  await open(page);
+  await page.getByRole('button', { name: connection.url, exact: true }).click();
+  await page.getByRole('button', { name: '为此连接新建规则' }).click();
+  await expect(page.getByLabel('WS 规则名称')).toBeVisible();
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await page.locator('nav').getByRole('button', { name: 'WebSocket' }).click();
+  await page.getByRole('button', { name: /WS 规则/ }).click();
+  await expect(page.getByLabel('WS 规则名称')).toHaveCount(0);
+  await page.locator('nav').getByRole('button', { name: 'WebSocket' }).click();
+  await page.getByRole('button', { name: connection.url, exact: true }).click();
+  await page.getByRole('button', { name: '为此连接新建规则' }).click();
+  await page.getByLabel('WS 规则名称').fill('已保存的连接规则');
+  await page.getByRole('button', { name: '保存 WS 规则' }).click();
+  const sent = (await messages(page)) as Array<{ action: string; payload: { rule?: typeof rule } }>;
+  const saved = sent.filter((item) => item.action === 'ws.rules.save').at(-1)!.payload.rule!;
+  await state(page, { rules: [...ws.rules, saved] });
+  await expect(page.getByLabel('WS 规则名称')).toHaveCount(0);
+  await page.locator('nav').getByRole('button', { name: 'WebSocket' }).click();
+  await page.getByRole('button', { name: /WS 规则/ }).click();
+  await expect(page.getByLabel('WS 规则名称')).toHaveCount(0);
 });
 
 test('WS 二进制、截断和模拟消息明确标记，窄面板无横向溢出', async ({ page }) => {

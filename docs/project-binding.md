@@ -10,7 +10,7 @@
 项目根目录/
 └── .flutter-pilot/
     ├── project.json    # 格式版本、项目 UUID、显示名称、接入配置与项目设置
-    └── rules.json      # 当前目录使用的 Mock 规则
+    └── scenes.json     # 当前目录的 HTTP/WS 场景及激活状态
 ```
 
 请求历史、API 目录、CA 私钥和设备相关的本机连接记录不写入这两个文件。Flutter VM WS 仅在当前会话内使用，不写入项目或本机配置。
@@ -69,46 +69,70 @@
 
 `autoConnectVm` 是独立设置，项目值覆盖 IDE 值；手动断开会暂停本次调试会话自动重连。认证 VM / DTD 地址始终只在内存，不保存供下次复用。
 
-VM 默认连接后只记录 API，运行时 Dio Mock 需要在工作台主动开启。`autoStart: true` 不会保存认证 WS，也不代表在重新打开 IDE 后自动连接到上一次 App。
+未激活场景时，VM 默认连接后只记录 API；在工作台激活场景后统一开启所需 HTTP/WS Mock，激活状态持久保存并在重连和重开 IDE 后恢复。`autoStart: true` 不会保存认证 WS，也不代表在重新打开 IDE 后自动连接到上一次 App。
 
-## rules.json
+## scenes.json
 
-规则格式与导入 / 导出一致：
+场景独立持有 HTTP 和 WS 规则，同一时间只激活一个场景，`activeSceneId: null` 表示全部停用。导入追加新场景，保留规则启停但重新生成 ID，不改变当前激活场景。
 
 ```json
 {
   "version": 1,
-  "rules": [
+  "activeSceneId": null,
+  "scenes": [
     {
-      "id": "products-empty",
-      "name": "产品列表为空",
-      "enabled": false,
-      "priority": 0,
-      "match": {
-        "method": "GET",
-        "host": "api.example.test",
-        "path": "/api/products"
-      },
-      "mock": {
-        "status": 200,
-        "headers": {
-          "content-type": "application/json"
-        },
-        "body": "{\"items\":[]}"
-      }
+      "id": "example-orders",
+      "name": "订单空数据",
+      "httpRules": [
+        {
+          "id": "example-orders-empty",
+          "name": "示例：订单列表空数据",
+          "enabled": true,
+          "priority": 10,
+          "match": {
+            "method": "GET",
+            "host": "api.example.com",
+            "path": "/v1/orders"
+          },
+          "mock": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": "{\"data\":[]}"
+          }
+        }
+      ],
+      "wsRules": [
+        {
+          "id": "example-order-events",
+          "name": "订单事件替换",
+          "enabled": true,
+          "priority": 10,
+          "match": {
+            "url": "wss://api.example.com/orders*",
+            "direction": "inbound",
+            "contains": "order_status"
+          },
+          "action": {
+            "type": "replace",
+            "text": "{\"type\":\"order_status\",\"status\":\"paid\"}"
+          }
+        }
+      ]
     }
   ]
 }
 ```
 
-工作台中创建、编辑、复制、启停或删除规则会更新当前项目目录的这份文件。规则启用与 VM 运行时 Mock 总开关是两层状态：VM 仅采集时，即使规则已启用也不会改写应用数据。
+首次没有场景文件时，项目当前 rules.json / ws-rules.json 一次性归入默认场景，默认不激活；旧文件保留但不再参与加载。所有编辑通过场景文件保存，规则需启用且所属场景激活才会应用。手动修改后读取项目文件，非法文件保留上次有效配置，外部改动未读取前禁止工作台覆盖。
 
 ## 读取与配置修改
 
 连接页的项目绑定卡显示项目名称与 UUID，并提供三个操作：
 
 - **项目配置**：打开 `.flutter-pilot/project.json`。
-- **规则文件**：打开 `.flutter-pilot/rules.json`。
+- **规则文件**：打开 `.flutter-pilot/scenes.json`。
 - **读取项目文件**：重新校验并读取磁盘文件，加载规则并同步到运行中的会话。
 
 打开工作区时读取项目文件。已有配置或规则不是合法 JSON、格式版本不支持或字段值无效时，插件显示配置错误，保留原文件，不重新生成 UUID 或用空规则覆盖。

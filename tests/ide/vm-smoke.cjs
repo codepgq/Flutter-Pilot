@@ -43,12 +43,18 @@ exports.run = async () => {
       createHash('sha256').update(workspace.toString()).digest('hex').slice(0, 24),
     ),
   );
-  const rulesFile = path.join(workspace.fsPath, '.flutter-pilot', 'rules.json');
-  assert.deepEqual(JSON.parse(await fs.readFile(rulesFile, 'utf8')), { version: 1, rules: [] });
+  const rulesFile = path.join(workspace.fsPath, '.flutter-pilot', 'scenes.json');
+  const readScenes = async () => JSON.parse(await fs.readFile(rulesFile, 'utf8'));
+  const writeDomain = async (domain, rules) => {
+    const doc = await readScenes();
+    doc.scenes[0][domain] = rules;
+    await fs.writeFile(rulesFile, JSON.stringify(doc));
+  };
+  assert.deepEqual((await readScenes()).scenes[0].httpRules, []);
   await fs.access(path.join(storage, 'vm-history.sqlite3'));
-  const wsRulesFile = path.join(workspace.fsPath, '.flutter-pilot', 'ws-rules.json');
+  const wsRulesFile = rulesFile;
   await fs.access(path.join(storage, 'ws-history.sqlite3'));
-  assert.deepEqual(JSON.parse(await fs.readFile(wsRulesFile, 'utf8')), { version: 1, rules: [] });
+  assert.deepEqual((await readScenes()).scenes[0].wsRules, []);
   const wsRule = {
     id: 'ide-ws-rule',
     name: 'WS IDE fixture',
@@ -58,8 +64,8 @@ exports.run = async () => {
     action: { type: 'replace', text: 'mocked' },
   };
   await workbench.handle({ action: 'ws.rules.save', payload: { rule: wsRule } });
-  assert.deepEqual(JSON.parse(await fs.readFile(wsRulesFile, 'utf8')).rules, [wsRule]);
-  await fs.writeFile(wsRulesFile, JSON.stringify({ version: 1, rules: [] }));
+  assert.deepEqual((await readScenes()).scenes[0].wsRules, [wsRule]);
+  await writeDomain('wsRules', []);
   await assert.rejects(
     workbench.handle({ action: 'ws.rules.toggle', payload: { id: wsRule.id } }),
     /已被修改/,
@@ -96,7 +102,7 @@ exports.run = async () => {
   await workbench.handle({ action: 'ws.select', payload: { id: 'ide-ws-message' } });
   await assert.rejects(
     workbench.handle({ action: 'ws.push', payload: { connectionId: 'ide-ws', text: 'manual' } }),
-    /开启 WS Mock/,
+    /开启 WS 采集/,
   );
   await missing(path.join(storage, 'ca'));
   await missing(path.join(storage, 'history.sqlite3'));
@@ -158,20 +164,20 @@ exports.run = async () => {
   };
   await workbench.handle({ action: 'rules.save', payload: { rule: fixtureRule } });
   assert.equal(workbench.lastError, undefined);
-  assert.deepEqual(JSON.parse(await fs.readFile(rulesFile, 'utf8')).rules, [fixtureRule]);
+  assert.deepEqual((await readScenes()).scenes[0].httpRules, [fixtureRule]);
   const externalRule = { ...fixtureRule, id: 'external-rule', name: 'External edit' };
-  await fs.writeFile(rulesFile, JSON.stringify({ version: 1, rules: [fixtureRule, externalRule] }));
+  await writeDomain('httpRules', [fixtureRule, externalRule]);
   await assert.rejects(
     workbench.handle({ action: 'rules.toggle', payload: { id: fixtureRule.id } }),
-    /项目规则文件已被修改/,
+    /场景文件已被修改/,
   );
-  assert.equal(JSON.parse(await fs.readFile(rulesFile, 'utf8')).rules.length, 2);
+  assert.equal((await readScenes()).scenes[0].httpRules.length, 2);
   await workbench.handle({ action: 'project.reload', payload: {} });
   assert.equal(workbench.lastError, undefined);
-  assert.equal(workbench.rules.length, 2);
+  assert.equal(workbench.scenes.selected.httpRules.length, 2);
   await workbench.handle({ action: 'rules.toggle', payload: { id: fixtureRule.id } });
   assert.equal(workbench.lastError, undefined);
-  assert.equal(JSON.parse(await fs.readFile(rulesFile, 'utf8')).rules[0].enabled, true);
+  assert.equal((await readScenes()).scenes[0].httpRules[0].enabled, true);
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await new Promise((resolve) => server.once('listening', resolve));
   const rpcCalls = [];

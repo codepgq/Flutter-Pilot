@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "projectId": "7fcf8be6-3bd0-4b52-aa0b-62c74169666e",
+  "name": "Scene 功能演示",
+  "connection": {
+    "mode": "vm"
+  },
+  "settings": {
+    "autoStart": false,
+    "autoConnectVm": false
+  }
+}

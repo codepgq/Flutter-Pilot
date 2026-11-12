@@ -129,7 +129,7 @@
     return jsonEncode({'connections': results, 'limited': candidates.length > 128});
   };
   state['push'] = (String id, String text) {
-    if (!active() || state['mock'] != true) throw StateError('disabled');
+    if (!active()) throw StateError('disabled');
     final record = state['records'].values.firstWhere((dynamic item) => item['id'] == id);
     if (record['capture'] != 'attached' || record['socket'].readyState != WebSocket.open || !record['socket']._controller.hasListener) throw StateError('closed');
     for (final hook in record['hooks']) { if (!api['owns'](hook['subscription'], hook['wrapper'])) throw StateError('changed'); }
@@ -141,7 +141,7 @@
     return true;
   };
   state['send'] = (String id, String text) {
-    if (!active() || state['mock'] != true) throw StateError('disabled');
+    if (!active()) throw StateError('disabled');
     final record = state['records'].values.firstWhere((dynamic item) => item['id'] == id);
     if (record['enabled'] != true || record['capture'] != 'attached' || record['socket'].readyState != WebSocket.open) throw StateError('closed');
     for (final hook in record['hooks']) { if (!api['owns'](hook['subscription'], hook['wrapper'])) throw StateError('changed'); }

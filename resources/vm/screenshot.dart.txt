@@ -1,0 +1,131 @@
+  final screenshotElements = <String, Element>{};
+  Map<String, dynamic> screenshotTargets() {
+    screenshotElements.clear();
+    final targets = <Map<String, dynamic>>[];
+    final all = tree();
+    if (all.length >= 10000) return fail('TREE_LIMIT', '当前页面过于复杂，无法枚举滚动区域。');
+    for (final e in all) {
+      if (e is! StatefulElement || e.state is! ScrollableState) continue;
+      final scroll = e.state as ScrollableState;
+      final position = scroll.position;
+      final box = boxFor(e);
+      if (box == null || !position.hasContentDimensions || position.maxScrollExtent <= position.minScrollExtent ||
+          position.axisDirection != AxisDirection.down || !hit(e, box, box.localToGlobal(box.size.center(Offset.zero)))) continue;
+      final id = '${state['screenshotSequence'] ?? 0}:${targets.length}';
+      screenshotElements[id] = e;
+      final ancestors = <String>[];
+      if (e.widget.key != null) ancestors.add(e.widget.key.toString());
+      e.visitAncestorElements((parent) { if (parent.widget.key != null) ancestors.add(parent.widget.key.toString()); return ancestors.length < 2; });
+      targets.add({'id': id, 'label': ancestors.isEmpty ? '滚动区域 ${targets.length + 1}' : ancestors.join(' / '),
+        'description': '${box.size.width.round()} × ${box.size.height.round()}，内容约 ${(position.maxScrollExtent - position.minScrollExtent + position.viewportDimension).round()} px'});
+    }
+    state['screenshotSequence'] = (state['screenshotSequence'] ?? 0) + 1;
+    return {'ok': true, 'targets': targets};
+  }
+  Future<Map<String, dynamic>> takeScreenshot(dynamic args) async {
+    final views = binding.renderViews.toList();
+    if (views.length != 1) return fail('AMBIGUOUS_VIEW', '截图需要唯一的 Flutter 视图。');
+    final view = views.single;
+    final size = view.size;
+    final dpr = view.flutterView.devicePixelRatio;
+    final ratio = math.min(2.0, 4096.0 / size.width);
+    final parts = <Map<String, dynamic>>[];
+    var encodedLength = 0;
+    ScrollableState? scroll;
+    double? originalOffset;
+    var height = 0.0;
+    var frames = 0;
+    final deadline = DateTime.now().add(const Duration(seconds: 45));
+    void check() {
+      if (state['active'] != true) throw 'CANCELLED';
+      if (DateTime.now().isAfter(deadline)) throw 'CAPTURE_LIMIT';
+      if (scroll != null && !scroll!.mounted) throw 'PAGE_CHANGED';
+    }
+    Future<void> capturePart(int top, int bottom) async {
+      if (bottom <= top) return;
+      check();
+      await frame();
+      check();
+      final width = (size.width * ratio).ceil();
+      final nextHeight = height + bottom - top;
+      if (nextHeight > 30000 || nextHeight * width > 24000000 || bottom - top > 8192) throw 'CAPTURE_LIMIT';
+      final layer = view.debugLayer;
+      if (layer is! OffsetLayer || !layer.supportsRasterization()) throw 'UNSUPPORTED_LAYER';
+      // Crop each strip before rasterizing. Never create a GPU texture as tall as the final long image.
+      final image = await layer.toImage(Rect.fromLTWH(0, top / ratio * dpr, width / ratio * dpr, (bottom - top) / ratio * dpr), pixelRatio: ratio / dpr);
+      try {
+        if (image.width != width || image.height != bottom - top) throw 'RASTER_LIMIT';
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        check();
+        if (bytes == null) throw 'SCREENSHOT_FAILED';
+        final encoded = encodeBytes(bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes));
+        encodedLength += (encoded as String).length;
+        if (encodedLength > 28000000) throw 'CAPTURE_LIMIT';
+        parts.add({'png': encoded});
+        height = nextHeight;
+      } finally { image.dispose(); }
+    }
+    try {
+      if (args['mode'] == 'screen') {
+        await capturePart(0, (size.height * ratio).ceil());
+        frames = 1;
+      } else {
+        final element = screenshotElements[args['targetId']];
+        if (element == null || !element.mounted || element is! StatefulElement || element.state is! ScrollableState) throw 'PAGE_CHANGED';
+        scroll = element.state as ScrollableState;
+        final position = scroll!.position;
+        if (position.axisDirection != AxisDirection.down || !position.hasContentDimensions) throw 'PAGE_CHANGED';
+        // Nested scrolling needs coordinated outer/inner offsets; do not silently produce an incomplete image.
+        var nested = false;
+        element.visitAncestorElements((parent) { if (parent is StatefulElement && parent.state is ScrollableState) nested = true; return true; });
+        if (nested) throw 'NESTED_SCROLL';
+        originalOffset = position.pixels;
+        final box = boxFor(element);
+        if (box == null) throw 'PAGE_CHANGED';
+        final bounds = (box.localToGlobal(Offset.zero) & box.size).intersect(Offset.zero & size);
+        if (bounds.height < 32) throw 'PAGE_CHANGED';
+        final initialSize = box.size;
+        final plannedHeight = size.height + position.maxScrollExtent - position.minScrollExtent;
+        if (plannedHeight * ratio > 30000 || plannedHeight * ratio * (size.width * ratio).ceil() > 24000000) throw 'CAPTURE_LIMIT';
+        position.jumpTo(position.minScrollExtent);
+        await frame();
+        check();
+        final bottomPixel = (bounds.bottom * ratio).round();
+        await capturePart(0, bottomPixel);
+        frames = 1;
+        while (position.extentAfter > 0.5) {
+          check();
+          if (frames >= 32) throw 'CAPTURE_LIMIT';
+          final previous = position.pixels;
+          final next = math.min(position.maxScrollExtent, previous + bounds.height - 1);
+          position.jumpTo(next);
+          await frame();
+          check();
+          final currentBox = boxFor(element);
+          if (!identical(position, scroll!.position) || currentBox == null || currentBox.size != initialSize ||
+              (currentBox.localToGlobal(Offset.zero) - bounds.topLeft).distance > 1) throw 'PAGE_CHANGED';
+          final delta = position.pixels - previous;
+          if (delta <= 0 || delta > bounds.height) throw 'PAGE_CHANGED';
+          final rows = ((position.pixels - position.minScrollExtent) * ratio).round() - ((previous - position.minScrollExtent) * ratio).round();
+          await capturePart(bottomPixel - rows, bottomPixel);
+          frames++;
+        }
+        await capturePart(bottomPixel, (size.height * ratio).ceil());
+      }
+      check();
+      return {'ok': true, 'parts': parts, 'width': (size.width * ratio).ceil(), 'height': height.toInt(), 'frames': frames};
+    } catch (error) {
+      final messages = <String, String>{
+        'CANCELLED': '截图已取消。', 'PAGE_CHANGED': '截图期间页面或滚动区域发生变化，请重试。',
+        'CAPTURE_LIMIT': '内容超过长图限制（32 屏、2400 万像素或 45 秒），未保存不完整图片。',
+        'NESTED_SCROLL': '此区域含嵌套滚动，暂不支持长图；请使用当前屏幕截图。',
+        'RASTER_LIMIT': '设备无法按原尺寸渲染截图，请缩小 App 窗口后重试。',
+        'UNSUPPORTED_LAYER': '当前页面包含无法截图的原生平台视图。',
+      };
+      return fail(messages.containsKey(error) ? error as String : 'SCREENSHOT_FAILED', messages[error] ?? '截图失败，请检查 Flutter Debug 页面是否正常显示。');
+    } finally {
+      if (scroll != null && scroll!.mounted && originalOffset != null) {
+        try { scroll!.position.jumpTo(originalOffset!.clamp(scroll!.position.minScrollExtent, scroll!.position.maxScrollExtent)); await frame(); } catch (_) {}
+      }
+    }
+  }

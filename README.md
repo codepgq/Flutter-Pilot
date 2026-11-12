@@ -6,13 +6,11 @@
 
 配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key 精确操作页面，减少逐步截图识别的耗时与 token 消耗。
 
-当前版本为 **0.0.11**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+当前版本为 **0.0.12**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
 
-**0.0.11 更新**：重新构建并提供 Cursor 安装包，功能沿用 0.0.10。
+**0.0.12 更新**：同步远端最新版并重新构建 Cursor 安装包，包含可持久保存和切换的统一 HTTP / WebSocket Mock 场景，MCP 同步提供场景查询、激活和停用；侧栏与工作台新增 App 当前屏幕和滚动长截图，保存 PNG 并自动预览。
 
-**0.0.10 更新**：API 列表和详情展示当前规则配置标签；最近请求详情自动刷新；修复 Flutter 运行时重启或同步失败后的 Mock 接入状态与恢复。
-
-**MCP 全能力提示词**：21 个工具均有同名独立 Prompt，包括 `hot_reload` / `hot_restart`；保留四个场景模板，共 25 个。每个工具提示词提供操作步骤和生产参数定义，新增能力漏写模板会被检查发现。
+**MCP 全能力提示词**：23 个工具均有同名独立 Prompt，包括 `hot_reload` / `hot_restart`；保留四个场景模板，共 27 个。每个工具提示词提供操作步骤和生产参数定义，新增能力漏写模板会被检查发现。
 
 **0.0.6 修复 Cursor 设置卡死和已有 VM 会话补查恢复**：打开工作台会重新补查先前已运行的 Flutter Debug 会话；新增 MCP `hot_reload` / `hot_restart`，精确控制当前 VM 绑定的 IDE 调试会话。
 
@@ -20,11 +18,11 @@
 
 **0.0.4 新增 MCP Prompts 与双向 WS 主动消息**：提供四个开发场景模板，通过 MCP 向 App 注入模拟服务端消息或经 App 当前连接发送给服务端，支持原始文本或 `topic/data`；配合 API 多状态 Mock 和 Key 精确交互完成开发验证。详见 [更新记录](CHANGELOG.md) 与 [MCP 使用说明](docs/mcp.md)。
 
-**0.0.3 新增业务 WebSocket Tab**：通过现有 VM 手动开启 WS 采集，查看双向消息；独立开启实验性 WS Mock 后，可按规则整条替换或丢弃文本消息，向 App 手动注入模拟推送。运行时结构须探测通过；接入前消息不可补抓。详见 [WebSocket 使用说明](docs/v0.0.3-websocket.md)。
+**0.0.3 新增业务 WebSocket Tab**：通过现有 VM 手动开启 WS 采集，查看双向消息；激活包含 WS 规则的场景后，可按规则整条替换或丢弃文本消息，向 App 手动注入模拟推送。运行时结构须探测通过；接入前消息不可补抓。详见 [WebSocket 使用说明](docs/v0.0.3-websocket.md)。
 
 **MCP 与编码 Agent 接入**：MCP 服务名为 `flutter-pilot`。工作台的 MCP Tab 默认按项目适配 Claude Code CLI、Codex CLI／App；Agent 可复用现有 VM 操作 UI、重载 HTTP／WS 规则并查询记录验证结果。详见 [MCP 与编码 Agent](#mcp-与编码-agent) 和 [MCP 使用说明](docs/mcp.md)。
 
-项目首次初始化会生成 `.flutter-pilot/project.json` 保存 UUID 和项目配置，Mock 规则保存在 `.flutter-pilot/rules.json`。复制项目或创建 worktree 后，各目录读取自己的规则、分别记录本机历史。API 与历史按新到旧展示，目录可折叠，响应自动尝试 JSON 格式化；规则启停使用简洁 switch。
+项目首次初始化会生成 `.flutter-pilot/project.json` 保存 UUID 和项目配置，Mock 场景保存在 `.flutter-pilot/scenes.json`。复制项目或创建 worktree 后，各目录读取自己的规则、分别记录本机历史。API 与历史按新到旧展示，目录可折叠，响应自动尝试 JSON 格式化；规则启停使用简洁 switch。
 
 > 当前通过 VSIX 安装，尚未发布到扩展商店。0.0.2 VM 路线已在 iPhone 18 Pro / iOS 27.2 模拟器实际验证，应用入口 SHA-256 保持不变。代理路线的旧版设备验收与 VM 新版验收分别记录，完整证据和限制见 [VM 使用与可行性验证](docs/v0.0.2-vm-service.md) 和 [验收记录](docs/validation.md)。
 
@@ -63,7 +61,8 @@
 | 地址转发 | 改写目标完整 URL，保留请求方法和正文，直接返回目标服务结果 |
 | 手动断点 | 仅代理模式：请求发送前、响应返回前暂停，编辑放行、终止及超时自动放行 |
 | 后台记录 | 代理模式默认随 Flutter 工作区打开启动；VM 模式连接后持续采集，关闭工作台仍继续 |
-| VM 连接 | Flutter Debug VM WS 零源码采集；可主动开启运行时 Dio Mock、双向修改和转发 |
+| VM 连接 | Flutter Debug VM WS 零源码采集；通过激活场景应用 Dio Mock、双向修改和转发 |
+| App 截图 | 侧栏与工作台标题栏均可截取当前 Flutter App，支持当前屏幕和滚动长图，保存 PNG 后自动预览 |
 | API 目录 | 独立保存方法、主机、路径、累计调用次数和首次 / 最近调用时间，不随历史清理消失，可手动删除 |
 | 请求历史 | 按 API 查看、搜索筛选、三阶段快照、规则命中、耗时、备注与标签 |
 | 规则管理 | 新增、查询、编辑、删除、启停、复制、调整顺序、JSON 导入导出；规则保存在项目目录 |
@@ -71,6 +70,14 @@
 | 开发接入 | 引擎下载管理、设备检测、Android USB 转发、Dio 补丁预览与保护性撤销 |
 
 规则通过表单或完整 JSON 配置，首版不执行用户脚本。工作台跟随 IDE 明暗主题，并适配窄面板。
+
+### App 截图与长图
+
+先连接 Flutter Debug VM，在左侧工作台入口点击 **截取 App / 长截图**，或在工作台顶部点击 **截图**。选择“当前屏幕”或“滚动长截图”，指定 PNG 保存位置；长图从所选区域顶部滚动到底部，完成或失败后恢复原滚动位置。多个可见滚动区域会先让你选择；无需修改 App 源码或开启 MCP。
+
+长图适用于普通向下滚动的 Flutter 列表，包含尚未挂载的懒加载列表项。截图期间保持页面和窗口尺寸稳定；运行中的动画、异步加载和滚动监听可能改变内容。暂不支持嵌套滚动、反向/横向长图，以及原生平台视图（例如 WebView）截图。图像为 Flutter 渲染内容，不含系统状态栏、原生键盘和系统弹窗。
+
+截图采用最高 2 倍逻辑像素分辨率。长图最多 32 屏、30,000 像素高、2,400 万像素或 45 秒；超过限制会报错并放弃保存，不输出不完整长图。分段 PNG 在扩展端无损拼接，避免移动设备 GPU 对超长纹理的缩放和截断。
 
 ## MCP 与编码 Agent
 
@@ -81,15 +88,15 @@ MCP 服务名称和客户端配置项名称均为 **`flutter-pilot`**；插件�
 3. 按客户端提示加载配置、信任或批准项目 MCP；必要时重连或新建会话。**已配置不代表客户端已连接**，实际握手状态在工作台显示。
 4. 让 Agent 使用 `flutter-pilot` 的 `get_usage_guide` 和 `list_sessions`，选择对应项目后执行任务。
 
-Agent 可按 `ValueKey<String/int>` 查找、点击、输入和滚动，诊断当前界面的 Key 问题；也可查询 HTTP 请求和业务 WebSocket 消息、重载规则并控制采集与 Mock。规则由 Agent 编辑项目的 `.flutter-pilot/rules.json` 和 `.flutter-pilot/ws-rules.json`，重载规则不会自动开启 Mock。多状态测试逐个切换场景，分别检查新网络记录和页面结果；Key 用于日常精确交互，视觉样式和布局验收再补充截图。
+Agent 可按 `ValueKey<String/int>` 查找、点击、输入和滚动，诊断当前界面的 Key 问题；也可查询 HTTP 请求和业务 WebSocket 消息、重载规则并控制采集与 Mock。场景由 Agent 编辑项目的 `.flutter-pilot/scenes.json`，`reload_rules` 整份重载，`list_scenes` 查询，`activate_scene` / `deactivate_scene` 统一控制 HTTP / WS Mock。激活状态持久保存，重连和重开 IDE 后自动恢复。多状态测试逐个切换场景，分别检查新网络记录和页面结果；Key 用于日常精确交互，视觉样式和布局验收再补充截图。
 
-WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服务端消息，`send_ws_message` 通过 App 当前真实 WS 连接发给服务端。均需显式开启 WS 采集与 WS Mock，并选择准确的在线连接；不新建连接。可传原始 `text`，或传 `topic` 和 `data` 组装为 `{"topic": "...", "data": ...}`；自定义业务协议使用完整原始文本。真实发送经过当前 outbound 规则，可能被替换或丢弃；工具调用成功后仍需核对消息和业务结果。
+WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服务端消息，`send_ws_message` 通过 App 当前真实 WS 连接发给服务端。均需开启 WS 采集并确认连接已接入，并选择准确的在线连接；不新建连接。可传原始 `text`，或传 `topic` 和 `data` 组装为 `{"topic": "...", "data": ...}`；自定义业务协议使用完整原始文本。真实发送经过当前 outbound 规则，可能被替换或丢弃；工具调用成功后仍需核对消息和业务结果。
 
-服务提供 `overview`、`http`、`ws`、`ui`、`workflow` 五个指南主题，以及 25 个 MCP 提示模板：保留 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，全部 21 个工具另有同名独立模板，包含 `hot_reload` 和 `hot_restart`。每个工具模板提供准备、操作、验证步骤及与工具共用的参数 schema；新增工具遗漏模板会使类型或测试检查失败。指南可通过工具或资源读取；支持 Prompts 的客户端可按需读取并填写任务。Agent 通过 `tools/list` 获取可调用能力，初始化说明与 Prompts 补充用法；是否主动使用仍取决于客户端和 Agent。
+服务提供 `overview`、`http`、`ws`、`ui`、`workflow` 五个指南主题，以及 27 个 MCP 提示模板：保留 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，全部 23 个工具另有同名独立模板，包含 `hot_reload` 和 `hot_restart`。每个工具模板提供准备、操作、验证步骤及与工具共用的参数 schema；新增工具遗漏模板会使类型或测试检查失败。指南可通过工具或资源读取；支持 Prompts 的客户端可按需读取并填写任务。Agent 通过 `tools/list` 获取可调用能力，初始化说明与 Prompts 补充用法；是否主动使用仍取决于客户端和 Agent。
 
 例如可以向 Agent 提出：
 
-> 使用 `flutter-pilot` 模拟订单列表为空，并验证页面。先读取 HTTP 和工作流指南，选择当前项目；保留其他规则，重载后显式开启 Mock，通过实际 UI Key 操作页面，并检查新产生的请求和页面结果。
+> 使用 `flutter-pilot` 模拟订单列表为空，并验证页面。先读取 HTTP 和工作流指南，选择当前项目；保留其他规则，重载后激活目标场景，通过实际 UI Key 操作页面，并检查新产生的请求和页面结果。
 
 > 分别测试下单成功、下单失败和余额不足状态。每个场景只启用对应规则，按 Key 操作下单入口，核对请求命中、页面提示和资产变化，记录各场景结果。
 
@@ -121,7 +128,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 
 ### 从 VSIX 安装
 
-1. 获取 `flutter-pilot-0.0.11.vsix`。从源码构建见下方步骤。
+1. 获取 `flutter-pilot-0.0.12.vsix`。从源码构建见下方步骤。
 2. 在 VS Code 或 Cursor 扩展面板右上角菜单选择 **Install from VSIX… / 从 VSIX 安装…**。
 3. 选择安装包，按 IDE 提示重新加载窗口。
 4. 打开包含 `pubspec.yaml` 的 Flutter 项目根目录，并信任工作区。
@@ -131,7 +138,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 安装当前 Flutter Pilot 包，例如：
 
 ```sh
-cursor --install-extension artifacts/flutter-pilot-0.0.11.vsix --force
+cursor --install-extension artifacts/flutter-pilot-0.0.12.vsix --force
 # VS Code 使用 code --install-extension 同一文件 --force
 ```
 
@@ -154,7 +161,7 @@ npm test
 npm run package
 ```
 
-产物为 `artifacts/flutter-pilot-0.0.11.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
+产物为 `artifacts/flutter-pilot-0.0.12.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
 
 ### 使用已有引擎
 
@@ -168,7 +175,7 @@ npm run package
 
 1. 保存文件并结束旧插件的调试连接，停用或卸载旧插件，避免两个插件同时接管应用。更换扩展 ID 后，安装新包不会覆盖旧扩展。
 2. 安装 Flutter Pilot VSIX，在方便时重新加载 IDE 窗口，然后执行 **Flutter Pilot: 打开工作台**。
-3. 在新建的 `.flutter-pilot/` 中重新配置项目和规则，并按需设置 `flutterPilot.*`。默认使用 VM；重新连接后按需开启 HTTP / WS 采集与 Mock。
+3. 在新建的 `.flutter-pilot/` 中重新配置项目和规则，并按需设置 `flutterPilot.*`。默认使用 VM；重新连接后自动恢复已激活场景，也可按需开启采集。
 4. 使用 MCP 时，在工作台重新执行目标 Agent 的 **一键适配**，加载新服务 `flutter-pilot`，并在客户端移除旧服务配置。改名不会自动修改已有真实 Agent 配置。
 5. 代理接入需要使用新 helper 和 `FLUTTER_PILOT_PROXY` 参数重新配置。旧 helper 应在原插件中先撤销，或由项目自行恢复后再接入；VM 路线无需 helper。
 
@@ -179,9 +186,9 @@ npm run package
 1. 在 Cursor / VS Code 中用原有入口以 **Debug** 启动或附加 Flutter 应用，插件自动发现本项目的调试会话。外部终端独立运行时，先在 IDE 附加调试，或手动提供 VM Service 的 `ws://…/ws` 地址。
 2. 打开 **Flutter Pilot: 打开工作台 → 连接与诊断 → VM 连接**。只有一个可用会话时自动连接并后台记录，多个时选择会话。手动地址入口保留，认证地址仅在内存中使用。
 3. 在应用内触发请求，进入 **API 与历史** 查看自动发现的 API、请求和响应。此时仅采集，不改变请求结果。
-4. 需要 Mock 时，主动开启 **开启运行时 Dio Mock**，等待“已接入 Dio”数量更新。尚未创建的 Dio 会周期性发现；也可点 **重新发现并同步**。新实例首次请求可能早于接入，应确认接入后再触发。
-5. 在 **Mock 规则** 创建并启用规则。保存并同步成功后，再次触发接口。已有规则可复用；VM 不支持手动断点。
-6. 关闭 Mock 后恢复观察采集；点击 **断开连接** 停止 VM 会话。Hot Restart 后会重发现新的 Isolate；完整停止后新调试会话可再次自动连接。手动断开会暂停当前会话自动重连，需要时点击候选的 **重新连接**。
+4. 需要 Mock 时，在 **Mock 场景** 中激活目标场景，等待“已接入 Dio”数量更新。尚未创建的 Dio 会周期性发现；也可点 **重新发现并同步**。新实例首次请求可能早于接入，应确认接入后再触发。
+5. 在 **Mock 场景** 创建场景并添加、启用规则，再激活场景。同步成功后，再次触发接口。已有规则可复用；VM 不支持手动断点。
+6. 停用场景后保留观察采集；点击 **断开连接** 停止 VM 会话。Hot Restart 后会重发现新的 Isolate；完整停止后新调试会话可再次自动连接。手动断开会暂停当前会话自动重连，需要时点击候选的 **重新连接**。
 
 自动连接使用实时调试事件，并通过 Dart Tooling Daemon 补查已经运行的会话；旧版 Dart 扩展不支持补查时仍保留实时发现和手动入口。详见 [VM 自动发现说明](docs/vm-auto-discovery.md)。
 
@@ -189,7 +196,7 @@ npm run package
 
 Flutter 可能把原始 VM 连接重定向到 DDS（Dart Development Service）。插件支持本机地址之间的安全跳转，连接成功后显示实际 DDS 端点；不会自动跟随跳转到外部主机。遇到跳转提示时，使用调试工具提供的最终 DDS WS 地址，不要自行拼接认证路径。
 
-要确认 Mock 真正生效，检查 **运行时 Dio Mock 已开启 → 已接入 Dio 大于 0 → 目标规则已启用并同步成功**，再在 App 中重新触发请求。最新历史应显示 `MOCK` 和命中的规则，响应正文应包含预设内容。仅打开单条规则的 switch，不会让仍处于观察状态的 VM 改写响应；App 已缓存的页面也需要重新请求接口。
+要确认 Mock 真正生效，检查 **场景已激活 → HTTP 已应用且 Dio 大于 0 → 目标规则已启用**，再在 App 中重新触发请求。最新历史应显示 `MOCK` 和命中的规则，响应正文应包含预设内容。仅打开单条规则的 switch，不会激活所属场景；App 已缓存的页面也需要重新请求接口。
 
 **从旧代理路线切换时，先停止当前 Flutter 调试，移除 `FLUTTER_PILOT_PROXY` 启动参数，使用原启动项重新运行应用。** 再停止旧代理并连接 VM。切换界面不会撤销已有 helper，也不会改写已运行 App 的代理设置。
 
@@ -205,7 +212,7 @@ VM 转发发生在应用的 Dio 中，因此 `127.0.0.1` 指应用所在设备�
 2. 打开工作台，首次初始化引擎并确认代理已运行，记下实际端口。以后打开该 Flutter 项目时默认自动启动。
 3. 连接 Android 手机，开启 USB 调试并授权；在工作台 **刷新设备 → 连接 USB**。
 4. 点击 **检测 Flutter 项目**，选择 `lib/main.dart` 中的 `dio`，**预览补丁 → 应用当前预览**。
-5. 在 **Mock 规则** 点击 **直接 Mock**，填写下表后保存并启用。
+5. 在 **Mock 场景** 中选择场景，点击 **直接 Mock**，填写下表后保存、启用规则并激活场景。
 
    | 字段 | 示例值 |
    | --- | --- |
@@ -308,7 +315,7 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 ### 连接与诊断
 
-提供 **VM 连接 / 代理连接** 两种方式。VM 页输入 WS、连接 / 断开、开启运行时 Dio Mock、重新发现并同步；代理页准备引擎、设备、CA 和接入补丁。顶部持续展示记录状态，**工作区与连接** 可查看端点、启停连接及打开设置。已连接时，调试会话与手动地址默认收起；项目配置和规则文件入口位于页面底部的折叠区域。底部诊断日志和 IDE 的 **输出 → Flutter Pilot** 可用于排查错误。
+提供 **VM 连接 / 代理连接** 两种方式。VM 页输入 WS、连接 / 断开、控制 HTTP 采集、重新发现并同步；Mock 在场景页统一激活和停用；代理页准备引擎、设备、CA 和接入补丁。顶部持续展示记录状态，**工作区与连接** 可查看端点、启停连接及打开设置。已连接时，调试会话与手动地址默认收起；项目配置和规则文件入口位于页面底部的折叠区域。底部诊断日志和 IDE 的 **输出 → Flutter Pilot** 可用于排查错误。
 
 ### API 请求
 
@@ -316,7 +323,7 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 点击 API 打开详情，查看累计调用、首次和最近调用时间，以及最近一次请求的请求、响应、修改对比和备注。新请求被采集后，已选 API 的详情自动跟随最新记录；请求历史中选中的单次记录保持固定。点击 **查看调用历史** 跳转到 **请求历史** Tab 并按该 API 筛选；浏览 API 不改变历史页已有的筛选和分页。
 
-域名旁显示当前启用且方法、域名、路径匹配的规则 tag，包括 **Mock、转发、修改请求、修改响应、断点**。列表显示首类规则和其余类型数量，详情展示全部类型；悬停查看规则名称与优先级。带查询参数或请求头条件的规则标为“条件”，需具体请求满足条件才可能命中。tag 表示当前规则配置，随规则启停、编辑和删除更新，不依赖历史记录；实际拦截仍需开启对应运行时功能，并按每阶段优先级选择规则。
+域名旁显示激活场景内当前启用且方法、域名、路径匹配的规则 tag，包括 **Mock、转发、修改请求、修改响应、断点**。列表显示首类规则和其余类型数量，详情展示全部类型；悬停查看规则名称与优先级。带查询参数或请求头条件的规则标为“条件”，需具体请求满足条件才可能命中。tag 表示当前规则配置，随规则启停、编辑和删除更新，不依赖历史记录；实际拦截仍需所属场景激活并完成运行时接入，并按每阶段优先级选择规则。
 
 目录独立保存，即使对应历史过期或已清空，API 和累计次数仍会保留；此时详情提示暂无请求历史。可手动删除不再需要的目录项，该操作不删除请求历史或规则；未来同一 API 再次被当前模式采集时，会重新发现并从新的目录计数开始。旧版现存历史会在首次升级时迁移为目录，迁移只执行一次。
 
@@ -332,13 +339,17 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 历史事实保持不变；备注、标签可以编辑，记录可以删除或清空。要修改请求或响应内容，使用 **生成 Mock** 或 **更多规则** 创建草稿。草稿默认禁用，检查后再启用。清空历史不会删除 API 目录、规则或 CA。
 
-### Mock 规则
+### Mock 场景
 
-展开 **规则模板与说明** 可选择直接 Mock、修改请求、修改响应、转发地址、手动断点五个模板；**新建规则** 保持常驻，导入和导出位于 **更多操作**。表单覆盖常见场景，完整 JSON 可组合动作。保存后规则先持久化，再同步当前模式及仍在运行的代理会话；**已保存但未生效** 表示尚未同步成功。VM 默认仅采集，需主动开启运行时 Mock 并成功接入 Dio 后，规则才会改变应用行为。代理和 VM 共用规则文件，历史分别保存；切换模式时列表展示对应数据。
+一个场景独立持有一组 HTTP 和 WebSocket 规则，例如“下单成功”可包含账户接口、订单接口及订单事件 WS Mock。同一时间只激活一个场景；切换会先停用旧场景，再整体加载新场景。
 
-每条规则左侧提供简洁的滑块开关，通过位置和颜色区分启停；点击开关或聚焦后按 Space / Enter 即可切换。悬停可查看操作提示，停用规则仍可编辑、复制和再次启用。
+场景支持新建、重命名、复制、删除、激活和停用。浏览与编辑场景不会激活它；修改未激活场景不影响运行时，修改激活场景后立即同步。每个场景内分 HTTP / WebSocket 两组，继续支持规则启停、编辑、复制及排序；HTTP 支持直接 Mock、请求/响应修改、转发与代理断点。生成规则时可选择目标场景，默认当前浏览场景，其次激活场景，最后默认场景。
 
-复制的规则默认禁用。导入会重新生成 ID，以禁用状态追加到现有列表；导出只包含版本号和规则，不含请求历史或 CA。通过导入 / 导出可在 IDE 或同事之间手动共享配置，首版不提供云端同步或规则版本回滚。
+激活会保存选择并开启所需协议的采集和 Mock；关闭采集暂停该域 Mock，重新开启采集恢复。停用场景关闭两域 Mock，保留采集；删除激活场景也会停用。重连或重开 IDE 后自动恢复已激活场景，不改变 VM 自动连接设置。显示分域待应用、已应用、失败、不支持和暂停状态；没有 Dio 实例或目标 WS 连接不能表示已应用，实际命中仍须查看新记录。同步失败不恢复旧场景，旧租约可能需要最多约 16 秒等待。
+
+首次升级将当前 `.flutter-pilot/rules.json` 与 `ws-rules.json` 一次性归入“默认场景”，保留规则 ID、顺序和启停，默认不激活；新项目创建空默认场景。生成 `scenes.json` 后旧文件保留但不再读取或更新。文件无效或被外部修改时拒绝覆盖，修复后使用 **读取项目文件**。
+
+复制场景重新生成场景与规则 ID，保留启停状态且不自动激活；复制单条规则仍默认禁用。导入使用场景格式，重新生成 ID 后追加，保留启停状态并保持当前激活场景。导出整份场景配置，不含历史或 CA。持久 WS 使用 URL；当前连接的临时规则仅属于激活场景，连接失效或切换场景时清除。WS 手动推送继续在 WebSocket 页面操作，不提供自动推送、定时或重放。代理模式仅支持 HTTP，混合场景的 WS 显示不支持。
 
 ### 断点队列
 
@@ -348,7 +359,7 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 ## 规则格式与执行顺序
 
-导入文件结构为 `{"version":1,"rules":[...]}`。版本必须为 1，最多 1000 条规则，ID 在文件内唯一。单条规则的字段如下：
+场景文件和导入结构为 `{"version":1,"activeSceneId":null,"scenes":[{"id":"default","name":"默认场景","httpRules":[],"wsRules":[]}]}`。最多 1000 个场景，每场景每个协议最多 1000 条规则；规则 ID 在同一协议的所有场景中唯一。HTTP 单条规则的字段如下：
 
 | 字段 | 含义 |
 | --- | --- |
@@ -403,66 +414,107 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 ## 完整规则示例
 
-以下文件可直接导入：包含本地 Mock、请求 / 响应组合修改、地址转发和双向断点。导入后插件会将规则统一置为禁用，按需启用。
+以下文件可直接导入，包含本地 Mock、请求 / 响应组合修改、地址转发和双向断点。导入保留启停状态，不自动激活。
 
 ```json
 {
   "version": 1,
-  "rules": [
+  "activeSceneId": null,
+  "scenes": [
     {
-      "id": "orders-empty",
-      "name": "订单列表：空数据",
-      "enabled": false,
-      "priority": 20,
-      "match": {
-        "method": "GET",
-        "host": "api.example.com",
-        "path": "/v1/orders",
-        "query": { "scene": "empty" }
-      },
-      "mock": {
-        "status": 200,
-        "headers": { "content-type": "application/json" },
-        "body": "{\"data\":[],\"total\":0}"
-      }
-    },
-    {
-      "id": "orders-modify",
-      "name": "订单查询：修改参数与响应",
-      "enabled": false,
-      "priority": 10,
-      "match": {
-        "method": "GET",
-        "host": "api.example.com",
-        "path": "/v1/orders",
-        "headers": { "x-debug-scene": "modify" }
-      },
-      "request": {
-        "headers": { "x-debug": "true", "x-old-debug": null },
-        "query": { "page": "2", "debug": null }
-      },
-      "response": {
-        "status": 200,
-        "headers": { "content-type": "application/json", "x-mocked": "true" },
-        "body": "{\"data\":[{\"id\":1001,\"state\":\"paid\"}]}"
-      }
-    },
-    {
-      "id": "orders-local",
-      "name": "创建订单：转发到开发电脑",
-      "enabled": false,
-      "priority": 10,
-      "match": { "method": "POST", "host": "api.example.com", "path": "/v1/orders" },
-      "redirect": { "url": "http://127.0.0.1:3000/v1/orders" },
-      "request": { "headers": { "x-debug-source": "flutter-pilot" } }
-    },
-    {
-      "id": "orders-breakpoint",
-      "name": "订单详情：双向断点",
-      "enabled": false,
-      "priority": 10,
-      "match": { "method": "GET", "host": "api.example.com", "path": "/v1/orders/*" },
-      "breakpoint": { "request": true, "response": true, "timeout": 60 }
+      "id": "example-scene",
+      "name": "示例场景",
+      "httpRules": [
+        {
+          "id": "orders-empty",
+          "name": "订单列表：空数据",
+          "enabled": false,
+          "priority": 20,
+          "match": {
+            "method": "GET",
+            "host": "api.example.com",
+            "path": "/v1/orders",
+            "query": {
+              "scene": "empty"
+            }
+          },
+          "mock": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": "{\"data\":[],\"total\":0}"
+          }
+        },
+        {
+          "id": "orders-modify",
+          "name": "订单查询：修改参数与响应",
+          "enabled": false,
+          "priority": 10,
+          "match": {
+            "method": "GET",
+            "host": "api.example.com",
+            "path": "/v1/orders",
+            "headers": {
+              "x-debug-scene": "modify"
+            }
+          },
+          "request": {
+            "headers": {
+              "x-debug": "true",
+              "x-old-debug": null
+            },
+            "query": {
+              "page": "2",
+              "debug": null
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json",
+              "x-mocked": "true"
+            },
+            "body": "{\"data\":[{\"id\":1001,\"state\":\"paid\"}]}"
+          }
+        },
+        {
+          "id": "orders-local",
+          "name": "创建订单：转发到开发电脑",
+          "enabled": false,
+          "priority": 10,
+          "match": {
+            "method": "POST",
+            "host": "api.example.com",
+            "path": "/v1/orders"
+          },
+          "redirect": {
+            "url": "http://127.0.0.1:3000/v1/orders"
+          },
+          "request": {
+            "headers": {
+              "x-debug-source": "flutter-pilot"
+            }
+          }
+        },
+        {
+          "id": "orders-breakpoint",
+          "name": "订单详情：双向断点",
+          "enabled": false,
+          "priority": 10,
+          "match": {
+            "method": "GET",
+            "host": "api.example.com",
+            "path": "/v1/orders/*"
+          },
+          "breakpoint": {
+            "request": true,
+            "response": true,
+            "timeout": 60
+          }
+        }
+      ],
+      "wsRules": []
     }
   ]
 }
@@ -470,7 +522,7 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 代理模式转发由开发电脑上的代理引擎执行，因此目标中的 `127.0.0.1:3000` 指开发电脑本机服务；VM 模式转发由 App 的 Dio 执行，`127.0.0.1` 指应用所在设备。它与手机访问代理时使用的 `FLUTTER_PILOT_PROXY` 地址是两个不同的配置。
 
-仓库还提供可导入的最小示例 [example.rules.json](resources/example.rules.json)。从历史生成规则草稿也能避免手动填写方法、主机和路径。
+仓库还提供可导入的最小示例 [example.scenes.json](resources/example.scenes.json)。从历史生成规则草稿也能避免手动填写方法、主机和路径。
 
 ## 配置参考
 
@@ -520,7 +572,7 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 项目根目录/
 └── .flutter-pilot/
     ├── project.json              # 项目 UUID、格式版本、接入方式和项目设置
-    └── rules.json                # version: 1 的 Mock 规则文档
+    └── scenes.json               # 场景及持久激活状态，统一包含 HTTP / WS 规则
 ```
 
 `project.json` 示例（UUID 由插件生成，下面仅演示结构）：
@@ -543,12 +595,12 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 }
 ```
 
-`settings` 可省略；其中字段使用不带 `flutterPilot.` 前缀的名称，优先于对应 IDE 设置。引擎路径仍使用本机 IDE 的 `flutterPilot.enginePath`。`rules.json` 与导入 / 导出使用相同结构：`{"version":1,"rules":[]}`；工作台增删改、复制、启停和排序都会保存到当前目录的规则文件。
+`settings` 可省略；其中字段使用不带 `flutterPilot.` 前缀的名称，优先于对应 IDE 设置。引擎路径仍使用本机 IDE 的 `flutterPilot.enginePath`。`scenes.json` 与导入 / 导出使用相同场景结构；工作台增删改、复制、启停和排序都会保存到当前目录的规则文件。
 
 | 修改内容 | 生效方式 |
 | --- | --- |
 | 工作台编辑规则 | 保存到项目文件，并同步运行中的会话；以同步结果为准 |
-| 外部编辑 `rules.json` | 保存文件后点击 **读取项目文件**，校验并同步 |
+| 外部编辑 `scenes.json` | 保存文件后点击 **读取项目文件**，校验并同步 |
 | 外部编辑项目名称 | 保存后点击 **读取项目文件**，更新项目显示名称 |
 | 外部编辑接入方式、端口、采集参数 | 保存后重新加载窗口；当前会话继续使用启动时的配置 |
 | 修改 `projectId` | 重新加载窗口建立新绑定；当前会话拒绝直接切换 UUID |
@@ -590,7 +642,7 @@ macOS 默认 VS Code 用户数据下通常为 `~/Library/Application Support/Cod
 
 | 操作 | 结果 |
 | --- | --- |
-| 关闭 VM Mock / 断开 VM | 正常操作尽量立即卸载本插件拦截器；异常断连依赖最长约 15 秒租约到期后旁路，已发出的请求改写无法撤回 |
+| 停用场景 / 断开 VM | 正常操作尽量立即卸载本插件拦截器；异常断连依赖最长约 15 秒租约到期后旁路，已发出的请求改写无法撤回 |
 | 停止代理 | 关闭流量监听、释放等待断点并尝试清理本会话 Android 转发；引擎管理通道和历史查询保留 |
 | 关闭工作台 | 关闭界面；VM 连接 / Mock 或后台代理继续记录，代理人工断点释放并停用 |
 | 退出 IDE / 移除 Flutter 工作区 | 断开 VM 或退出后台引擎，释放断点并清理本会话转发；规则、API 目录和历史保留 |
@@ -619,13 +671,13 @@ adb -s YOUR_ANDROID_SERIAL reverse --remove tcp:8080
 | 预览后不能应用 | 保存相关文件并重新检测；已有 helper、自定义网络配置或源码变化会触发保护 |
 | 未自动启动 | VM 检查项目 / IDE 的 `autoConnectVm`，确认在本地 IDE 内启动或附加 Flutter Debug；多个会话需选择，手动断开后需点击重新连接。DTD 不可用时重新启动调试或手动填写地址；代理模式检查 `autoStart`、工作区信任及可用引擎 |
 | VM 连接失败 | 按具体提示区分端口未监听、超时、认证路径失效或初始化失败；使用本次 Debug 的完整 WS，不要填 DevTools 网页地址。App 重新运行后端口和认证路径可能变化，不能只替换旧地址的端口 |
-| VM 记录正常但 Mock 不生效 | 主动开启运行时 Mock，检查已接入 Dio 数、规则同步状态；新实例可重新发现，不支持所有自定义拦截链 |
+| VM 记录正常但 Mock 不生效 | 激活目标场景，检查 HTTP 分域状态、已接入 Dio 数和规则同步状态；新实例可重新发现，不支持所有自定义拦截链 |
 | VM 意外断开后暂不能启用 Mock | 可先重连观察，等待最长约 16 秒冷却，确保旧 15 秒租约已到期；正常显式关闭 / 断开且卸载成功时不受该冷却限制 |
 | 无请求历史 | VM 确认已连接当前 Debug App，并重新触发请求；代理确认已运行、应用使用已接入的 Dio、启动参数地址正确，Android reverse 和设备网络可用。只打开插件不会自动接管全部网络 |
 | HTTPS 握手失败 | helper 是否对应当前工作区 CA；系统代理路线是否信任当前证书；是否有证书固定或自定义校验 |
 | 手机连不上电脑 | 不要使用 `0.0.0.0` 作目标；Wi-Fi 路线开启局域网监听，检查 IP、网络隔离和防火墙；Android USB 检查授权 |
 | 规则没有命中 | 检查启停、方法、主机和原始路径；主机不填协议或端口，查询参数另填；检查更高优先级规则 |
-| 规则已保存但未生效 | 查看当前模式日志；VM 检查 Mock 开关、已接入 Dio 数并重新发现 / 同步，代理初始化 / 重启引擎后同步 |
+| 规则已保存但未生效 | 查看激活场景及分域状态；VM 检查已接入 Dio 数并重新发现 / 同步，代理初始化 / 重启引擎后同步 |
 | 只改请求头后正文不对 | 确认未开启“替换正文”；空字符串正文会清空内容 |
 | 断点提前消失 | 应用自己的超时或取消可能早于插件倒计时；也检查是否停止代理、关闭面板或控制断连 |
 | 转发后鉴权失败 | redirect 保留鉴权头；若鉴权签名包含原路径或域名，需由业务侧按目标重新签名 |
@@ -721,7 +773,7 @@ python3 tool/device_smoke.py --mitmdump /absolute/path/to/mitmdump --ios YOUR_SI
 
 ```sh
 npm run package
-shasum -a 256 artifacts/flutter-pilot-0.0.11.vsix
+shasum -a 256 artifacts/flutter-pilot-0.0.12.vsix
 ```
 
 VSIX 包含扩展构建产物、VM 注入模板、代理 addon、引擎清单及文档，不包含 Node 开发依赖、Flutter 示例构建结果或真实证书。首次引擎下载单独发生。源码中的 README 修改后，应重新打包，安装包内的文档才会更新。
@@ -739,7 +791,7 @@ Flutter Dio → HTTP/HTTPS 代理 → mitmdump + Python addon → 目标服务
                        SQLite API 目录与历史 / CA
 ```
 
-VM 模式由 TypeScript 扩展通过 VM Service JSON-RPC 读取 SDK HTTP profiling，或在用户开启 Mock 后给已有 Dio 安装运行时拦截器。共用规则文件，SQLite 单独保存 VM 历史；不写 App 源码，不接管 TLS。
+VM 模式由 TypeScript 扩展通过 VM Service JSON-RPC 读取 SDK HTTP profiling，或在用户激活含 HTTP 规则的场景后给已有 Dio 安装运行时拦截器。共用规则文件，SQLite 单独保存 VM 历史；不写 App 源码，不接管 TLS。
 
 代理模式的 Flutter 业务流量与管理通道分离；每个 Flutter 工作区拥有独立后台会话，工作台只连接并查看选定会话。扩展管理引擎进程、下载、规则文件及设备接入，addon 执行网络修改与断点，并通过 SQLite 分别保存 API 目录和请求历史。详情按需读取，避免列表反复传输完整正文。
 

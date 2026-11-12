@@ -1,6 +1,37 @@
 # 实现与验证结论
 
-## 0.0.11 更新与 Cursor 安装（2026-11-12）
+## 0.0.12 远端同步、标签与 Cursor 安装（2026-11-12）
+
+- 拉取确认 origin/main 仍为 2fccee4。完成本地 0.0.11 安装记录与远端 Mock 场景、App 截图的合并，manifest、lockfile、MCP serverInfo、README、CHANGELOG 与 VSIX 路径统一为 0.0.12。
+- 440 项 Vitest、63 项 Playwright、TypeScript / Webview 类型检查、Prettier 与构建通过。Python 代理发现 40 项，19 项通过，21 项因未设置 MITMDUMP 跳过。
+- 生成 `artifacts/flutter-pilot-0.0.12.vsix`（SHA-256 `1d0e75ffee04f15834dd3392e469d20b5a8ef4b6907ce02f9d3247a2b3b59813`）。Cursor CLI `--force` 安装后列表为 `flutter-pilot.flutter-pilot@0.0.12`。包内 29 个分发文件与安装目录逐项一致，清单只排除 Cursor `__metadata`；安装目录另有 `.vsixmanifest`。构建产物与包内 dist 四个文件 SHA-256 一致。
+- 构建与安装桥接的真实 SDK stdio 均为 flutter-pilot 0.0.12、23 个工具、27 个 Prompts、5 个资源，并读到离线指南。报告 `artifacts/v0.0.12-install-report.json`。
+- 按授权在 main 提交合并，创建附注标签 v0.0.12，并常规推送 main 与该标签。不发布扩展商店，不自动重载当前窗口。
+
+## 0.0.11 发布（2026-11-12）
+
+- 按用户最新授权发布统一 Mock 场景与 App 截图，版本、MCP serverInfo、安装文档、CHANGELOG 与 VSIX 路径同步为 0.0.11，包含此前本地 Scene 提交与本轮截图改动。
+- 440 项 Vitest、63 项 Playwright、类型、全仓格式与 diff 检查通过；Python 代理 19 项通过、21 项缺 MITMDUMP 跳过。构建并生成 `artifacts/flutter-pilot-0.0.11.vsix`。
+- 远端检查确认 origin/main 为 2d72c92；按授权在 main 提交并常规推送。未要求安装用户 Cursor，继续采用本地 VSIX、不发布商店的既有流程。
+
+## App 截图与长图（2026-11-12）
+
+- 左侧原生 viewsWelcome、侧栏标题图标和工作台顶部“截图”接入 flutterPilot.screenshot / screenshot.capture，共用截图模式、区域选择、保存和预览流程；未连接 Debug VM、繁忙和代理模式阻止截图。
+- resources/vm/screenshot.dart.txt 经现有 VmUiController 注入，逐屏裁片覆盖懒加载列表；finally 在成功、失败或取消时恢复滚动位置。PNG 不进入工作台 state、历史或日志；可取消进度复用 UI 会话失效机制。
+- src/screenshot.ts 用 pngjs 校验并在扩展端无损拼接，规避真实模拟器中 GPU 长纹理被缩小到 8192 的问题；累计高度不全、尺寸不匹配和超限拒绝保存。补充第三方许可。
+- 类型、构建、相关格式与 diff 检查通过；438 项全量 Vitest 通过后新增入口集成回归（相关 71 项通过）；63 项全量 Playwright 通过。独立 iOS 模拟器 57 项检查通过，含屏幕 PNG、804×9082 长图、可见项位置恢复、取消恢复、多区域枚举、过期目标与超限拒绝；长图末尾 Item 79 和拼接处已目视检查。
+- README 记录入口、使用步骤与边界；Android、iOS 真机和真实 IDE 保存对话框尚未现场验收。保持 0.0.10，未提交、打包、发布或安装用户 Cursor。
+
+## HTTP / WS Scene 实现（2026-11-12）
+
+- SceneStore 使用原子创建/替换、整份严格校验及外部编辑检测；SceneController 串行持久化、场景投影与运行时同步，包含连接标识/revision 防旧结果、租约等待重试、采集暂停及临时 WS 规则清理。
+- 场景页管理新建/重命名/复制/删除/激活/停用、HTTP/WS 规则和导入导出。生成规则可选择目标场景；API tag 仅用激活规则，历史 ID 不改写。MCP 工具、同名提示词、指南、示例和 smoke 脚本同步新格式。
+- 429 项 Vitest、61 项 Playwright、类型检查、Prettier 和构建通过。场景生命周期使用合成运行时验证；390px / 1280px 场景截图已检查。
+- 三位子代理分别审查运行时、UI、MCP 与文档；已修复代理重启恢复、非激活场景重载扰动、采集失败与租约重试、文件切换暂停状态、WS 草稿重复、历史规则筛选、MCP 摘要大小和代理状态等问题，并补回归。最终测试使用仅含 Scene 暂存内容的隔离快照。
+- 隔离真实 Dart 3.13.7 Debug VM 的 WS/WSS 均通过，每种 122 条消息、400 条预期队列遗漏、无警告；覆盖采集模式手动消息、replace/drop、MCP 链路、租约过期与卸载。不是 Flutter 设备或 IDE GUI 验收。
+- 代理 40 项发现、19 项通过、21 项因缺 MITMDUMP 跳过。本轮未执行真实 IDE / Flutter 设备场景恢复验收；按后续授权本地提交，未安装、发布或推送，版本不变。
+
+## 本地早期 0.0.11 更新与 Cursor 安装（合并前历史）（2026-11-12）
 
 - 用户要求更新新版本并安装 Cursor，沿用已确认的补丁递增与本地 VSIX 流程；工作区原本干净，0.0.11 功能沿用 0.0.10。manifest、lockfile、MCP 版本、README、CHANGELOG 与打包路径已同步。
 - 类型、全仓格式、构建与打包通过，402 项 Vitest 全部通过。首次沙箱运行因本机监听限制失败，允许测试监听后全量通过；此次仅版本与文档变更，未重跑 UI 或真实 Flutter/IDE GUI 验收。

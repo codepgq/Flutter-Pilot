@@ -42,17 +42,17 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 { "topic": "http" }
 ```
 
-| topic              | 内容                                                                 |
-| ------------------ | -------------------------------------------------------------------- |
-| `overview`（默认） | 能力场景、首次调用、规则文件和运行前提                               |
-| `http`             | `rules.json` 的字段、完整合法示例、请求／响应修改、转发及验证流程    |
-| `ws`               | `ws-rules.json` 的 URL、方向、文本匹配、替换／丢弃及双向消息验证     |
-| `ui`               | 快照发现真实 Key、父范围查找、点击／输入／滚动／等待、Key 诊断与修复 |
-| `workflow`         | 编辑规则 → 重载 → 显式开启采集／Mock → 操作 UI → 查询网络及页面结果  |
+| topic              | 内容                                                                           |
+| ------------------ | ------------------------------------------------------------------------------ |
+| `overview`（默认） | 能力场景、首次调用、规则文件和运行前提                                         |
+| `http`             | `scenes.json` 中 HTTP 规则的字段、完整合法示例、请求／响应修改、转发及验证流程 |
+| `ws`               | `scenes.json` 中 WS 规则的 URL、方向、文本匹配、替换／丢弃及双向消息验证       |
+| `ui`               | 快照发现真实 Key、父范围查找、点击／输入／滚动／等待、Key 诊断与修复           |
+| `workflow`         | 编辑规则 → 重载 → 激活目标场景 → 操作 UI → 查询网络及页面结果                  |
 
 同一份指南还可通过 `resources/list` 发现，URI 为 `flutter-pilot://guides/<topic>`，使用 `resources/read` 读取。工具入口兼容只使用 MCP tools 的 Agent，资源入口方便支持参考资料的客户端；两者返回相同内容。
 
-支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 25 个模板：原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及下文工具列表中全部 21 个工具的同名独立模板。`hot_reload` 和 `hot_restart` 可以直接按同名 Prompt 查找，无需先打开其他场景模板。
+支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 27 个模板：原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及下文工具列表中全部 23 个工具的同名独立模板。`hot_reload` 和 `hot_restart` 可以直接按同名 Prompt 查找，无需先打开其他场景模板。
 
 例如读取热重启提示词：
 
@@ -64,7 +64,7 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 
 Agent 的可调用能力由 `tools/list` 提供，Prompts 是可选的使用指导；未读取 Prompts 不等于工具不存在。初始化说明已明确列出所有工具及同名 Prompt 入口。不支持 Prompts 的客户端仍可通过工具描述和 `get_usage_guide` 发现用法。新增工具必须补齐同名提示词，类型检查及真实 MCP stdio 测试会校验完整覆盖和可读性。
 
-指南明确由 Agent 文件工具增量编辑规则，先通过 `get_network_status` 获取准确路径并保留已有规则。HTTP JSON 正文必须序列化为字符串；WS 规则针对业务连接，连接临时规则不能写入持久文件。保存后调用 `reload_rules`，检查各域加载与同步结果，再显式控制开关并验证本次新记录。UI 先用快照发现 Key，再确认唯一目标；没有 Key 时诊断并补业务源码，不回退文本定位。
+指南明确由 Agent 文件工具增量编辑规则，先通过 `get_network_status` 获取准确路径并保留已有规则。HTTP JSON 正文必须序列化为字符串；WS 规则针对业务连接，连接临时规则不能写入持久文件。保存后调用 `reload_rules`，检查各域加载与同步结果，再用 `activate_scene` 激活目标场景并验证本次新记录。UI 先用快照发现 Key，再确认唯一目标；没有 Key 时诊断并补业务源码，不回退文本定位。
 
 例如用户要求“模拟订单列表空数据并验证页面”，Agent 应先读取 `http`／`workflow` 指南，选择对应项目会话，读取并编辑规则，再完成重载、Mock、Key 操作和结果验证。具体是否主动调用仍由客户端 Agent 根据任务和上下文决定；MCP 说明提供发现与操作指引，不替代用户授权和客户端审批。
 
@@ -83,9 +83,9 @@ Agent 可以直接调用两个 MCP 工具控制当前应用：
 
 首版仅控制当前已连接 VM 准确对应的 Cursor／VS Code Flutter Debug 会话。应用可由 IDE 启动或附加；无法绑定调试会话、会话已结束或不支持操作时返回明确诊断，不会操作其他项目或当前碰巧处于焦点的会话。仅手动输入 VM 地址且无法关联 IDE 会话时不可用。Agent 使用 MCP 入口即可，无需额外终端操作。
 
-“修改 API → restart → 展示不同状态和 UI”的流程是：增量修改目标 Mock 文件，调用 `reload_rules` 检查加载和同步，显式开启所需采集与 Mock，记录请求／消息基线，再调用 `hot_restart`。热重启不会代替规则文件重载；仅修改源码且需要保留页面状态时选择 `hot_reload`。编译失败时先修复源码，不自动改成热重启。
+“修改 API → restart → 展示不同状态和 UI”的流程是：增量修改目标 Mock 文件，调用 `reload_rules` 检查加载和同步，激活所需场景，记录请求／消息基线，再调用 `hot_restart`。热重启不会代替规则文件重载；仅修改源码且需要保留页面状态时选择 `hot_reload`。编译失败时先修复源码，不自动改成热重启。
 
-VM 连接未断时，已有采集／Mock 开关维持，并重新发现运行时对象。启动首请求可能早于 Mock 重新注入，因此不能保证拦截；检查工具返回的 `network` 及 `get_network_status`，必要时待接入后按 Key 再次触发请求。实际 VM 断线后仍按既有规则关闭 Mock，重新连接后须按任务显式开启。
+VM 连接未断时，已有采集／Mock 开关维持，并重新发现运行时对象。启动首请求可能早于 Mock 重新注入，因此不能保证拦截；检查工具返回的 `network` 及 `get_network_status`，必要时待接入后按 Key 再次触发请求。实际 VM 断线后停止运行时 Mock；重新连接后自动恢复已保存的激活场景，等待旧租约到期并检查分域状态。
 
 热重载用当前 Flutter Isolate／Group 的成功事件确认，热重启用旧 Flutter Isolate 消失且新 Isolate 就绪确认。部分运行时在源码无变化时不发送重载事件，此时可能超时并返回 `completed=false`，需要检查当前 UI 和 IDE 诊断；不将调试协议响应本身当成更新成功。
 
@@ -109,7 +109,7 @@ VM 连接未断时，已有采集／Mock 开关维持，并重新发现运行时
 
 ## WebSocket 主动消息
 
-先显式开启 WS 采集和 WS Mock，再调用 `get_ws_connections` 选择在线且 `capture=attached` 的准确连接。两个工具均复用 App 现有连接，不新建 WebSocket：
+先开启 WS 采集并确认目标连接已接入，再调用 `get_ws_connections` 选择在线且 `capture=attached` 的准确连接。两个工具均复用 App 现有连接，不新建 WebSocket：
 
 - `inject_ws_message`：向 App 接收链路注入模拟服务端事件，用于构造订单状态、资产更新等页面状态，不发给服务端。
 - `send_ws_message`：经 App 当前真实连接发往服务端，适合发送指定订阅或测试消息；当前 outbound 规则仍会生效，消息可能被替换或丢弃。
@@ -141,23 +141,25 @@ VM 连接未断时，已有采集／Mock 开关维持，并重新发现运行时
 
 ## 工具列表
 
-| 工具                                       | 用途                                                  |
-| ------------------------------------------ | ----------------------------------------------------- |
-| `get_usage_guide`                          | 按主题读取规则编辑、UI 定位和验证指南，无需在线 IDE   |
-| `list_sessions`                            | 获取已开启 MCP 的项目和能力                           |
-| `hot_reload` / `hot_restart`               | 控制当前 VM 对应 IDE 调试会话的热重载／热重启         |
-| `get_ui_snapshot`                          | 获取有界的已挂载 UI 结构                              |
-| `find_widget`                              | 按 Key 查询目标                                       |
-| `tap` / `enter_text` / `scroll`            | 点击、替换输入内容、滚动                              |
-| `wait_for_widget`                          | 等待出现、消失或可操作                                |
-| `inspect_key_issues`                       | 诊断当前界面交互目标的 Key                            |
-| `get_network_status`                       | 查询采集／Mock／规则加载状态和文件位置                |
-| `get_requests` / `get_request`             | 分页查询 HTTP 记录与详情                              |
-| `get_ws_connections` / `get_ws_messages`   | 查询 WS 连接和消息；`includeBodies` 请求正文          |
-| `inject_ws_message`                        | 向 App 注入模拟服务端消息，支持原始文本或 topic/data  |
-| `send_ws_message`                          | 经 App 真实 WS 连接发送消息，受当前 outbound 规则影响 |
-| `reload_rules`                             | 重新读取、校验并同步 `http`、`ws` 或 `all` 规则       |
-| `set_capture_enabled` / `set_mock_enabled` | 显式控制指定 `http`／`ws` 域的开关                    |
+| 工具                                     | 用途                                                           |
+| ---------------------------------------- | -------------------------------------------------------------- |
+| `get_usage_guide`                        | 按主题读取规则编辑、UI 定位和验证指南，无需在线 IDE            |
+| `list_sessions`                          | 获取已开启 MCP 的项目和能力                                    |
+| `hot_reload` / `hot_restart`             | 控制当前 VM 对应 IDE 调试会话的热重载／热重启                  |
+| `get_ui_snapshot`                        | 获取有界的已挂载 UI 结构                                       |
+| `find_widget`                            | 按 Key 查询目标                                                |
+| `tap` / `enter_text` / `scroll`          | 点击、替换输入内容、滚动                                       |
+| `wait_for_widget`                        | 等待出现、消失或可操作                                         |
+| `inspect_key_issues`                     | 诊断当前界面交互目标的 Key                                     |
+| `get_network_status`                     | 查询采集／Mock／规则加载状态和文件位置                         |
+| `get_requests` / `get_request`           | 分页查询 HTTP 记录与详情                                       |
+| `get_ws_connections` / `get_ws_messages` | 查询 WS 连接和消息；`includeBodies` 请求正文                   |
+| `inject_ws_message`                      | 向 App 注入模拟服务端消息，支持原始文本或 topic/data           |
+| `send_ws_message`                        | 经 App 真实 WS 连接发送消息，受当前 outbound 规则影响          |
+| `reload_rules`                           | 整份读取、校验并按激活状态同步 `scenes.json`，无 `domain` 参数 |
+| `list_scenes`                            | 列出场景摘要（ID、名称、规则数量）、激活场景和 HTTP/WS 应用状态，支持 VM 离线查询        |
+| `activate_scene` / `deactivate_scene`    | 持久选择或停用场景；离线待应用，重连自动恢复                   |
+| `set_capture_enabled`                    | 控制指定 `http`／`ws` 域采集；关闭暂停该域 Mock，重新开启恢复  |
 
 除 `get_usage_guide`、`list_sessions` 外，工具均需 `sessionId`。正式参数及边界以客户端发现的工具 schema 为准。MCP 不提供任意 Dart 求值或规则增删改工具。
 
@@ -165,11 +167,11 @@ VM 连接未断时，已有采集／Mock 开关维持，并重新发现运行时
 
 可以向编码 Agent 下达以下任务：
 
-> 读取 Flutter Pilot 的 `get_usage_guide`（http／ui／workflow），调用 `list_sessions` 选择当前项目。查看 `get_network_status` 返回的规则路径，保留已有规则，只修改产品详情 Mock 正文。保存 `.flutter-pilot/rules.json` 后调用 `reload_rules`，确认加载和同步成功，显式开启 HTTP Mock。通过 `get_ui_snapshot` 找到实际产品及详情 Key，确认目标唯一后点击产品，等待详情出现，查询对应 HTTP 请求并验证响应字段。出现 Key 诊断问题时修改业务源码补稳定 Key，重新验证；不要用文本点击绕过问题。
+> 读取 Flutter Pilot 的 `get_usage_guide`（http／ui／workflow），调用 `list_sessions` 选择当前项目。查看 `get_network_status` 返回的规则路径，保留已有规则，只修改产品详情 Mock 正文。保存 `.flutter-pilot/scenes.json` 后调用 `reload_rules`，确认加载成功，再用 `activate_scene` 激活目标场景并检查 HTTP 应用状态。通过 `get_ui_snapshot` 找到实际产品及详情 Key，确认目标唯一后点击产品，等待详情出现，查询对应 HTTP 请求并验证响应字段。出现 Key 诊断问题时修改业务源码补稳定 Key，重新验证；不要用文本点击绕过问题。
 
-> 分别构造接口成功、失败和空数据三个场景。每次只启用对应 Mock，保存后 `reload_rules`，确认采集和 Mock 状态，再用 `hot_restart` 重置页面状态。检查重启返回的网络状态及本次新请求；如果启动请求早于 Mock 接入，待接入后按 Key 再次触发。最后核对接口命中和对应 UI，不把热重启完成当作场景通过。
+> 分别构造接口成功、失败和空数据三个场景。每次只激活对应场景，保存后 `reload_rules`，确认采集和 Mock 状态，再用 `hot_restart` 重置页面状态。检查重启返回的网络状态及本次新请求；如果启动请求早于 Mock 接入，待接入后按 Key 再次触发。最后核对接口命中和对应 UI，不把热重启完成当作场景通过。
 
-HTTP 规则保存在 `.flutter-pilot/rules.json`，WS 持久规则保存在 `.flutter-pilot/ws-rules.json`。Agent 直接维护文件；配置非法时保留文件及上一份有效规则。重载并不自动开启 Mock，WS 重载保留仍有效的连接临时规则。HTTP 与 WS 开关彼此独立，VM 断线后按原有规则关闭，重新连接后须显式开启。
+HTTP 与 WS 规则统一保存在 `.flutter-pilot/scenes.json`，由 `get_network_status` 的 `files.scenes` 返回准确路径。顶层为 `{version:1, activeSceneId:null, scenes:[{id,name,httpRules:[],wsRules:[]}]}`；规则 ID 在同一协议的所有场景中唯一。Agent 直接维护文件；配置非法时保留文件及上一份有效配置，外部编辑未读取前禁止 UI 覆盖。`reload_rules(sessionId)` 整份重载后按文件中的激活状态同步；用 `activate_scene` / `deactivate_scene` 选择或停用。未激活场景的编辑不影响运行时；VM 离线时可选择待应用场景，重连、IDE 重开后自动恢复，遵守自动连接设置。连接临时 WS 规则仅存在所属激活场景的内存中，切换场景或连接失效后清除。
 
 ## 可用性与验证边界
 
@@ -177,7 +179,7 @@ MCP 能连接不代表全部运行时能力均可用。请在 Tab 中查看 VM �
 
 未打开 IDE、当前工作区未开启 MCP 或 VM 尚未连接时，Agent 会获得可用性提示。配置已写入但工具尚未出现时，先按客户端卡片提示检查信任、加载及策略状态，再重新检测。
 
-规则重载结果中 `loaded` 表示读取及校验通过，`synchronized` 表示插件接受规则并完成当前可执行的同步，`runtimeApplied` 表示运行中的 Mock 已实际接入；`pending` 表示仍需连接 VM、开启 Mock 或发现实例。不能仅凭文件加载成功断言请求已被 Mock。
+规则重载结果中 `loaded` 表示读取及校验通过；`status.scene.runtime.http` / `ws` 分别返回 `unneeded`、`pending`、`applied`、`error`、`unsupported` 或 `paused`。`pending` 表示仍需连接或发现 Dio / 目标 WS 连接，代理模式的 WS 为 `unsupported`。激活不等于实际命中，需查询本次新记录核验。
 
 适配卡片提示项目、全局及 Claude local 配置的同名覆盖关系。未知 Codex 握手名只显示实际名称，不推断来自 CLI 还是 App。
 

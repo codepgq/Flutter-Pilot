@@ -87,7 +87,7 @@ exports.run = async () => {
       }),
     );
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 21);
+    assert.equal(tools.tools.length, 23);
     const list = await client.callTool({ name: 'list_sessions', arguments: {} });
     const sessions = list.structuredContent.sessions;
     assert.equal(sessions.length, 1);
@@ -96,7 +96,7 @@ exports.run = async () => {
     const status = await call('get_network_status');
     assert.equal(status.isError, undefined);
     assert.equal(status.structuredContent.vmConnected, false);
-    assert.equal(status.structuredContent.files.http, path.join(workspace, '.flutter-pilot/rules.json'));
+    assert.equal(status.structuredContent.files.scenes, path.join(workspace, '.flutter-pilot/scenes.json'));
     await waitFor(
       () => workbench.mcpState.clients.some((c) => c.name === 'codex-cli-ide-smoke'),
       'client handshake',
@@ -104,7 +104,7 @@ exports.run = async () => {
     passed(
       phase + ': real SDK stdio discovers tools, workspace session and network status through extension IPC',
     );
-    const rulesFile = status.structuredContent.files.http;
+    const rulesFile = status.structuredContent.files.scenes;
     const rule = {
       id: 'mcp-ide-rule',
       name: 'Agent file edit',
@@ -113,16 +113,21 @@ exports.run = async () => {
       match: { method: 'GET', path: '/mcp-fixture' },
       mock: { status: 200, headers: { 'content-type': 'application/json' }, body: '{"mocked":true}' },
     };
-    await fs.writeFile(rulesFile, JSON.stringify({ version: 1, rules: [rule] }));
-    const reload = await call('reload_rules', { domain: 'http' });
-    assert.equal(reload.structuredContent.results.http.loaded, true);
+    const doc = JSON.parse(await fs.readFile(rulesFile, 'utf8'));
+    doc.scenes[0].httpRules = [rule];
+    doc.activeSceneId = doc.scenes[0].id;
+    await fs.writeFile(rulesFile, JSON.stringify(doc));
+    const reload = await call('reload_rules');
+    assert.equal(reload.structuredContent.loaded, true);
     assert.equal(workbench.rules[0].id, rule.id);
     await fs.writeFile(rulesFile, '{invalid');
-    const invalid = await call('reload_rules', { domain: 'http' });
+    const invalid = await call('reload_rules');
     assert.equal(invalid.isError, true);
     assert.equal(workbench.rules[0].id, rule.id, 'last valid rules preserved');
-    await fs.writeFile(rulesFile, JSON.stringify({ version: 1, rules: [] }));
-    await call('reload_rules', { domain: 'http' });
+    doc.activeSceneId = null;
+    doc.scenes[0].httpRules = [];
+    await fs.writeFile(rulesFile, JSON.stringify(doc));
+    await call('reload_rules');
     passed(
       phase +
         ': Agent file edits reload through shared rules service; invalid JSON preserves last valid rules',
@@ -139,10 +144,7 @@ exports.run = async () => {
       assert.equal(workbench.mcpState.running, false);
       assert.equal((await call('get_network_status')).isError, true);
       assert.equal((await fs.readdir(path.join(bridgeRoot, 'sessions'))).length, 0);
-      assert.match(
-        await fs.readFile(path.join(workspace, '.codex/config.toml'), 'utf8'),
-        /flutter-pilot/,
-      );
+      assert.match(await fs.readFile(path.join(workspace, '.codex/config.toml'), 'utf8'), /flutter-pilot/);
       await workbench.handle({ action: 'mcp.enable', payload: { enabled: true } });
       assert.equal(workbench.mcpState.running, true);
       passed(

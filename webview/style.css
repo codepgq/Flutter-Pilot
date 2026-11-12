@@ -3064,3 +3064,60 @@ footer {
     padding-left: 12px;
   }
 }
+
+.scenes-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.scene-runtime {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.scene-runtime small {
+  flex-basis: 100%;
+}
+.scene-selector label {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.scene-selector select {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+.scene-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.scene-actions input {
+  flex: 1;
+  min-width: 120px;
+}
+.scenes-page .rules-page,
+.scenes-page .ws-page {
+  min-height: auto;
+  overflow: visible;
+  flex: none;
+}
+.scenes-page .ws-page {
+  padding: 0;
+}
+@media (max-width: 760px) {
+  .scene-selector label {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .scene-runtime > span {
+    overflow-wrap: anywhere;
+  }
+  .scene-actions input {
+    flex-basis: 100%;
+  }
+}

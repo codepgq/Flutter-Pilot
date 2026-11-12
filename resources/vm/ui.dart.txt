@@ -156,10 +156,13 @@
     });
     return yes;
   }
+  __SCREENSHOT__
   Future<Map<String, dynamic>> perform(String tool, dynamic args) async {
     if (state['active'] != true) return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
     if (binding.rootElement == null) return fail('APP_NOT_READY', 'Flutter 尚未挂载根 Widget。');
     if (tool == 'probe') return {'ok': true, 'experimental': true, 'keyTypes': ['string', 'int']};
+    if (tool == 'screenshot_targets') return screenshotTargets();
+    if (tool == 'take_screenshot') return takeScreenshot(args);
     if (tool == 'get_ui_snapshot' || tool == 'inspect_key_issues') {
       final all = tree();
       final limit = args['limit'] ?? args['maxNodes'] ?? 200;

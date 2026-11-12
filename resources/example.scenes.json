@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "activeSceneId": null,
+  "scenes": [
+    {
+      "id": "example-orders",
+      "name": "订单空数据",
+      "httpRules": [
+        {
+          "id": "example-orders-empty",
+          "name": "示例：订单列表空数据",
+          "enabled": true,
+          "priority": 10,
+          "match": {
+            "method": "GET",
+            "host": "api.example.com",
+            "path": "/v1/orders"
+          },
+          "mock": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": "{\"data\":[]}"
+          }
+        }
+      ],
+      "wsRules": [
+        {
+          "id": "example-order-events",
+          "name": "订单事件替换",
+          "enabled": true,
+          "priority": 10,
+          "match": {
+            "url": "wss://api.example.com/orders*",
+            "direction": "inbound",
+            "contains": "order_status"
+          },
+          "action": {
+            "type": "replace",
+            "text": "{\"type\":\"order_status\",\"status\":\"paid\"}"
+          }
+        }
+      ]
+    }
+  ]
+}

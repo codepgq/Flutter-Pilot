@@ -371,7 +371,7 @@ export class WsVmInjector extends EventEmitter {
         if (generation !== this.generation || signal?.aborted) throw new Error('invalidated');
       } catch {
         throw new Error(
-          `${action === 'push' ? '模拟推送' : '向服务端发送'}未确认：请检查 WS Mock、当前连接及消息记录；动作可能已执行，请勿自动重试`,
+          `${action === 'push' ? '模拟推送' : '向服务端发送'}未确认：请检查 WS 采集、当前连接及消息记录；动作可能已执行，请勿自动重试`,
         );
       }
     });

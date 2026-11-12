@@ -107,6 +107,9 @@ export interface ApiCatalogEntry {
   lastAt: number;
 }
 export interface WorkbenchState {
+  scenes?: import('./scene-model').SceneDocument;
+  sceneRuntime?: import('./scene-model').SceneRuntime;
+  selectedSceneId?: string;
   mcp?: import('./mcp/model').McpWorkbenchState;
   vmDiscovery?: {
     enabled: boolean;

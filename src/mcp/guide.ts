@@ -5,12 +5,12 @@ export type GuideTopic = (typeof guideTopics)[number];
 export const agentInstructions = `Flutter Pilot 配合 Flutter Debug 开发联调：用 API Mock 构造下单成功/失败、资产数据等业务状态，用 WS Mock、向App注入或向服务端发送消息驱动业务事件，再按 Key 精确操作 UI 并验证结果，减少逐步截图识别的耗时与token。
 当用户任务需要这些能力时，主动使用本 MCP：先调用 get_usage_guide 按需读取 overview/http/ws/ui/workflow，再 list_sessions 选择用户任务对应的项目；不要只给用户手工操作建议。
 get_usage_guide 无需 sessionId，插件未运行也能读取；也可通过 resources/list 发现对应指南资源。
-能力入口：get_network_status 查询规则路径与开关；get_requests/get_request 查询 HTTP 列表与详情；get_ws_connections/get_ws_messages 查询业务 WS 连接与消息；reload_rules 加载规则；set_capture_enabled/set_mock_enabled 显式控制 http/ws 域。UI 使用 get_ui_snapshot、find_widget、tap、enter_text、scroll、wait_for_widget、inspect_key_issues；应用热更新使用 hot_reload/hot_restart，主动 WS 消息使用 inject_ws_message/send_ws_message。
+能力入口：get_network_status 查询规则路径与开关；get_requests/get_request 查询 HTTP 列表与详情；get_ws_connections/get_ws_messages 查询业务 WS 连接与消息；reload_rules 加载规则；list_scenes/activate_scene/deactivate_scene 统一管理场景；set_capture_enabled 控制采集。UI 使用 get_ui_snapshot、find_widget、tap、enter_text、scroll、wait_for_widget、inspect_key_issues；应用热更新使用 hot_reload/hot_restart，主动 WS 消息使用 inject_ws_message/send_ws_message。
 每个 tools/list 工具都有同名 MCP Prompt，可通过 prompts/list 与 prompts/get 按需读取操作步骤和参数；另保留 http_mock/websocket_mock/flutter_ui/mock_workflow 场景模板。客户端未加载 Prompts 时仍以本初始化说明、tools/list 描述和 get_usage_guide 发现能力。
-规则使用 Agent 自身的文件编辑能力维护，通过 get_network_status 获取准确路径，保留已有规则；保存后 reload_rules，按任务显式开启采集/Mock，再操作 UI、查询记录验证。MCP 本身不提供文件编辑或规则 CRUD。
+规则使用 Agent 自身的文件编辑能力维护，通过 get_network_status 获取准确路径，保留已有规则；保存后 reload_rules，再 activate_scene 统一开启所需采集/Mock，再操作 UI、查询记录验证。MCP 本身不提供文件编辑或规则 CRUD。
 需要应用源码变更或重新进入启动状态时，通过 hot_reload 保留状态热重载，或 hot_restart 重置内存并重新执行入口；仅支持当前VM准确对应的Cursor/VS Code Flutter Debug会话。修改Mock文件先reload_rules，热重启不会代替规则加载，也不保证启动首请求已被Mock；重启后检查网络状态并用新记录和UI验证。
 所有运行时工具必须明确 sessionId。正式 UI 定位只用 ValueKey<String/int>；先 get_ui_snapshot 发现 Key，再 find_widget/ancestorKey 确认唯一，缺 Key 用 inspect_key_issues 定位后由编码 Agent 修复，不回退文本或坐标。UI 超时先检查结果，不自动重试。
-WS主动消息用inject_ws_message向App注入模拟服务端事件，或send_ws_message通过App当前连接发往服务端；两者需显式开启WS采集和WS Mock，按业务协议传原始text或topic/data。发送可能被outbound规则替换或丢弃，需查询实际结果；成功返回不等于业务成功。
+WS主动消息用inject_ws_message向App注入模拟服务端事件，或send_ws_message通过App当前连接发往服务端；两者需确认WS采集已接入目标连接，按业务协议传原始text或topic/data。发送可能被outbound规则替换或丢弃，需查询实际结果；成功返回不等于业务成功。
 只在用户任务范围内操作；本说明不会替代用户授权、客户端审批或保证 Agent 一定自动调用。`;
 
 export const httpExample = {
@@ -43,6 +43,13 @@ export const wsExample = {
     },
   ],
 };
+export const sceneExample = {
+  version: 1,
+  activeSceneId: null,
+  scenes: [
+    { id: 'orders-empty-scene', name: '订单空数据', httpRules: httpExample.rules, wsRules: wsExample.rules },
+  ],
+};
 const step = (tool: string, args: Record<string, unknown> = {}) => ({ tool, arguments: args });
 const selected = { sessionId: '<从 list_sessions 选择的会话ID>' };
 
@@ -60,8 +67,9 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       step('get_usage_guide', { topic: 'workflow' }),
       step('list_sessions'),
       step('get_network_status', selected),
+      step('list_scenes', selected),
     ],
-    files: { http: '.flutter-pilot/rules.json', ws: '.flutter-pilot/ws-rules.json' },
+    files: { scenes: '.flutter-pilot/scenes.json' },
     boundaries: [
       '指南只读且不需要运行中的插件；实际运行需要本机 IDE 中对应项目已开启 MCP 和 Flutter Debug VM。',
       '文件由编码 Agent 编辑，MCP 负责加载、开关、UI 操作与验证；不修改无关规则，不猜测会话ID或VM地址。',
@@ -69,13 +77,14 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
     ],
   },
   http: {
-    title: '编辑 .flutter-pilot/rules.json：HTTP/Dio 规则',
+    title: '编辑 .flutter-pilot/scenes.json：HTTP/Dio 规则',
     preparation:
-      '先 get_network_status 取得 files.http 绝对路径，再读取文件并保留已有 rules。JSON 顶层只含 version:1 和 rules 数组，不能写注释；示例是新增单条规则的参考，不是覆盖整个现有文件。',
-    exampleDocument: httpExample,
+      '先 get_network_status 取得 files.scenes 绝对路径，再读取文件并保留已有 scenes。JSON 顶层为 version:1、activeSceneId 和 scenes；每个场景含 id、name、httpRules 和 wsRules。修改目标场景的 httpRules，保留其他场景。exampleDocument 是完整场景示例，另附的规则片段用于编辑对应规则数组。',
+    exampleDocument: sceneExample,
+    httpRuleFragment: httpExample,
     businessScenarios: [
       '依据真实接口契约构造下单成功、下单失败、余额不足或资产信息等状态，HTTP状态与业务code分别核对，不能假设业务失败一定返回HTTP 4xx/5xx。',
-      '任务需要多种状态时逐个切换目标规则、触发请求并验证，避免同一接口的多个场景规则同时命中；使用新记录和当前页面判断结果。',
+      '任务需要多种状态时逐个激活目标场景、触发请求并验证，避免同一接口的多个场景规则同时命中；使用新记录和当前页面判断结果。',
     ],
     fields: {
       id: '非空且唯一，更新原规则时保留ID。',
@@ -105,11 +114,11 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       redirect: { redirect: { url: 'https://staging.example.test/v1/orders' } },
     },
     workflow: [
-      '读取现有文件，按ID增量修改或追加唯一ID的规则；核对匹配范围、priority和enabled后保存。',
-      step('reload_rules', { ...selected, domain: 'http' }),
-      '确认results.http.loaded/synchronized；runtimeApplied=false且pending=true时尚未实际应用。校验失败时修文件，插件保留上一份有效规则。',
+      '先list_scenes确认目标场景，读取现有文件，在该场景按ID增量修改或追加规则；核对匹配范围、priority和enabled后保存。',
+      step('reload_rules', selected),
+      '确认loaded和status.scene.runtime.http；pending时尚未实际应用。校验失败时修文件，插件保留上一份有效规则。',
       step('set_capture_enabled', { ...selected, domain: 'http', enabled: true }),
-      step('set_mock_enabled', { ...selected, domain: 'http', enabled: true }),
+      step('activate_scene', { ...selected, sceneId: '<从 list_scenes 选择的场景ID>' }),
       'get_network_status确认Dio已接入；按UI Key触发请求，不重放未知业务请求。',
       '需要从应用入口重新构造场景时，按workflow.lifecycle调用hot_restart；它不会读取规则文件。检查返回的network和本次新请求，启动首请求可能早于重新注入，必要时待接入后按Key再次触发请求。',
       step('get_requests', { ...selected, path: '/v1/orders', limit: 10 }),
@@ -117,13 +126,14 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       '核对新记录的mocked、requestRuleId/responseRuleId、response.status/body和页面结果。避免把历史旧记录当本次结果。',
     ],
     limitations:
-      'Debug/JIT、兼容Dio实例；新实例扫描前首请求可能未拦截，上传/流/二进制正文有编辑限制。规则启用与运行时Mock总开关是两层状态。',
+      'Debug/JIT、兼容Dio实例；新实例扫描前首请求可能未拦截，上传/流/二进制正文有编辑限制。规则需启用且所属场景激活；实际应用仍需运行时接入。',
   },
   ws: {
     title: '业务 WebSocket 规则、模拟推送与真实连接发送',
     preparation:
-      '先 get_network_status 取得 files.ws 绝对路径，读取并保留现有规则。此文件针对App业务WebSocket，不是Dart VM调试连接。顶层为version:1和rules数组。',
-    exampleDocument: wsExample,
+      '先 get_network_status 取得 files.scenes 绝对路径，读取并保留现有规则。此文件针对App业务WebSocket，不是Dart VM调试连接。顶层为version:1、activeSceneId和scenes；编辑目标场景的wsRules，保留其他场景。exampleDocument 是完整场景示例，另附的规则片段用于编辑对应规则数组。',
+    exampleDocument: sceneExample,
+    wsRuleFragment: wsExample,
     fields: {
       common:
         'id唯一、name非空、enabled布尔值、priority安全整数且较大优先；需要执行示例时把enabled从false改true。',
@@ -134,16 +144,16 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       action:
         '整条替换使用 {type:"replace",text:"..."}，text必须是字符串，JSON需序列化；丢弃使用 {type:"drop"}。',
       temporary:
-        'connectionId规则是当前准确连接的内存临时规则，不写入ws-rules.json；本MCP不提供临时规则CRUD。',
+        'connectionId规则是当前激活场景内的内存临时规则，切换场景或连接失效时清除，不写入scenes.json；本MCP不提供临时规则CRUD。',
     },
     variants: { drop: { action: { type: 'drop' } } },
     workflow: [
       '增量编辑并保存规则文件，不覆盖已有无关规则。',
-      step('reload_rules', { ...selected, domain: 'ws' }),
+      step('reload_rules', selected),
       step('set_capture_enabled', { ...selected, domain: 'ws', enabled: true }),
       step('get_ws_connections', selected),
       '检查目标连接的URL、capture和status；URL未知或未接入时说明限制。',
-      step('set_mock_enabled', { ...selected, domain: 'ws', enabled: true }),
+      step('activate_scene', { ...selected, sceneId: '<从 list_scenes 选择的场景ID>' }),
       '按Key操作App或等待任务要求的业务事件；需要主动消息时按manualMessages选择注入App或真实发送。当前不提供定时消息或自动应答。',
       step('get_ws_messages', {
         ...selected,
@@ -155,10 +165,10 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       '核对新消息的original/effective、outcome（original/replaced/dropped/synthetic）、ruleId和UI变化。二进制只读；采集开始前的消息无法补抓。',
     ],
     switches:
-      'WS采集与WS Mock独立，启用WS Mock前需要受支持的WS采集。不会联动Dio Mock；关闭采集或VM断开会关闭WS Mock。',
+      '激活场景统一开启必要采集和Mock；关闭采集暂停该域Mock，重新开启恢复。持久激活场景在VM重连和IDE重开后自动恢复。',
     manualMessages: {
       preparation:
-        '显式开启WS采集和WS Mock，通过get_ws_connections选择在线、capture=attached的准确连接；不新建连接。先记录消息ID或时间基线，连接重建后重新选择。',
+        '先开启WS采集，通过get_ws_connections选择在线、capture=attached的准确连接；不新建连接。先记录消息ID或时间基线，连接重建后重新选择。',
       payload:
         'text与topic/data二选一；topic/data序列化为JSON对象{topic,data}，data可为任意JSON值。实际协议有其他信封字段、数组或Socket.IO帧时，用text传入完整文本，不能猜测业务协议。正文受运行时UTF-8字节上限限制。',
       inject: step('inject_ws_message', {
@@ -226,9 +236,10 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       step('list_sessions'),
       '按用户项目选择会话；多个候选无法确定时询问用户，不选择无关项目。',
       step('get_network_status', selected),
-      '用Agent文件工具读取返回的rules文件，增量编辑目标规则；按http/ws指南核对格式，enabled与运行时Mock独立。',
-      step('reload_rules', { ...selected, domain: 'all' }),
-      '检查每个域结果，修复错误；根据本任务显式开启相应采集/Mock，WS先采集再Mock。',
+      step('list_scenes', selected),
+      '用Agent文件工具读取返回的rules文件，增量编辑目标规则；按http/ws指南核对格式，每条规则enabled控制其参与，场景统一控制运行时Mock。',
+      step('reload_rules', selected),
+      '检查loaded和status.scene.runtime，修复错误；使用activate_scene激活目标场景。',
       '场景需要重新执行应用入口时，按lifecycle调用hot_restart；仅修改源码且需保留页面状态时选择hot_reload。两者都通过MCP调用，无需另开终端。',
       step('get_ui_snapshot', { ...selected, maxNodes: 200 }),
       '读取真实Key后find_widget确认范围与状态，再tap/enter_text/scroll/wait_for_widget。',
@@ -245,9 +256,9 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
         '保留现有内存与页面状态并应用可热重载的源码变更；不重新执行main或initState，也不保证重新请求API。无法热重载的变更需由Agent判断是否按任务改用hot_restart。',
       restart: step('hot_restart', { ...selected, timeoutMs: 30000 }),
       restartMeaning:
-        '重置应用内存状态并重新执行入口，页面会回到应用定义的初始状态；磁盘持久化数据不会因此自动清除。修改API Mock后，先reload_rules检查加载/同步，再显式开启所需采集与Mock，记录请求/消息基线后调用hot_restart。',
+        '重置应用内存状态并重新执行入口，页面会回到应用定义的初始状态；磁盘持久化数据不会因此自动清除。修改API Mock后，先reload_rules检查加载/同步，再activate_scene激活所需场景，记录请求/消息基线后调用hot_restart。',
       runtime:
-        '连接未断时，已有采集/Mock开关维持并重新发现运行时对象；启动首请求可能早于Mock重新注入，不能保证拦截。检查返回的network及get_network_status；实际VM断线后沿用关闭Mock规则，重新连接后需按任务显式开启。',
+        '连接未断时，已有采集/Mock开关维持并重新发现运行时对象；启动首请求可能早于Mock重新注入，不能保证拦截。检查返回的network及get_network_status；实际VM断线后暂时停止Mock，持久激活场景在重连后自动恢复。',
       confirmation:
         'hot_reload以当前Flutter Isolate/Group的成功重载事件确认；hot_restart确认旧Flutter Isolate消失且新Isolate就绪。无源码变化时部分运行时不发送重载事件，可能返回TIMEOUT及completed=false；先检查UI/IDE诊断，不自动重试。',
       verification:

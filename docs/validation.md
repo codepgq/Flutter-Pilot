@@ -1,5 +1,29 @@
 # 验收记录
 
+## 0.0.12 远端同步、标签与 Cursor 安装（2026-11-12）
+
+- 合并远端 Mock 场景与 App 截图，并保留本地安装记录。manifest、lockfile、MCP serverInfo、README、CHANGELOG 与 VSIX 命名统一为 0.0.12。
+- 发布回归：440 项 Vitest、63 项 Playwright 全部通过；TypeScript / Webview 类型检查、Prettier 与构建通过。Python 代理发现 40 项，19 项通过，21 项因未设置 MITMDUMP 跳过。
+- Cursor CLI `--force` 安装成功，扩展列表为 `flutter-pilot.flutter-pilot@0.0.12`。VSIX 内 29 个分发文件与安装目录逐项一致，`package.json` 仅排除 Cursor `__metadata`；安装目录另有 `.vsixmanifest`。`extension.js`、`mcp-bridge.cjs`、`webview.js`、`webview.css` 与当前构建 SHA-256 一致。
+- 构建与安装桥接的真实 SDK stdio 均返回 flutter-pilot 0.0.12、23 个工具、27 个 Prompts、5 个资源，并读到离线指南。安装包为 `artifacts/flutter-pilot-0.0.12.vsix`，校验值与文件一致性见 `artifacts/v0.0.12-install-report.json`。
+- 附注标签为 v0.0.12。未发布扩展商店，未自动重载当前窗口。真实 IDE 保存对话框、Android / iOS 真机和完整 Scene 的设备恢复验收仍沿用下方既有边界，本轮没有重复。
+
+## 0.0.11 本地 VSIX 发布（2026-11-12）
+
+- 统一发布 HTTP / WebSocket Mock 场景与 App 当前屏幕 / 滚动长截图；manifest、lockfile、MCP serverInfo、README、CHANGELOG 与 VSIX 命名统一为 0.0.11。
+- 本轮发布回归：440 项 Vitest、63 项 Playwright 全部通过，TypeScript / Webview 类型检查、Prettier、构建和 diff 检查通过；Python 代理 19 项通过、21 项因未设置 MITMDUMP 跳过。
+- 截图实现阶段已有独立 Flutter 3.47.8 / iOS 模拟器 57 项检查，报告 `artifacts/ui-flutter-smoke-report.json`：包含当前屏幕、804 × 9082 完整长图、原位置恢复、取消恢复、多区域枚举、过期目标和超限拒绝，fixture 源码哈希未变。本轮发布没有重复设备验收。
+- 安装包为 `artifacts/flutter-pilot-0.0.11.vsix`。本次沿用本地 VSIX 与 origin/main 常规推送流程；未安装用户 Cursor、未发布扩展商店。真实 IDE 保存对话框、Android / iOS 真机和完整 Scene 的设备恢复验收边界仍见下方记录。
+
+## HTTP / WebSocket Mock Scene（2026-11-12，源码未发布）
+
+- 版本保持 0.0.10。429 项 Vitest、61 项 Playwright、TypeScript / Webview 类型检查、Prettier、构建和 diff 检查通过。
+- 三位子代理审查运行时、UI、MCP 与文档，发现的问题已修复并补回归；最终结果来自仅含 Scene 暂存内容的隔离快照，不包含并行截图功能。修复覆盖代理重启恢复、采集租约失败后恢复、非激活场景重载、历史筛选、WS 草稿、MCP 摘要与状态。首次单测早于快照构建导致 MCP 入口不可用，构建完成后全量复测通过。
+- 合成运行时测试覆盖一次性默认场景迁移、重复初始化、非法文件与外部冲突、复制隔离、激活持久化、混合场景切换、未激活编辑、停用/删除、断线/重开恢复、同步失败、租约等待重试和快速切换。UI 覆盖场景管理、规则目标归属、状态、草稿保留及 390px / 1280px 布局；MCP 覆盖 23 个工具与 27 个提示词。
+- 隔离真实 Dart 3.13.7 Debug VM 的 WS / WSS 回归通过，每种 122 条消息、400 条预期队列遗漏、无警告。覆盖采集模式下手动发送/推送、替换/丢弃、真实 SDK MCP stdio 链路、租约到期及卸载；复现命令 `npm run test:ws`。这项是 Dart 运行时验证，不是完整 Scene 的 Flutter 设备验收。
+- Python 代理回归发现 40 项，19 项通过；21 项真实代理集成因未设置 `MITMDUMP` 跳过。代理场景仅应用 HTTP、混合场景 WS 不支持的状态由合成测试验证。
+- 真实 IDE / Flutter 设备上的场景切换、重连和重开恢复尚未验收。没有操作用户业务 App、启动 IDE GUI、安装扩展、推送或发布；用户后续授权审查修复后本地提交。
+
 以下历史章节为更名前各版本的验收证据。原始 VSIX 路径保留当时名称；复现命令中的环境变量已按当前 Flutter Pilot 脚本名称更新。历史通过结果不代表本次更名后的安装或设备验收已经执行。
 
 ## Flutter Pilot 更名验证（2026-11-11）

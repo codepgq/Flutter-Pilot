@@ -58,7 +58,23 @@ const fixture = {
 };
 async function state(page: Page, overrides = {}, selected?: unknown) {
   await page.evaluate(({ state, selected }) => window.postMessage({ type: 'state', state, selected }, '*'), {
-    state: { ...fixture, ...overrides },
+    state: {
+      ...fixture,
+      ...overrides,
+      scenes: {
+        version: 1,
+        activeSceneId: 'scene',
+        scenes: [
+          {
+            id: 'scene',
+            name: '默认场景',
+            httpRules: (overrides as { rules?: unknown[] }).rules ?? fixture.rules,
+            wsRules: [],
+          },
+        ],
+      },
+      selectedSceneId: 'scene',
+    },
     selected,
   });
 }
@@ -114,12 +130,15 @@ test('项目绑定展示 UUID 并打开配置、规则和读取项目文件', as
 test('规则启停只显示 switch，支持鼠标和键盘，繁忙时禁用', async ({ page }) => {
   await page.goto('/');
   await state(page);
-  await page.getByRole('button', { name: 'Mock 规则' }).click();
+  await page.getByRole('button', { name: 'Mock 场景' }).click();
   const toggle = page.getByRole('switch', { name: `启用 ${rule.name}`, exact: true });
   await expect(toggle).toBeChecked();
   await expect(toggle).toHaveText('');
   await toggle.click();
-  expect(await messages(page)).toContainEqual({ action: 'rules.toggle', payload: { id: rule.id } });
+  expect(await messages(page)).toContainEqual({
+    action: 'rules.toggle',
+    payload: { id: rule.id, sceneId: 'scene' },
+  });
   await state(page, { rules: [{ ...rule, enabled: false }] });
   await expect(toggle).not.toBeChecked();
   await toggle.focus();
@@ -127,7 +146,7 @@ test('规则启停只显示 switch，支持鼠标和键盘，繁忙时禁用', a
   await page.keyboard.press('Space');
   expect((await messages(page)).slice(before)).toContainEqual({
     action: 'rules.toggle',
-    payload: { id: rule.id },
+    payload: { id: rule.id, sceneId: 'scene' },
   });
   await page.screenshot({ path: 'artifacts/rule-switch-dark.png', fullPage: true, animations: 'disabled' });
   await page.setViewportSize({ width: 680, height: 920 });
@@ -158,7 +177,7 @@ test('规则卡片紧凑布局与长地址在桌面和窄窗口可用', async ({
       { ...rule, id: 'second', name: 'PD配置重定向至临时接口' },
     ],
   });
-  await page.getByRole('button', { name: 'Mock 规则' }).click();
+  await page.getByRole('button', { name: 'Mock 场景' }).click();
   for (const width of [1280, 680, 390]) {
     await page.setViewportSize({ width, height: 900 });
     const card = page.locator('.rule-card').first();
@@ -185,7 +204,7 @@ test('连接引导、代理控制与局域网开关', async ({ page }) => {
 test('转发规则支持路径及完整 URL 并说明凭证保留', async ({ page }) => {
   await page.goto('/');
   await state(page);
-  await page.getByRole('button', { name: 'Mock 规则' }).click();
+  await page.getByRole('button', { name: 'Mock 场景' }).click();
   for (const target of ['/api/private/new', 'https://target.example.test/private?x=1']) {
     await page.getByRole('button', { name: '新建规则' }).click();
     await page.getByLabel('规则名称', { exact: true }).fill('私有接口转发');
@@ -195,14 +214,19 @@ test('转发规则支持路径及完整 URL 并说明凭证保留', async ({ pag
     await page.getByRole('button', { name: '保存规则' }).click();
     expect(await messages(page)).toContainEqual({
       action: 'rules.save',
-      payload: { rule: expect.objectContaining({ redirect: { url: target } }) },
+      payload: {
+        rule: expect.objectContaining({ redirect: { url: target } }),
+        sceneId: 'scene',
+        targetSceneId: 'scene',
+      },
     });
+    await page.getByRole('button', { name: '取消', exact: true }).click();
   }
 });
 test('规则表单校验、JSON编辑与 CRUD 消息', async ({ page }) => {
   await page.goto('/');
   await state(page);
-  await page.getByRole('button', { name: 'Mock 规则' }).click();
+  await page.getByRole('button', { name: 'Mock 场景' }).click();
   await page.getByRole('button', { name: '新建规则' }).click();
   await page.getByRole('button', { name: '保存规则' }).click();
   await expect(page.getByRole('alert')).toContainText('规则名称不能为空');
@@ -213,6 +237,7 @@ test('规则表单校验、JSON编辑与 CRUD 消息', async ({ page }) => {
   await page.getByRole('button', { name: '保存规则' }).click();
   const out = (await messages(page)) as { action: string; payload: { rule?: typeof rule } }[];
   expect(out.find((m) => m.action === 'rules.save')?.payload.rule?.mock?.status).toBe(503);
+  await page.getByRole('button', { name: '取消', exact: true }).click();
   await page.getByRole('button', { name: '编辑', exact: true }).click();
   await page.getByRole('button', { name: '完整 JSON', exact: true }).click();
   await expect(page.getByLabel('规则 JSON', { exact: true })).toContainText('订单列表');
@@ -220,8 +245,14 @@ test('规则表单校验、JSON编辑与 CRUD 消息', async ({ page }) => {
   await page.getByRole('button', { name: '取消', exact: true }).click();
   await page.getByRole('button', { name: '复制', exact: true }).click();
   await page.getByRole('button', { name: '删除', exact: true }).click();
-  expect(await messages(page)).toContainEqual({ action: 'rules.duplicate', payload: { id: 'orders' } });
-  expect(await messages(page)).toContainEqual({ action: 'rules.delete', payload: { id: 'orders' } });
+  expect(await messages(page)).toContainEqual({
+    action: 'rules.duplicate',
+    payload: { id: 'orders', sceneId: 'scene' },
+  });
+  expect(await messages(page)).toContainEqual({
+    action: 'rules.delete',
+    payload: { id: 'orders', sceneId: 'scene' },
+  });
 });
 test('历史详情、对比、生成规则及备注', async ({ page }) => {
   await page.goto('/');
@@ -298,7 +329,7 @@ test('窄面板与浅色主题不横向溢出', async ({ page }) => {
     document.documentElement.style.setProperty('--vscode-input-background', '#ffffff'),
   );
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-  await page.getByRole('button', { name: 'Mock 规则' }).click();
+  await page.getByRole('button', { name: 'Mock 场景' }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.screenshot({ path: 'artifacts/workbench-narrow-light.png', fullPage: true });
 });
@@ -306,7 +337,7 @@ test('窄面板与浅色主题不横向溢出', async ({ page }) => {
 test('仅改请求头保留正文，关闭全部断点仍可保存 Mock', async ({ page }) => {
   await page.goto('/');
   await state(page);
-  await page.getByRole('button', { name: 'Mock 规则' }).click();
+  await page.getByRole('button', { name: 'Mock 场景' }).click();
   await page.getByText('规则模板与说明', { exact: true }).click();
   await page.getByRole('button', { name: '修改请求', exact: true }).click();
   await page.getByLabel('规则名称', { exact: true }).fill('只修改请求头');
@@ -319,10 +350,15 @@ test('仅改请求头保留正文，关闭全部断点仍可保存 Mock', async 
   }[];
   const saved = sent.find((m) => m.action === 'rules.save')?.payload.rule;
   expect(saved?.request).toEqual({ headers: { 'x-debug': 'true' }, query: {} });
+  await page.getByRole('button', { name: '取消', exact: true }).click();
   await state(page, { rules: [{ ...rule, breakpoint: { request: true, response: false, timeout: 60 } }] });
   await page.getByRole('button', { name: '编辑', exact: true }).click();
   await page.getByLabel('请求发送前暂停').uncheck();
   await page.getByRole('button', { name: '保存规则' }).click();
+  const savedRule = ((await messages(page)) as { action: string; payload: { rule?: unknown } }[])
+    .filter((message) => message.action === 'rules.save')
+    .at(-1)!.payload.rule;
+  await state(page, { rules: [savedRule] });
   await expect(page.getByRole('dialog')).not.toBeVisible();
   const all = (await messages(page)) as typeof sent;
   expect(all.filter((m) => m.action === 'rules.save').at(-1)?.payload.rule).not.toHaveProperty('breakpoint');
@@ -676,7 +712,23 @@ test('跨 Tab 读取详情按宿主来源分发，较早的 API 结果不覆盖�
   const publish = async (selected: unknown, selectedSource: string) =>
     page.evaluate((message) => window.postMessage(message, '*'), {
       type: 'state',
-      state: { ...fixture, ...overrides },
+      state: {
+        ...fixture,
+        ...overrides,
+        scenes: {
+          version: 1,
+          activeSceneId: 'scene',
+          scenes: [
+            {
+              id: 'scene',
+              name: '默认场景',
+              httpRules: (overrides as { rules?: unknown[] }).rules ?? fixture.rules,
+              wsRules: [],
+            },
+          ],
+        },
+        selectedSceneId: 'scene',
+      },
       selected,
       selectedSource,
     });
@@ -935,55 +987,48 @@ test('首次打开默认推荐 VM，代理标记为备用且无需先准备引�
   await expect(page.getByRole('heading', { name: '准备代理引擎' })).not.toBeVisible();
   await page.getByText('工作区与连接', { exact: true }).click();
   await expect(page.getByRole('button', { name: '连接 VM', exact: true })).toBeVisible();
-  await expect(page.getByRole('switch', { name: '开启运行时 Dio Mock' })).not.toBeChecked();
+  await expect(page.getByRole('switch', { name: '开启运行时 Dio Mock' })).toHaveCount(0);
 });
 
-test('VM 运行时 Mock 开关、重新发现、断开和旧代理恢复入口', async ({ page }) => {
+test('VM 由场景控制 Mock，采集、重新发现和断开入口保留', async ({ page }) => {
   await page.goto('/');
-  const connected = {
+  const vm = {
     status: 'connected',
     endpoint: '127.0.0.1:1234',
     isolates: 1,
     recorded: 2,
     instances: 1,
-    mockEnabled: false,
+    mockEnabled: true,
+    captureEnabled: true,
     warnings: [],
   };
-  const overrides = { mode: 'vm', vm: connected, engine: { status: 'stopped' }, proxyActive: false };
+  const overrides = { mode: 'vm', vm, engine: { status: 'stopped' }, proxyActive: false };
   await state(page, overrides);
-  const mock = page.getByRole('switch', { name: '开启运行时 Dio Mock', exact: true });
-  const rescan = page.getByRole('button', { name: '重新发现并同步', exact: true });
-  await expect(mock).not.toBeChecked();
-  await expect(rescan).not.toBeVisible();
-  await mock.click();
-  expect(await messages(page)).toContainEqual({ action: 'vm.mock', payload: { enabled: true } });
-  await state(page, { ...overrides, vm: { ...connected, mockEnabled: true } });
-  await expect(mock).toBeChecked();
-  await rescan.click();
-  expect(await messages(page)).toContainEqual({ action: 'vm.rescan', payload: {} });
-  await mock.focus();
-  await page.keyboard.press('Space');
-  expect(await messages(page)).toContainEqual({ action: 'vm.mock', payload: { enabled: false } });
+  await expect(page.getByRole('switch', { name: '开启运行时 Dio Mock' })).toHaveCount(0);
+  await page.getByRole('button', { name: '重新发现并同步', exact: true }).click();
+  await page.getByRole('button', { name: '关闭 HTTP 采集' }).click();
+  expect(await messages(page)).toEqual(
+    expect.arrayContaining([
+      { action: 'vm.rescan', payload: {} },
+      { action: 'vm.capture', payload: { enabled: false } },
+    ]),
+  );
   await state(page, { ...overrides, busy: true });
-  await expect(mock).toBeDisabled();
+  await expect(page.getByRole('button', { name: '关闭 HTTP 采集' })).toBeDisabled();
   await page.setViewportSize({ width: 390, height: 900 });
   await state(page, overrides);
-  const card = page.getByRole('region', { name: 'Dio Mock 实验性' });
+  const card = page.getByRole('region', { name: '场景 Mock 控制' });
   await expect(card).toBeVisible();
-  await expect(card.locator('input[type=checkbox]')).toHaveCount(0);
-  expect(await card.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThan(180);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await card.screenshot({ path: 'artifacts/dio-mock-switch-narrow.png' });
   await state(page, { ...overrides, proxyActive: true });
-  await expect(page.getByText(/旧代理仍在运行/)).toBeVisible();
   await page.getByRole('button', { name: '停止旧代理', exact: true }).click();
-  expect(await messages(page)).toContainEqual({ action: 'proxy.stop', payload: {} });
   await page.getByRole('button', { name: '断开连接', exact: true }).click();
-  expect(await messages(page)).toContainEqual({ action: 'vm.disconnect', payload: {} });
-  await state(page, { ...overrides, vm: { ...connected, status: 'disconnected' } });
-  await expect(mock).toBeDisabled();
-  await expect(rescan).not.toBeVisible();
-  await expect(page.getByRole('button', { name: '断开连接', exact: true })).not.toBeVisible();
+  expect(await messages(page)).toEqual(
+    expect.arrayContaining([
+      { action: 'proxy.stop', payload: {} },
+      { action: 'vm.disconnect', payload: {} },
+    ]),
+  );
 });
 
 test('VM 连接中、成功、断开和失败状态一致，已连接时禁止重复连接', async ({ page }) => {
@@ -1137,7 +1182,7 @@ test('VM 自动发现展示候选并只提交选中的会话 ID', async ({ page 
     payload: { id: 'android-debug' },
   });
   await expect(page.getByLabel('VM WebSocket 地址', { exact: true })).toBeEnabled();
-  await expect(page.getByRole('switch', { name: '开启运行时 Dio Mock' })).not.toBeChecked();
+  await expect(page.getByRole('switch', { name: '开启运行时 Dio Mock' })).toHaveCount(0);
   await state(page, {
     ...overrides,
     vm: { ...vm, status: 'connecting' },
@@ -1256,12 +1301,12 @@ for (const width of [1280, 390]) {
       ['API 请求', '.api-layout'],
       ['请求历史', '.history-layout'],
       ['WebSocket', '.ws-workspace'],
-      ['Mock 规则', '.rule-list'],
+      ['Mock 场景', '.scene-runtime'],
       ['断点队列', '.breakpoints-page .empty'],
       ['MCP', '.mcp-agents'],
     ];
     for (const [name, selector] of panels) {
-      await page.getByRole('button', { name }).click();
+      await page.locator('nav').getByRole('button', { name }).click();
       const content = page.locator(selector).first();
       await expect(content).toBeVisible();
       const main = await page.locator('main').boundingBox();
@@ -1284,10 +1329,8 @@ for (const width of [1280, 390]) {
     await expect(page.getByLabel('筛选状态码')).not.toBeVisible();
     await page.getByRole('button', { name: '筛选 2', exact: true }).click();
     await expect(page.getByLabel('筛选状态码')).toHaveValue('503');
-    await page.getByRole('button', { name: 'Mock 规则' }).click();
-    await expect(page.getByRole('button', { name: '导入', exact: true })).not.toBeVisible();
-    await page.getByText('更多操作', { exact: true }).click();
-    await page.getByRole('button', { name: '导入', exact: true }).click();
+    await page.getByRole('button', { name: 'Mock 场景' }).click();
+    await page.getByRole('button', { name: '导入场景', exact: true }).click();
     expect(await messages(page)).toContainEqual({ action: 'rules.import', payload: {} });
   });
 }

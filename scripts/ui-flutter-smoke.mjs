@@ -41,7 +41,7 @@ class _FixtureState extends State<Fixture> {
   Text(value, key: const ValueKey('case-echo')),
   SizedBox(key: const ValueKey('parallel-lists'), height: 200, child: Row(children: [
    Expanded(child: ListView.builder(key: const ValueKey('case-list-left'), itemCount: 50, itemExtent: 40, itemBuilder: (context, index) => Text('L$index', key: ValueKey('left.$index')))),
-   Expanded(child: ListView.builder(key: const ValueKey('case-list-right'), itemCount: 50, itemExtent: 40, itemBuilder: (context, index) => Text('R$index', key: ValueKey('right.$index')))),
+   Expanded(child: ListView.builder(key: const ValueKey('case-list-right'), itemCount: 5000, itemExtent: 40, itemBuilder: (context, index) => Text('R$index', key: ValueKey('right.$index')))),
   ])),
  ])));
  return Scaffold(body: SafeArea(child: Column(children: [
@@ -65,7 +65,7 @@ class _FixtureState extends State<Fixture> {
 `,
 );
 await build({
-  entryPoints: ['src/vm/ui.ts', 'src/vm/client.ts'],
+  entryPoints: { ui: 'src/vm/ui.ts', client: 'src/vm/client.ts', screenshot: 'src/screenshot.ts' },
   outdir: join(temp, 'js'),
   bundle: true,
   platform: 'node',
@@ -75,6 +75,7 @@ await build({
 const require = createRequire(import.meta.url);
 const { VmServiceClient } = require(join(temp, 'js/client.cjs'));
 const { VmUiController } = require(join(temp, 'js/ui.cjs'));
+const { composeScreenshot } = require(join(temp, 'js/screenshot.cjs'));
 const hash = async () =>
   createHash('sha256')
     .update(await readFile(source))
@@ -122,13 +123,13 @@ const waitFor = async (predicate, timeout = 120000) => {
   }
   throw new Error('fixture timeout');
 };
-const machine = (method, params) =>
+const machine = (method, params, timeoutMs = 90000) =>
   new Promise((resolve, reject) => {
     const id = ++sequence;
     const timer = setTimeout(() => {
       commands.delete(id);
       reject(new Error('machine timeout'));
-    }, 90000);
+    }, timeoutMs);
     commands.set(id, (message) => {
       clearTimeout(timer);
       message.error ? reject(new Error('machine error')) : resolve(message);
@@ -216,6 +217,56 @@ try {
   );
   // Hide keyboard by clicking status outside the text field before list gestures.
   await invoke('tap', { key: key('blur') });
+  const screenshot = async (args, name) => {
+    const result = await invoke('take_screenshot', args);
+    check(result.ok, `${name}: ${result.code ?? ''} ${result.message ?? ''}`);
+    const png = composeScreenshot(result);
+    check(png.subarray(0, 8).toString('hex') === '89504e470d0a1a0a', `${name} PNG signature`);
+    check(
+      png.readUInt32BE(16) === result.width && png.readUInt32BE(20) === result.height,
+      `${name} PNG dimensions`,
+    );
+    await mkdir(join(root, 'artifacts'), { recursive: true });
+    await writeFile(join(root, `artifacts/${name}.png`), png);
+    return result;
+  };
+  const screen = await screenshot({ mode: 'screen' }, 'flutter-app-screen');
+  await invoke('scroll', { key: key('list'), direction: 'down', distance: 180 });
+  const beforeSnapshot = await invoke('get_ui_snapshot', { limit: 500 });
+  const marker = beforeSnapshot.widgets.find(
+    (widget) => widget.key?.value?.startsWith?.('item.') && widget.visible,
+  );
+  check(!!marker, 'restoration marker exists before long screenshot');
+  const targets = await invoke('screenshot_targets');
+  check(targets.ok && targets.targets.length === 1, 'discovers unique visible vertical list');
+  const long = await screenshot({ mode: 'long', targetId: targets.targets[0].id }, 'flutter-app-long');
+  check(
+    long.width === screen.width && long.height > screen.height && long.frames > 1,
+    'scrolling produces a long image',
+  );
+  const afterLong = await invoke('find_widget', { key: marker.key });
+  check(
+    afterLong.ok && JSON.stringify(afterLong.widget.bounds) === JSON.stringify(marker.bounds),
+    'long screenshot restores original list offset',
+  );
+  check(
+    (await invoke('take_screenshot', { mode: 'long', targetId: 'stale' })).code === 'PAGE_CHANGED',
+    'stale scroll target rejected',
+  );
+  const refreshedTargets = await invoke('screenshot_targets');
+  const cancelledScreenshot = invoke('take_screenshot', {
+    mode: 'long',
+    targetId: refreshedTargets.targets[0].id,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  ui.invalidate();
+  check((await cancelledScreenshot).code === 'SESSION_INVALIDATED', 'cancel long screenshot');
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  const afterCancel = await invoke('find_widget', { key: marker.key });
+  check(
+    afterCancel.ok && JSON.stringify(afterCancel.widget.bounds) === JSON.stringify(marker.bounds),
+    'cancelled long screenshot restores offset',
+  );
   check(
     (await invoke('scroll', { key: key('list'), direction: 'down', distance: 180 })).ok,
     'pointer list scroll',
@@ -254,6 +305,18 @@ try {
   await machine('app.restart', { appId, fullRestart: true, pause: false });
   check((await ui.probe()).supported, 'hot restart auto invalidates without manual reset');
   check((await invoke('tap', { key: key('cases') })).ok, 'open independent regression cases');
+  const parallelTargets = await invoke('screenshot_targets');
+  check(
+    parallelTargets.ok && parallelTargets.targets.length === 2,
+    'discovers parallel long screenshot regions',
+  );
+  const oversizedTarget = parallelTargets.targets.find((target) => target.label.includes('case-list-right'));
+  check(!!oversizedTarget, 'labels targets with ancestor list Key');
+  check(
+    (await invoke('take_screenshot', { mode: 'long', targetId: oversizedTarget.id })).code ===
+      'CAPTURE_LIMIT',
+    'oversized long screenshot fails without partial image',
+  );
   check(
     (await invoke('tap', { key: key('mixed-page') })).code === 'AMBIGUOUS_ACTION_TARGET',
     'mixed page cannot select button by type',
@@ -303,7 +366,7 @@ try {
 } finally {
   await ui.dispose();
   await client.disconnect();
-  if (appId) await machine('app.stop', { appId }).catch(() => {});
+  if (appId) await machine('app.stop', { appId }, 5000).catch(() => {});
   await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 3000))]);
   if (child.exitCode === null) child.kill('SIGTERM');
   await exited;
