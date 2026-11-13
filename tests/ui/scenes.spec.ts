@@ -210,7 +210,7 @@ test('连接与 WebSocket 页面统一跳转场景，保留采集', async ({ pag
 test('历史规则筛选跨场景保留，删除规则后仍显示准确 ID', async ({ page }) => {
   await page.goto('/');
   await state(page);
-  await page.getByRole('button', { name: '请求历史', exact: false }).first().click();
+  await page.getByRole('button', { name: 'API 请求', exact: false }).first().click();
   await page.getByRole('button', { name: /筛选/ }).click();
   await page.getByLabel('筛选命中规则').selectOption('http');
   const inactive = { ...fixture.scenes, activeSceneId: 'other' };

@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  ApiCatalogEntry,
   HistoryEntry,
   HistoryQuery,
   PendingBreakpoint,
@@ -20,7 +19,6 @@ import { WorkflowPanel } from './workflows';
 import { TestPanel } from './tests';
 import type { WsRule } from '../src/ws/model';
 import type { Scene } from '../src/scene-model';
-import { apiRuleTags, type ApiRuleTag } from './api-rules';
 
 declare global {
   interface Window {
@@ -50,8 +48,7 @@ const initial: WorkbenchState = {
   logs: [],
   busy: false,
 };
-type Tab =
-  'apis' | 'history' | 'rules' | 'breakpoints' | 'connection' | 'websocket' | 'mcp' | 'workflows' | 'tests';
+type Tab = 'apis' | 'rules' | 'breakpoints' | 'connection' | 'websocket' | 'mcp' | 'workflows' | 'tests';
 type Snapshot = RequestSnapshot | ResponseSnapshot;
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
@@ -330,9 +327,7 @@ function App() {
   const [state, setState] = useState(initial);
   const [tab, setTab] = useState<Tab>('connection');
   const [selected, setSelected] = useState<HistoryEntry>();
-  const [selectedApi, setSelectedApi] = useState<HistoryEntry>();
-  const selectionTarget = useRef<'apis' | 'history'>('history');
-  const [historyApiFilter, setHistoryApiFilter] = useState<ApiCatalogEntry>();
+  const requestedHistoryId = useRef<string | undefined>(undefined);
   const [edit, setEdit] = useState<Rule>();
   const [wsDraft, setWsDraft] = useState<WsRule>();
   const [preview, setPreview] = useState<{
@@ -345,19 +340,13 @@ function App() {
       const m = event.data;
       if (m.type === 'state') {
         setState(m.state);
-        if ('selected' in m) {
-          if (!m.selected) {
-            setSelectedApi(undefined);
-            setSelected(undefined);
-          } else {
-            const source = m.selectedSource ?? selectionTarget.current;
-            if (source === 'apis') setSelectedApi(m.selected);
-            else setSelected(m.selected);
-            // The same request can be visible in either tab; keep edits in sync.
-            setSelectedApi((previous) => (previous?.id === m.selected.id ? m.selected : previous));
-            setSelected((previous) => (previous?.id === m.selected.id ? m.selected : previous));
-          }
-        }
+        if (
+          'selected' in m &&
+          (!m.selected ||
+            (m.selectedSource !== 'apis' &&
+              (!requestedHistoryId.current || requestedHistoryId.current === m.selected.id)))
+        )
+          setSelected(m.selected ?? undefined);
         if ('preview' in m) setPreview(m.preview ?? undefined);
       }
       if (m.type === 'showScenes') {
@@ -374,8 +363,7 @@ function App() {
   }, []);
   const nav: { id: Tab; label: string; icon: string; count?: number }[] = [
     { id: 'connection', label: '连接与诊断', icon: 'plug' },
-    { id: 'apis', label: 'API 请求', icon: 'radar', count: state.apis?.length ?? 0 },
-    { id: 'history', label: '请求历史', icon: 'history', count: state.history.total },
+    { id: 'apis', label: 'API 请求', icon: 'radar', count: state.history.total },
     { id: 'websocket', label: 'WebSocket', icon: 'radar', count: state.ws?.messages.total ?? 0 },
     { id: 'rules', label: 'Mock 场景', icon: 'rules', count: state.scenes?.scenes.length ?? 0 },
     {
@@ -531,38 +519,18 @@ function App() {
         {tab === 'mcp' && <McpPanel state={state} send={send} />}
         {tab === 'workflows' && <WorkflowPanel state={state} send={send} />}
         {tab === 'tests' && <TestPanel state={state} send={send} />}
-        {(tab === 'apis' || tab === 'history') && (
-          <div className="http-workspace" key={state.mode ?? 'vm'}>
-            <div className="http-tab-panel" hidden={tab !== 'apis'}>
-              <ApiCatalog
-                state={state}
-                active={tab === 'apis'}
-                selected={selectedApi}
-                onSelect={(api) => {
-                  selectionTarget.current = 'apis';
-                  setSelectedApi(undefined);
-                  send('api.select', { method: api.method, host: api.host, path: api.path });
-                }}
-                onHistory={(api) => {
-                  setHistoryApiFilter({ ...api });
-                  setTab('history');
-                }}
-              />
-            </div>
-            <div className="http-tab-panel" hidden={tab !== 'history'}>
-              <History
-                state={state}
-                selected={selected}
-                active={tab === 'history'}
-                apiFilter={historyApiFilter}
-                onSelect={(id) => {
-                  selectionTarget.current = 'history';
-                  send('history.select', { id });
-                }}
-              />
-            </div>
-          </div>
-        )}
+        <div className="http-workspace" hidden={tab !== 'apis'} key={state.mode ?? 'vm'}>
+          <HttpRequests
+            state={state}
+            selected={selected}
+            active={tab === 'apis'}
+            onSelect={(id) => {
+              requestedHistoryId.current = id;
+              setSelected((previous) => (previous?.id === id ? previous : undefined));
+              send('history.select', { id });
+            }}
+          />
+        </div>
         {tab === 'websocket' && (
           <WebSocketPanel
             state={state.ws}
@@ -1067,34 +1035,6 @@ function Connection({
     </div>
   );
 }
-function apiKey(api: Pick<ApiCatalogEntry, 'method' | 'host' | 'path'>) {
-  return `${api.method} ${api.host}${api.path}`;
-}
-function ApiRuleTags({ tags, compact = false }: { tags: ApiRuleTag[]; compact?: boolean }) {
-  if (!tags.length) return null;
-  return (
-    <span className="api-rule-tags" aria-label="已启用的匹配规则">
-      {(compact ? tags.slice(0, 1) : tags).map((tag) => (
-        <span
-          key={`${tag.kind}:${tag.conditional}`}
-          className={`tag api-rule-tag ${tag.kind} ${tag.conditional ? 'conditional' : ''}`}
-          title={tag.title}
-        >
-          {tag.label}
-        </span>
-      ))}
-      {compact && tags.length > 1 && (
-        <span
-          className="tag api-rule-more"
-          title={tags.map((tag) => `${tag.label}\n${tag.title}`).join('\n\n')}
-          aria-label={`另有 ${tags.length - 1} 类规则，打开详情查看`}
-        >
-          +{tags.length - 1}
-        </span>
-      )}
-    </span>
-  );
-}
 function formatRequestTime(value?: number) {
   return value
     ? new Date(value).toLocaleString('zh-CN', {
@@ -1107,237 +1047,15 @@ function formatRequestTime(value?: number) {
       })
     : '—';
 }
-function ApiCatalog({
-  state,
-  active,
-  selected,
-  onSelect,
-  onHistory,
-}: {
-  state: WorkbenchState;
-  active: boolean;
-  selected?: HistoryEntry;
-  onSelect: (api: ApiCatalogEntry) => void;
-  onHistory: (api: ApiCatalogEntry) => void;
-}) {
-  const [search, setSearch] = useState('');
-  const [method, setMethod] = useState('');
-  const [offset, setOffset] = useState(0);
-  const [selectedKey, setSelectedKey] = useState('');
-  const [detailFocused, setDetailFocused] = useState(false);
-  useEffect(() => {
-    if (!active || (state.mode === 'proxy' && state.engine.status !== 'running')) return;
-    const timer = setTimeout(() => send('api.query', { search, method, offset }), 250);
-    return () => clearTimeout(timer);
-  }, [active, search, method, offset, state.mode, state.engine.status]);
-  useEffect(() => {
-    if (state.apiTotal !== undefined && offset > 0 && offset >= state.apiTotal) {
-      setSelectedKey('');
-      setOffset(Math.floor(Math.max(0, state.apiTotal - 1) / 30) * 30);
-    }
-  }, [state.apiTotal, offset]);
-  const groups = useMemo(() => [...(state.apis ?? [])].sort((a, b) => b.lastAt - a.lastAt), [state.apis]);
-  const ruleTags = useMemo(
-    () => new Map(groups.map((api) => [apiKey(api), apiRuleTags(api, state.rules)])),
-    [groups, state.rules],
-  );
-  const current = groups.find((api) => apiKey(api) === selectedKey);
-  const record = selected && current && apiKey(selected) === selectedKey ? selected : undefined;
-  const visible = groups.filter(
-    (api) => (!method || api.method === method) && apiKey(api).toLowerCase().includes(search.toLowerCase()),
-  );
-  const close = () => {
-    setSelectedKey('');
-    setDetailFocused(false);
-  };
-  return (
-    <div className="history-page api-page">
-      <div className="history-toolbar">
-        <div className="search-field">
-          <Icon name="search" size={16} />
-          <input
-            aria-label="搜索 API 目录"
-            placeholder="搜索路径、域名或方法…"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setOffset(0);
-            }}
-          />
-        </div>
-        <select
-          aria-label="筛选 API 方法"
-          value={method}
-          onChange={(e) => {
-            setMethod(e.target.value);
-            setOffset(0);
-          }}
-        >
-          <option value="">所有方法</option>
-          {['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((m) => (
-            <option key={m}>{m}</option>
-          ))}
-        </select>
-      </div>
-      <div className="history-viewbar">
-        <span className="http-list-count">
-          API 目录 <b>{visible.length}</b> / {state.apiTotal ?? groups.length} 个
-        </span>
-        <span className="sort-indicator">最近调用优先</span>
-      </div>
-      <div
-        className={`api-layout ${current ? 'has-detail' : ''} ${current && detailFocused ? 'detail-focused' : ''}`}
-      >
-        <section className="api-sidebar" aria-label="API 目录">
-          <div className="api-columns" aria-hidden="true">
-            <span>方法 / 请求路径</span>
-            <span>域名</span>
-            <span>累计调用</span>
-            <span>最近调用</span>
-            <span />
-          </div>
-          {visible.map((api) => {
-            const id = apiKey(api);
-            return (
-              <div className={`api-entry ${selectedKey === id ? 'selected' : ''}`} key={id}>
-                <button
-                  className="api-group"
-                  aria-label={`查看 API ${id}`}
-                  aria-pressed={selectedKey === id}
-                  title={`${id}\n累计调用 ${api.count} 次${api.firstAt ? `\n首次发现：${new Date(api.firstAt).toLocaleString('zh-CN')}` : ''}\n最近调用：${new Date(api.lastAt).toLocaleString('zh-CN')}`}
-                  onClick={() => {
-                    setSelectedKey(id);
-                    setDetailFocused(false);
-                    onSelect(api);
-                  }}
-                >
-                  <span className="api-request">
-                    <Method method={api.method} />
-                    <strong title={api.path}>{api.path}</strong>
-                  </span>
-                  <span className="api-host-info">
-                    <small className="api-host" title={api.host}>
-                      {api.host}
-                    </small>
-                    <ApiRuleTags tags={ruleTags.get(id) ?? []} compact />
-                  </span>
-                  <b className="api-call-count">{api.count.toLocaleString()} 次</b>
-                  <time className="api-last-seen" title={new Date(api.lastAt).toLocaleString('zh-CN')}>
-                    {formatRequestTime(api.lastAt)}
-                  </time>
-                </button>
-                <button
-                  className="api-delete"
-                  aria-label={`删除 API ${id}`}
-                  title="只删除目录项，保留请求历史；下次请求会重新发现"
-                  disabled={state.busy}
-                  onClick={() => send('api.delete', { method: api.method, host: api.host, path: api.path })}
-                >
-                  <Icon name="close" size={12} />
-                </button>
-              </div>
-            );
-          })}
-          {!visible.length && (
-            <Empty
-              icon="radar"
-              title={groups.length ? '没有匹配的 API' : '暂无 API'}
-              description="在应用中触发请求后，按方法、域名和路径自动汇总。"
-            />
-          )}
-          {(offset > 0 || (state.apiTotal ?? groups.length) > 30) && (
-            <div className="pagination" aria-label="API 目录分页">
-              <Button
-                disabled={offset === 0}
-                onClick={() => {
-                  close();
-                  setOffset(Math.max(0, offset - 30));
-                }}
-              >
-                上一页
-              </Button>
-              <span>
-                {offset + 1}–{Math.min(offset + 30, state.apiTotal ?? groups.length)} /{' '}
-                {state.apiTotal ?? groups.length}
-              </span>
-              <Button
-                disabled={offset + 30 >= (state.apiTotal ?? groups.length)}
-                onClick={() => {
-                  close();
-                  setOffset(offset + 30);
-                }}
-              >
-                下一页
-              </Button>
-            </div>
-          )}
-          <p className="sidebar-hint">目录独立保存；清空或过期请求历史不会移除已发现的 API。</p>
-        </section>
-        {current && (
-          <section className="request-detail api-detail" aria-label="API 详情">
-            <div className="api-detail-overview">
-              <div className="api-detail-title">
-                <strong>API 概览</strong>
-                <button aria-label="关闭 API 详情" title="关闭详情，返回列表" onClick={close}>
-                  <Icon name="close" size={16} />
-                </button>
-              </div>
-              <code>{apiKey(current)}</code>
-              <ApiRuleTags tags={ruleTags.get(selectedKey) ?? []} />
-              <dl className="api-facts">
-                <div>
-                  <dt>累计调用</dt>
-                  <dd>{current.count.toLocaleString()} 次</dd>
-                </div>
-                <div>
-                  <dt>首次发现</dt>
-                  <dd>{formatRequestTime(current.firstAt)}</dd>
-                </div>
-                <div>
-                  <dt>最近调用</dt>
-                  <dd>{formatRequestTime(current.lastAt)}</dd>
-                </div>
-              </dl>
-              <Button onClick={() => onHistory(current)}>
-                <Icon name="history" size={14} />
-                查看调用历史
-              </Button>
-            </div>
-            {record ? (
-              <>
-                <div className="latest-request-label">最近一次请求详情</div>
-                <RequestDetails
-                  state={state}
-                  selected={record}
-                  detailFocused={detailFocused}
-                  setDetailFocused={setDetailFocused}
-                  onClose={close}
-                />
-              </>
-            ) : (
-              <Empty
-                icon="history"
-                title={state.busy ? '正在读取请求详情' : '该 API 暂无请求历史'}
-                description="API 统计独立保留。新的调用会继续记录，可在请求历史中查看每次请求。"
-              />
-            )}
-          </section>
-        )}
-      </div>
-    </div>
-  );
-}
-function History({
+function HttpRequests({
   state,
   selected,
   active,
-  apiFilter,
   onSelect,
 }: {
   state: WorkbenchState;
   selected?: HistoryEntry;
   active: boolean;
-  apiFilter?: ApiCatalogEntry;
   onSelect: (id: string) => void;
 }) {
   const [query, setQuery] = useState<HistoryQuery>({});
@@ -1347,17 +1065,15 @@ function History({
   const [detailFocused, setDetailFocused] = useState(false);
   useEffect(() => {
     setDetailOpen(!!selected);
+    if (!selected) setDetailFocused(false);
   }, [selected?.id]);
   useEffect(() => {
-    if (apiFilter) {
-      setQuery({ method: apiFilter.method, host: apiFilter.host, path: apiFilter.path });
-      setOffset(0);
-      setDetailOpen(false);
-    }
-  }, [apiFilter]);
+    if (offset > 0 && offset >= state.history.total)
+      setOffset(Math.floor(Math.max(0, state.history.total - 1) / 30) * 30);
+  }, [state.history.total, offset]);
   useEffect(() => {
     if (!active) return;
-    if (state.mode !== 'vm' && state.engine.status !== 'running') return;
+    if (state.mode === 'proxy' && state.engine.status !== 'running') return;
     const t = setTimeout(() => send('history.query', { ...query, offset }), 250);
     return () => clearTimeout(t);
   }, [query, offset, state.engine.status, state.mode, active]);
@@ -1365,7 +1081,6 @@ function History({
     () => [...state.history.items].sort((a, b) => b.startedAt - a.startedAt),
     [state.history.items],
   );
-  const group = query.host && query.path ? `${query.method ?? ''} ${query.host}${query.path}` : '';
   const historyRules = state.scenes?.scenes.flatMap((scene) => scene.httpRules) ?? state.rules;
   function update(p: Partial<HistoryQuery>) {
     setQuery((q) => ({ ...q, ...p }));
@@ -1378,7 +1093,7 @@ function History({
           <Icon name="search" size={16} />
           <input
             aria-label="搜索请求"
-            placeholder="搜索 URL、API 或备注…"
+            placeholder="搜索 URL、API、备注或标签…"
             value={query.search ?? ''}
             onChange={(e) => update({ search: e.target.value })}
           />
@@ -1468,16 +1183,6 @@ function History({
         <span className="http-list-count">
           请求记录 <b>{state.history.total.toLocaleString()}</b> 条
         </span>
-        {group && (
-          <button
-            className="active-api-filter"
-            title={`清除 API 筛选：${group}`}
-            onClick={() => update({ host: undefined, path: undefined, method: undefined })}
-          >
-            <span>{group}</span>
-            <Icon name="close" size={12} />
-          </button>
-        )}
         <div className="history-view-actions">
           <span className="sort-indicator">最新在前 · 按请求时间倒序</span>
           <Button
@@ -1491,19 +1196,22 @@ function History({
         </div>
       </div>
       <div
-        className={`history-layout ${detailOpen && selected ? 'has-detail' : ''} ${detailFocused ? 'detail-focused' : ''}`}
+        className={`history-layout ${detailOpen && selected ? 'has-detail' : ''} ${detailOpen && selected && detailFocused ? 'detail-focused' : ''}`}
       >
-        <section className="request-list">
+        <section className="request-list" aria-label="API 请求列表">
           <div className="request-columns" aria-hidden="true">
             <span>方法 / 请求路径</span>
             <span>域名</span>
-            <span>时间 / 耗时</span>
+            <span>状态码</span>
+            <span>耗时</span>
+            <span>请求时间</span>
           </div>
           {records.length ? (
             records.map((h) => (
               <button
                 className={`request-row ${selected?.id === h.id ? 'selected' : ''}`}
                 key={h.id}
+                aria-label={`查看请求 ${h.method} ${h.host}${h.path} ${formatRequestTime(h.startedAt)}`}
                 aria-pressed={selected?.id === h.id}
                 onClick={() => {
                   setDetailOpen(true);
@@ -1513,40 +1221,41 @@ function History({
                 <div className="request-summary">
                   <Method method={h.method} />
                   <strong title={h.url}>{h.path}</strong>
-                  <span
-                    className={`http-status ${h.error || (h.response?.status ?? (h as unknown as { status?: number }).status ?? 0) >= 400 ? 'failed' : ''}`}
-                  >
-                    {h.response?.status ??
-                      (h as unknown as { status?: number }).status ??
-                      (h.error ? 'ERR' : '—')}
-                  </span>
-                  {h.mocked && <span className="mock-badge">MOCK</span>}
                 </div>
-                <small title={h.host}>{h.host}</small>
-                <div className="request-meta">
-                  <time
-                    dateTime={new Date(h.startedAt).toISOString()}
-                    title={new Date(h.startedAt).toLocaleString('zh-CN')}
-                  >
-                    {new Date(h.startedAt).toLocaleString('zh-CN', {
-                      month: '2-digit',
-                      day: '2-digit',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      second: '2-digit',
-                      hour12: false,
-                    })}
-                  </time>
-                  <span>{Math.round(h.duration)} ms</span>
+                <div className="request-host-info">
+                  <small className="request-host" title={h.host}>
+                    {h.host}
+                  </small>
+                  {h.mocked && <span className="mock-badge">MOCK</span>}
                   {(h.requestRuleId || h.responseRuleId) && <span className="rule-hit">规则命中</span>}
                 </div>
+                <span
+                  title={h.error || undefined}
+                  className={`http-status ${h.error || (h.response?.status ?? (h as unknown as { status?: number }).status ?? 0) >= 400 ? 'failed' : ''}`}
+                >
+                  {h.response?.status ??
+                    (h as unknown as { status?: number }).status ??
+                    (h.error ? 'ERR' : '—')}
+                </span>
+                <span className="request-duration">{Math.round(h.duration)} ms</span>
+                <time
+                  className="request-time"
+                  dateTime={new Date(h.startedAt).toISOString()}
+                  title={new Date(h.startedAt).toLocaleString('zh-CN')}
+                >
+                  {formatRequestTime(h.startedAt)}
+                </time>
               </button>
             ))
           ) : (
             <Empty
               icon="history"
-              title={group ? '该 API 暂无请求历史' : '暂无请求历史'}
-              description="在应用中触发请求后，这里会自动记录。已发现的 API 独立保留在 API 请求 Tab 中。"
+              title={
+                Object.values(query).some((value) => value !== undefined && value !== '')
+                  ? '没有匹配的请求'
+                  : '暂无 API 请求'
+              }
+              description="在应用中触发 HTTP 请求后，每次调用都会在这里单独记录。"
             />
           )}
           <div className="pagination">
