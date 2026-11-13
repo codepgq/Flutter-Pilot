@@ -1,4 +1,5 @@
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { Socket } from 'node:net';
 import { mkdtemp, chmod, mkdir, symlink, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -83,6 +84,90 @@ async function connect(registryRoot: string, workspace?: string, name = 'codex-t
 }
 
 describe('MCP local session transport', () => {
+  it.each([
+    ['setup_automation', 660000, {}],
+    ['connect_device', 240000, { deviceId: 'fixture-device', appId: 'dev.fixture' }],
+  ] as const)('keeps %s alive beyond the initial host deadline', async (tool, timeout, args) => {
+    const f = await fixture('long-operation', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      return { ok: true, completed: true };
+    });
+    const deadlines: number[] = [];
+    const original = Socket.prototype.setTimeout;
+    // Scale only socket deadlines so this exercises real IPC past the old 45-second limit.
+    const deadlineSpy = vi.spyOn(Socket.prototype, 'setTimeout').mockImplementation(function (
+      this: Socket,
+      milliseconds: number,
+      callback?: () => void,
+    ) {
+      deadlines.push(milliseconds);
+      return original.call(this, milliseconds >= 40000 ? milliseconds / 100 : milliseconds, callback);
+    });
+    try {
+      await expect(
+        requestSession(f.descriptor, {
+          kind: 'call',
+          tool,
+          args: { sessionId: 'long-operation', ...args },
+        }),
+      ).resolves.toEqual({ ok: true, completed: true });
+      expect(deadlines).toContain(timeout);
+      expect(deadlines).toContain(timeout + 5000);
+    } finally {
+      deadlineSpy.mockRestore();
+    }
+  });
+
+  it('discovers mobile actions, validates selectors, returns device PNG metadata and preserves uncertain errors over stdio', async () => {
+    const calls: string[] = [];
+    const f = await fixture('mobile', async (tool, args) => {
+      calls.push(tool);
+      if (tool === 'take_screenshot')
+        return {
+          ok: true,
+          source: 'device',
+          width: 400,
+          height: 800,
+          geometry: { orientation: 'PORTRAIT', rect: { x: 0, y: 0, width: 400, height: 800 } },
+          image: { mimeType: 'image/png', data: 'aW1hZ2U=' },
+        };
+      if (tool === 'double_tap') return { ok: false, code: 'DEVICE_CONNECTION_FAILED', uncertain: true };
+      return { ok: true, selector: args.selector };
+    });
+    const client = await connect(f.registryRoot, f.workspace);
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    for (const name of [
+      'setup_automation',
+      'connect_device',
+      'perform_gesture',
+      'edit_text',
+      'device_action',
+      'hide_keyboard',
+    ])
+      expect(names).toContain(name);
+    const screenshot = await client.callTool({
+      name: 'take_screenshot',
+      arguments: { sessionId: 'mobile', source: 'device', mode: 'screen' },
+    });
+    expect(screenshot.content).toContainEqual({ type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' });
+    expect(screenshot.structuredContent).toMatchObject({
+      source: 'device',
+      width: 400,
+      geometry: { orientation: 'PORTRAIT' },
+    });
+    const target = {
+      sessionId: 'mobile',
+      selector: { source: 'device', text: '允许', type: 'XCUIElementTypeButton' },
+    };
+    expect((await client.callTool({ name: 'tap', arguments: target })).isError).not.toBe(true);
+    expect((await client.callTool({ name: 'tap', arguments: { ...target, key: 'conflict' } })).isError).toBe(
+      true,
+    );
+    expect(
+      (await client.callTool({ name: 'double_tap', arguments: target })).structuredContent,
+    ).toMatchObject({ uncertain: true, code: 'DEVICE_CONNECTION_FAILED' });
+    expect(calls).toEqual(['take_screenshot', 'tap', 'double_tap']);
+  });
   it.each(['missing', 'unsafe'] as const)(
     'discovers and reads usage guides over stdio with a %s registry and no IDE',
     async (registryState) => {

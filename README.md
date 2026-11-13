@@ -4,7 +4,7 @@
 
 **Flutter 运行时调试与 Agent 联调工作台**，面向 **VS Code 和 Cursor**。支持通过 **Flutter VM WebSocket 零源码记录 API、实验性运行时 Dio Mock**，也保留 HTTP/HTTPS 代理、双向修改、转发、手动断点和请求历史。
 
-配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key 精确操作页面，减少逐步截图识别的耗时与 token 消耗。
+配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key、文字或语义定位页面，通过 VM 或设备输入操作，减少逐步截图识别的耗时与 token 消耗。
 
 当前版本为 **0.0.14**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
 
@@ -12,7 +12,9 @@
 
 **0.0.12 更新**：同步远端最新版并重新构建 Cursor 安装包，包含可持久保存和切换的统一 HTTP / WebSocket Mock 场景，MCP 同步提供场景查询、激活和停用；侧栏与工作台新增 App 当前屏幕和滚动长截图，保存 PNG 并自动预览。
 
-**MCP 全能力提示词**：25 个工具均有同名独立 Prompt，包括 `hot_reload` / `hot_restart` 和截图工具；保留四个场景模板，共 29 个。每个工具提示词提供操作步骤和生产参数定义，新增能力漏写模板会被检查发现。
+**本轮源码扩展**：新增私有 Appium 设备通道，支持无 Key 定位、多指手势、文本编辑、键盘和系统操作，详见 [移动交互指南](docs/mobile-automation.md)。尚未发布或安装本轮改动。
+
+**MCP 全能力提示词**：42 个工具均有同名独立 Prompt，包括 `hot_reload` / `hot_restart` 和截图工具；保留四个场景模板，共 46 个。每个工具提示词提供操作步骤和生产参数定义，新增能力漏写模板会被检查发现。
 
 **0.0.6 修复 Cursor 设置卡死和已有 VM 会话补查恢复**：打开工作台会重新补查先前已运行的 Flutter Debug 会话；新增 MCP `hot_reload` / `hot_restart`，精确控制当前 VM 绑定的 IDE 调试会话。
 
@@ -92,16 +94,19 @@ MCP 服务名称和客户端配置项名称均为 **`flutter-pilot`**；插件�
 3. 按客户端提示加载配置、信任或批准项目 MCP；必要时重连或新建会话。**已配置不代表客户端已连接**，实际握手状态在工作台显示。
 4. 让 Agent 使用 `flutter-pilot` 的 `get_usage_guide` 和 `list_sessions`，选择对应项目后执行任务。
 
-Agent 可按 `ValueKey<String/int>` 查找、点击、输入和滚动，诊断当前界面的 Key 问题；也可查询 HTTP 请求和业务 WebSocket 消息、重载规则并控制采集与 Mock。场景由 Agent 编辑项目的 `.flutter-pilot/scenes.json`，`reload_rules` 整份重载，`list_scenes` 查询，`activate_scene` / `deactivate_scene` 统一控制 HTTP / WS Mock。激活状态持久保存，重连和重开 IDE 后自动恢复。多状态测试逐个切换场景，分别检查新网络记录和页面结果；Key 用于日常精确交互，视觉样式和布局验收再补充截图。
+Agent 可按 `ValueKey<String/int>`、文字、语义、类型、祖先或快照引用定位；连接设备后支持完整手势、原生编辑器与系统 UI，也可诊断当前界面的 Key 问题；也可查询 HTTP 请求和业务 WebSocket 消息、重载规则并控制采集与 Mock。场景由 Agent 编辑项目的 `.flutter-pilot/scenes.json`，`reload_rules` 整份重载，`list_scenes` 查询，`activate_scene` / `deactivate_scene` 统一控制 HTTP / WS Mock。激活状态持久保存，重连和重开 IDE 后自动恢复。多状态测试逐个切换场景，分别检查新网络记录和页面结果；Key 用于日常精确交互，视觉样式和布局验收再补充截图。
 
 WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服务端消息，`send_ws_message` 通过 App 当前真实 WS 连接发给服务端。均需开启 WS 采集并确认连接已接入，并选择准确的在线连接；不新建连接。可传原始 `text`，或传 `topic` 和 `data` 组装为 `{"topic": "...", "data": ...}`；自定义业务协议使用完整原始文本。真实发送经过当前 outbound 规则，可能被替换或丢弃；工具调用成功后仍需核对消息和业务结果。
 
-服务提供 `overview`、`http`、`ws`、`ui`、`workflow` 五个指南主题，以及 29 个 MCP 提示模板：保留 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，全部 25 个工具另有同名独立模板，包含 `hot_reload` 和 `hot_restart`。每个工具模板提供准备、操作、验证步骤及与工具共用的参数 schema；新增工具遗漏模板会使类型或测试检查失败。指南可通过工具或资源读取；支持 Prompts 的客户端可按需读取并填写任务。Agent 通过 `tools/list` 获取可调用能力，初始化说明与 Prompts 补充用法；是否主动使用仍取决于客户端和 Agent。
+服务提供 `overview`、`http`、`ws`、`ui`、`workflow` 五个指南主题，以及 46 个 MCP 提示模板：保留 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，全部 42 个工具另有同名独立模板，包含 `hot_reload` 和 `hot_restart`。每个工具模板提供准备、操作、验证步骤及与工具共用的参数 schema；新增工具遗漏模板会使类型或测试检查失败。指南可通过工具或资源读取；支持 Prompts 的客户端可按需读取并填写任务。Agent 通过 `tools/list` 获取可调用能力，初始化说明与 Prompts 补充用法；是否主动使用仍取决于客户端和 Agent。
 
 | 能力 | MCP 工具及同名 Prompt |
 | --- | --- |
 | 指南与会话 | `get_usage_guide`、`list_sessions` |
 | 热更新 | `hot_reload`、`hot_restart` |
+| 设备自动化           | `get_automation_status`、`setup_automation`、`connect_device`、`disconnect_device`                       |
+| 手势                 | `double_tap`、`long_press`、`drag`、`swipe`、`pinch`、`rotate_gesture`、`perform_gesture`                |
+| 编辑与系统           | `edit_text`、`press_key`、`get_keyboard_state`、`hide_keyboard`、`editor_action`、`device_action`        |
 | 界面查询与操作 | `get_ui_snapshot`、`find_widget`、`tap`、`enter_text`、`scroll`、`wait_for_widget`、`inspect_key_issues` |
 | App 截图 | `list_screenshot_targets`、`take_screenshot` |
 | 网络状态与 HTTP 记录 | `get_network_status`、`get_requests`、`get_request` |
@@ -122,7 +127,7 @@ WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服�
 
 Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `hot_restart` 重置内存并重新执行应用入口。修改 Mock 后先调用 `reload_rules`，再按场景热重启并检查新请求与 UI；启动首请求可能早于 Mock 重新注入。两个工具仅控制当前 VM 绑定的 IDE Flutter Debug 会话。
 
-`get_usage_guide` 不需要在线插件会话；其他操作需要相应的插件会话，截图、UI 和热更新还需要可用的 Flutter Debug VM，UI 能力取决于运行时探测。工具参数、配置范围、使用限制和验收范围见 [MCP 使用说明](docs/mcp.md) 与 [验收记录](docs/validation.md)。
+`get_usage_guide` 不需要在线插件会话；其他操作需要相应的插件会话，Flutter 结构、VM 截图和热更新需要可用的 Debug VM；原生与系统操作需要设备自动化通道。能力按实际平台及动作报告。工具参数、配置范围、使用限制和验收范围见 [MCP 使用说明](docs/mcp.md) 与 [验收记录](docs/validation.md)。
 
 ## 环境要求与兼容范围
 

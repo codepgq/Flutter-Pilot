@@ -92,7 +92,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-
 ### zod 4.6.7
 
 许可：MIT
@@ -118,7 +117,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
 
 ### smol-toml 1.9.1
 
@@ -148,7 +146,6 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 
 ### jsonc-parser 3.3.1
 
@@ -202,3 +199,44 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+## fast-xml-parser 5.12.0
+
+许可：MIT。用于本机解析 Android / iOS 可访问节点 XML。
+
+MIT License
+
+Copyright (c) 2017 Amit Kumar Gupta
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+## fast-xml-parser 的 MIT 依赖
+
+以下依赖同样采用 MIT，适用上一节完整许可正文；版本来自本项目锁文件，保留其原始版权声明：
+
+- fast-xml-builder 1.3.2：Copyright (c) 2026 Natural Intelligence
+- is-unsafe 2.0.3：Copyright (c) 2026 Natural Intelligence
+- path-expression-matcher 1.6.2：Copyright (c) 2024
+- strnum 2.5.1：Copyright (c) 2021 Natural Intelligence
+- xml-naming 0.3.0：Copyright (c) 2026 Natural Intelligence
+- @nodable/entities 3.1.0：发行包 package.json 声明 MIT，作者 Amit Gupta；该发行包未附单独 LICENSE 文件。
+
+## 按需安装的 Appium 设备环境
+
+Appium 3.9.0、UiAutomator2 Driver 8.7.3、XCUITest Driver 12.22.8 及其依赖通过独立锁文件安装到用户私有目录，不随 VSIX 捆绑 node_modules。各包的原始 LICENSE / NOTICE 保留在安装目录中。Flutter Pilot 对锁定 XCUITest / WDA 添加具备版本检查的本地附着适配器，以保护已有模拟器与其他进程；来源和版本见 resources/automation/package-lock.json，适配器见 src/automation/runtime.ts。

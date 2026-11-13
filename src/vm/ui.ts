@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { VmRpc } from './client';
 import { dartLiteral } from './injection';
+import { uiSelectorSchema } from '../automation/tools';
+import { validateTracks } from '../automation/gestures';
 
 export interface UiResult {
   ok: boolean;
@@ -24,6 +26,14 @@ type EventRpc = VmRpc & {
 };
 const tools = new Set([
   'probe',
+  'get_ui_geometry',
+  'get_scroll_state',
+  'perform_gesture',
+  'edit_text',
+  'press_key',
+  'get_keyboard_state',
+  'hide_keyboard',
+  'editor_action',
   'get_ui_snapshot',
   'find_widget',
   'tap',
@@ -119,11 +129,30 @@ export class VmUiController {
       );
     };
     if (
-      (['find_widget', 'tap', 'enter_text', 'scroll', 'wait_for_widget'].includes(tool) &&
-        !validKey(args.key)) ||
+      ([
+        'find_widget',
+        'get_scroll_state',
+        'tap',
+        'enter_text',
+        'edit_text',
+        'scroll',
+        'wait_for_widget',
+      ].includes(tool) &&
+        !(validKey(args.key) || uiSelectorSchema.safeParse(args.selector).success)) ||
       (args.ancestor !== undefined && !validKey(args.ancestor))
     )
-      return failure('INVALID_ARGUMENT', '请提供字符串或安全整数类型的稳定 ValueKey。');
+      return failure('INVALID_ARGUMENT', '请提供有效的组合选择器或字符串／安全整数 ValueKey。');
+    if (args.selector !== undefined && !uiSelectorSchema.safeParse(args.selector).success)
+      return failure('INVALID_ARGUMENT', '选择器无效。');
+    if (args.scopeSelector !== undefined && !uiSelectorSchema.safeParse(args.scopeSelector).success)
+      return failure('INVALID_ARGUMENT', '查找范围无效。');
+    if (tool === 'perform_gesture') {
+      try {
+        validateTracks(args.tracks as any, { x: 0, y: 0, width: 100000, height: 100000 });
+      } catch {
+        return failure('INVALID_ARGUMENT', '手势轨迹无效。');
+      }
+    }
     if (tool === 'enter_text' && (typeof args.text !== 'string' || args.text.length > 16384))
       return failure('INVALID_ARGUMENT', '输入文本必须为字符串，且不超过 16384 个字符。');
     if (
@@ -252,6 +281,7 @@ export class VmUiController {
           .filter((line) => !line.trimStart().startsWith('//'))
           .join(' ')
           .replaceAll('__SESSION__', dartLiteral(this.tag))
+          .replaceAll('__REF_SESSION__', dartLiteral(`${this.tag}:${generation}`))
           .replaceAll('__LOCATION__', location ? 'creationLocation' : '((dynamic e) => null)');
         const result = await this.evaluate(
           isolate.id,

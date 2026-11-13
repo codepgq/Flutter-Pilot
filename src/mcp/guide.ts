@@ -1,3 +1,4 @@
+import { automationGuide, automationInstructions } from '../automation/prompts';
 /** Agent-facing reference, bundled into MCP so it is available even without an IDE session. */
 export const guideTopics = ['overview', 'http', 'ws', 'ui', 'workflow'] as const;
 export type GuideTopic = (typeof guideTopics)[number];
@@ -9,7 +10,7 @@ get_usage_guide 无需 sessionId，插件未运行也能读取；也可通过 re
 每个 tools/list 工具都有同名 MCP Prompt，可通过 prompts/list 与 prompts/get 按需读取操作步骤和参数；另保留 http_mock/websocket_mock/flutter_ui/mock_workflow 场景模板。客户端未加载 Prompts 时仍以本初始化说明、tools/list 描述和 get_usage_guide 发现能力。
 规则使用 Agent 自身的文件编辑能力维护，通过 get_network_status 获取准确路径，保留已有规则；保存后 reload_rules，再 activate_scene 统一开启所需采集/Mock，再操作 UI、查询记录验证。MCP 本身不提供文件编辑或规则 CRUD。
 需要应用源码变更或重新进入启动状态时，通过 hot_reload 保留状态热重载，或 hot_restart 重置内存并重新执行入口；仅支持当前VM准确对应的Cursor/VS Code Flutter Debug会话。修改Mock文件先reload_rules，热重启不会代替规则加载，也不保证启动首请求已被Mock；重启后检查网络状态并用新记录和UI验证。
-所有运行时工具必须明确 sessionId。正式 UI 定位只用 ValueKey<String/int>；先 get_ui_snapshot 发现 Key，再 find_widget/ancestorKey 确认唯一，缺 Key 用 inspect_key_issues 定位后由编码 Agent 修复，不回退文本或坐标。UI 超时先检查结果，不自动重试。
+所有运行时工具必须明确 sessionId。UI 优先 Key，也支持显式文字、语义、类型、祖先范围、快照引用和坐标；不静默更换定位策略。先读取快照并确认唯一。设备连接后 auto 使用系统输入，失败不换通道重放。完整移动交互工具：${automationInstructions}。UI 超时先检查结果，不自动重试。
 WS主动消息用inject_ws_message向App注入模拟服务端事件，或send_ws_message通过App当前连接发往服务端；两者需确认WS采集已接入目标连接，按业务协议传原始text或topic/data。发送可能被outbound规则替换或丢弃，需查询实际结果；成功返回不等于业务成功。
 只在用户任务范围内操作；本说明不会替代用户授权、客户端审批或保证 Agent 一定自动调用。`;
 
@@ -71,7 +72,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
     ],
     files: { scenes: '.flutter-pilot/scenes.json' },
     boundaries: [
-      '指南只读且不需要运行中的插件；实际运行需要本机 IDE 中对应项目已开启 MCP 和 Flutter Debug VM。',
+      '指南只读且不需要运行中的插件；实际运行需本机 IDE 对应项目已开启 MCP。Flutter 结构和 VM 操作需 Debug VM，原生与系统操作需设备通道。',
       '文件由编码 Agent 编辑，MCP 负责加载、开关、UI 操作与验证；不修改无关规则，不猜测会话ID或VM地址。',
       '没有可用会话时报告需在插件开启MCP；VM未连接时报告需要连接Debug App。不要声称已完成运行时验证。',
     ],
@@ -190,56 +191,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
         '调用get_ws_messages并includeBodies=true核对本次消息与页面变化；超时、取消或断线后先查询结果，不自动重试发送或注入，避免重复业务事件。',
     },
   },
-  ui: {
-    title: '发现 UI、按 Key 定位与操作 Widget',
-    purpose:
-      '开发联调优先用结构化快照和稳定Key精确定位组件、驱动多种业务状态验证，减少每步截图识别的耗时与token；视觉样式或布局验收仍需截图证据。',
-    screenshot: [
-      step('take_screenshot', { ...selected, mode: 'screen' }),
-      '返回当前 Flutter App 的 MCP PNG 图片；长图先查询当前可见的向下滚动区域，选择准确目标。',
-      step('list_screenshot_targets', selected),
-      step('take_screenshot', {
-        ...selected,
-        mode: 'long',
-        targetId: '<从 list_screenshot_targets 选择的区域ID>',
-      }),
-      '长图从顶部采集到末尾，完成或失败后尝试恢复原滚动位置。采集期间保持页面和窗口尺寸稳定；只支持普通向下滚动的 Flutter 列表，不支持嵌套、横向、反向或原生平台视图。',
-      '最高2倍逻辑像素；长图最多32屏、30000像素高、2400万像素或45秒，超限不返回不完整图像。图像不含系统状态栏、原生键盘或系统弹窗。',
-    ],
-    discovery: [
-      step('list_sessions'),
-      step('get_ui_snapshot', { ...selected, maxNodes: 200 }),
-      '从widgets读取真实的key、ancestorKeys、type、bounds、enabled/actionable及source；key对象中的value转为工具参数，字符串和整数不能互换。不要猜Key。',
-      step('find_widget', { ...selected, key: 'login.submit', ancestorKey: 'login.page' }),
-      '确认范围内唯一且可操作。多个相同Key用ancestorKey缩小范围；UniqueKey、自定义Key子类或对象身份Key不能作稳定选择器。',
-    ],
-    examples: [
-      step('enter_text', { ...selected, key: 'login.username', ancestorKey: 'login.page', text: 'demo' }),
-      step('wait_for_widget', { ...selected, key: 'login.submit', state: 'actionable', timeoutMs: 5000 }),
-      step('tap', { ...selected, key: 'login.submit', ancestorKey: 'login.page' }),
-      step('wait_for_widget', { ...selected, key: 'home.page', state: 'present', timeoutMs: 5000 }),
-      step('scroll', {
-        ...selected,
-        key: 'orders.list',
-        direction: 'down',
-        targetKey: 'order.42',
-        maxSteps: 10,
-        timeoutMs: 10000,
-      }),
-      step('find_widget', { ...selected, key: 42, ancestorKey: 'orders.list' }),
-    ],
-    diagnosis: [
-      'NOT_FOUND只说明当前挂载树未找到，可能页面未进入或懒加载尚未创建；先确认页面，再有界滚动或等待。',
-      step('inspect_key_issues', { ...selected, maxNodes: 200 }),
-      'MISSING_KEY/UNSTABLE_KEY由编码Agent结合source修复业务源码，加入稳定ValueKey（列表用业务ID，不用位置索引），热重载后重新验证。不能用文本点击绕过问题，也不必给每个布局节点加Key。',
-      step('hot_reload', { ...selected, timeoutMs: 30000 }),
-      '源码修改需先保存；hot_reload保留现有页面状态，不重新执行main/initState。需要重置内存状态时显式选择hot_restart，随后重新读取快照；编译失败时修复源码，不自动改用热重启。',
-      'AMBIGUOUS_KEY需缩小父范围；AMBIGUOUS_ACTION_TARGET/AMBIGUOUS_SCROLL_TARGET需给具体交互/滚动目标加稳定Key。',
-      '遮挡/禁用应按正常业务导航解除，不能绕过命中测试。超时或连接失效先检查界面和网络结果，不自动重放点击；HotRestart后重新读取界面。',
-    ],
-    boundaries:
-      '仅当前挂载界面，不是全仓静态审计。文本输入模拟Flutter编辑协议，支持formatter/onChanged，但不覆盖真实IME组合输入；点击/滚动使用pointer事件，不直接调用回调。',
-  },
+  ui: { ...automationGuide() },
   workflow: {
     title: '按需主动调用：规则文件 → UI 操作 → 网络与页面验证',
     steps: [
@@ -254,9 +206,9 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       '检查loaded和status.scene.runtime，修复错误；使用activate_scene激活目标场景。',
       '场景需要重新执行应用入口时，按lifecycle调用hot_restart；仅修改源码且需保留页面状态时选择hot_reload。两者都通过MCP调用，无需另开终端。',
       step('get_ui_snapshot', { ...selected, maxNodes: 200 }),
-      '读取真实Key后find_widget确认范围与状态，再tap/enter_text/scroll/wait_for_widget。',
+      '从快照选择真实 Key 或明确的文字、语义、类型和祖先条件，find_widget 确认唯一后操作及等待。',
       '查询新产生的HTTP记录或WS消息详情，并重新取UI快照/查找目标验证结果；单纯loaded或runtimeApplied不等于已命中规则。',
-      '出现Key缺陷由编码Agent修改业务源码并复验；完成后报告改动、命中证据、当前开关和未验证项；按用户要求恢复临时开关或规则。',
+      '需要稳定业务 Key 时可修改源码并复验；无 Key 页面可使用显式选择器。完成后报告改动、命中证据、当前开关和未验证项；按用户要求恢复临时开关或规则。',
     ],
     lifecycle: {
       scope:

@@ -1,11 +1,34 @@
 (() {
-  final state = <String, dynamic>{'active': true, 'pointer': 734000};
+  final state = <String, dynamic>{'active': true, 'pointer': 734000, 'snapshot': 0, 'refs': <String, dynamic>{}};
   final locationFor = __LOCATION__;
   final binding = WidgetsBinding.instance;
   Map<String, dynamic> fail(String code, String message) => {'ok': false, 'code': code, 'message': message};
   bool stable(dynamic key) => key != null && (key.runtimeType == const ValueKey<String>('').runtimeType || key.runtimeType == const ValueKey<int>(0).runtimeType);
   dynamic keyData(dynamic key) => stable(key) ? {'type': key.value is String ? 'string' : 'int', 'value': key.value} : null;
   bool matches(dynamic key, dynamic expected) => stable(key) && expected != null && ((expected['type'] == 'string' && key.value is String) || (expected['type'] == 'int' && key.value is int)) && key.value == expected['value'];
+  // BEGIN_UNICODE_EDIT_RANGE
+  Map<String, dynamic> editTextRange(String text, int base, int extent, dynamic args) {
+    final action = args['action'];
+    var start = base, end = extent;
+    if (action == 'move_cursor') start = end = args['offset'] as int;
+    else if (action == 'select_range') { start = args['start'] as int; end = args['end'] as int; }
+    if (start < 0 || end < 0 || start > text.length || end > text.length) {
+      return {'ok': false, 'code': action == 'move_cursor' || action == 'select_range' ? 'INVALID_ARGUMENT' : 'INVALID_SELECTION', 'message': '光标或选区超出文本范围。'};
+    }
+    final boundaries = <int>[0];
+    for (final character in text.characters) boundaries.add(boundaries.last + character.length);
+    if (!boundaries.contains(start) || !boundaries.contains(end)) {
+      return {'ok': false, 'code': 'INVALID_TEXT_BOUNDARY', 'message': '光标或选区不能位于字符簇内部，请使用完整字符的 UTF-16 边界。'};
+    }
+    if (action == 'delete') {
+      var from = start < end ? start : end;
+      final to = start < end ? end : start;
+      if (from == to && from > 0) from = boundaries[boundaries.indexOf(from) - 1];
+      return {'ok': true, 'text': text.replaceRange(from, to, ''), 'start': from, 'end': from};
+    }
+    return {'ok': true, 'text': text, 'start': start, 'end': end};
+  }
+  // END_UNICODE_EDIT_RANGE
   List<Element> tree([Element? root]) {
     final found = <Element>[];
     void visit(Element e) {
@@ -17,9 +40,54 @@
     if (start != null) visit(start);
     return found;
   }
+  String? textFor(Element e) {
+    if (e.widget is Text) return (e.widget as Text).data ?? (e.widget as Text).textSpan?.toPlainText();
+    if (e.widget is EditableText && !(e.widget as EditableText).obscureText) return (e.widget as EditableText).controller.text;
+    return null;
+  }
+  String? semanticsFor(Element e) {
+    if (e.widget is Semantics) return (e.widget as Semantics).properties.label;
+    try { final dynamic w = e.widget; if (w.semanticsLabel is String) return w.semanticsLabel as String; } catch (_) {}
+    return null;
+  }
+  bool selectorMatches(Element e, dynamic selector) {
+    if (selector == null) return false;
+    if (selector['key'] != null && !matches(e.widget.key, {'type': selector['key'] is int ? 'int' : 'string', 'value': selector['key']})) return false;
+    if (selector['type'] != null && e.widget.runtimeType.toString() != selector['type']) return false;
+    if (selector['text'] != null && textFor(e) != selector['text']) return false;
+    if (selector['semantics'] != null && semanticsFor(e) != selector['semantics']) return false;
+    if (selector['ref'] != null) {
+      final record = state['refs'][selector['ref']];
+      if (record == null || !(record['element'] as Element).mounted || !identical(record['widget'], (record['element'] as Element).widget)) throw 'STALE_REFERENCE';
+      if (!identical(record['element'], e)) return false;
+      final render = e.findRenderObject();
+      final bounds = render is RenderBox && render.attached && render.hasSize ? {'x': render.localToGlobal(Offset.zero).dx, 'y': render.localToGlobal(Offset.zero).dy, 'width': render.size.width, 'height': render.size.height} : null;
+      if (record['bounds'].toString() != bounds.toString() || record['text'] != textFor(e)) throw 'STALE_REFERENCE';
+    }
+    return true;
+  }
   List<Element> select(dynamic args) {
     final all = tree();
     if (all.length >= 10000) throw 'TREE_LIMIT';
+    if (args['selector'] != null) {
+      final selector = args['selector'];
+      if (selector['source'] == 'device' || selector['accessibilityId'] != null || selector['resourceId'] != null) throw 'INVALID_SELECTOR';
+      if (selector['ref'] != null && state['refs'][selector['ref']] == null) throw 'STALE_REFERENCE';
+      final ancestors = selector['ancestor'] == null ? null : all.where((e) => selectorMatches(e, selector['ancestor'])).toSet();
+      final scope = args['scopeSelector'] == null ? null : select({'selector': args['scopeSelector']}).toSet();
+      return all.where((e) {
+        if (!selectorMatches(e, selector)) return false;
+        if (scope != null) {
+          var scoped = false;
+          e.visitAncestorElements((parent) { if (scope.contains(parent)) { scoped = true; return false; } return true; });
+          if (!scoped) return false;
+        }
+        if (ancestors == null) return true;
+        var inside = false;
+        e.visitAncestorElements((parent) { if (ancestors.contains(parent)) { inside = true; return false; } return true; });
+        return inside;
+      }).toList();
+    }
     if (args['ancestor'] != null) {
       final parents = all.where((e) => matches(e.widget.key, args['ancestor'])).toList();
       if (parents.length != 1) throw parents.isEmpty ? 'ANCESTOR_NOT_FOUND' : 'AMBIGUOUS_ANCESTOR';
@@ -30,10 +98,14 @@
   bool interactive(Element e) {
     if (e.widget is EditableText || e.widget is Scrollable) return true;
     try { final dynamic w = e.widget; w.onPressed; return true; } catch (_) {}
-    try { final dynamic w = e.widget; if (w.onTap != null || w.onLongPress != null || w.onPanUpdate != null) return true; } catch (_) {}
+    for (final name in ['tap', 'double', 'long', 'pan', 'scale']) {
+      try { final dynamic w = e.widget; if ((name == 'tap' && w.onTap != null) || (name == 'double' && w.onDoubleTap != null) || (name == 'long' && w.onLongPress != null) || (name == 'pan' && w.onPanUpdate != null) || (name == 'scale' && w.onScaleUpdate != null)) return true; } catch (_) {}
+    }
     return false;
   }
   bool enabled(Element e) {
+    // Material navigation buttons use a null override to invoke their normal navigation action.
+    if (['BackButton', 'CloseButton', 'DrawerButton', 'EndDrawerButton'].contains(e.widget.runtimeType.toString())) return true;
     try { final dynamic w = e.widget; if (w.onPressed == null) return false; } catch (_) {}
     if (e.widget is EditableText) return !(e.widget as EditableText).readOnly;
     try { final dynamic w = e.widget; if (w.enabled == false) return false; } catch (_) {}
@@ -77,9 +149,8 @@
     final point = box == null ? null : box.localToGlobal(box.size.center(Offset.zero));
     dynamic location;
     try { location = locationFor(e); } catch (_) {}
-    String? text;
-    if (e.widget is Text) text = (e.widget as Text).data;
-    if (e.widget is EditableText && !(e.widget as EditableText).obscureText) text = (e.widget as EditableText).controller.text;
+    final text = textFor(e);
+    final semantics = semanticsFor(e);
     final path = <dynamic>[];
     e.visitAncestorElements((parent) {
       if (stable(parent.widget.key)) path.insert(0, keyData(parent.widget.key));
@@ -87,10 +158,126 @@
     });
     final target = actionTarget(e);
     final isEnabled = enabled(e) && (target == null || enabled(target));
-    return {'type': e.widget.runtimeType.toString(), 'key': keyData(e.widget.key), 'ancestorKeys': path, 'enabled': isEnabled, 'actionable': target != null && isEnabled && point != null && hit(e, box, point), 'visible': point != null && hit(e, box, point), if (location != null) 'source': location, if (text != null) 'text': text.length > 1024 ? text.substring(0, 1024) : text, if (box != null) 'bounds': {'x': box.localToGlobal(Offset.zero).dx, 'y': box.localToGlobal(Offset.zero).dy, 'width': box.size.width, 'height': box.size.height}};
+    final inputs = tree(e).where((child) => child.widget is EditableText).toList();
+    final input = inputs.length == 1 ? inputs.single.widget as EditableText : null;
+    dynamic inputBounds;
+    dynamic inputFieldBounds;
+    dynamic selectionPoint;
+    if (input != null) {
+      final render = ((inputs.single as StatefulElement).state as EditableTextState).renderEditable;
+      if (render.attached && render.hasSize && !render.size.isEmpty) {
+        final origin = render.localToGlobal(Offset.zero);
+        inputBounds = {'x': origin.dx, 'y': origin.dy, 'width': render.size.width, 'height': render.size.height};
+      }
+      // iOS accessibility may expose the enclosing field rather than its text render box.
+      inputs.single.visitAncestorElements((parent) {
+        if (!['TextField', 'CupertinoTextField'].contains(parent.widget.runtimeType.toString())) return true;
+        final fieldBox = boxFor(parent);
+        if (fieldBox != null) {
+          final origin = fieldBox.localToGlobal(Offset.zero);
+          inputFieldBounds = {'x': origin.dx, 'y': origin.dy, 'width': fieldBox.size.width, 'height': fieldBox.size.height};
+        }
+        return false;
+      });
+    }
+    if (input != null && input.controller.selection.isValid && !input.controller.selection.isCollapsed) {
+      final render = ((inputs.single as StatefulElement).state as EditableTextState).renderEditable;
+      if (render is RenderEditable) {
+        final point = render.localToGlobal(render.getLocalRectForCaret(TextPosition(offset: (input.controller.selection.start + input.controller.selection.end) ~/ 2)).center + const Offset(2, 0));
+        selectionPoint = {'x': point.dx, 'y': point.dy};
+      }
+    }
+    return {'type': e.widget.runtimeType.toString(), 'key': keyData(e.widget.key), 'ancestorKeys': path, 'enabled': isEnabled, 'actionable': target != null && isEnabled && point != null && hit(e, box, point), 'visible': point != null && hit(e, box, point), 'actions': [if (target != null) ...['tap', 'double_tap', 'long_press', 'drag', 'swipe', 'pinch', 'rotate_gesture'], if (tree(e).where((child) => child.widget is EditableText).length == 1) ...['enter_text', 'edit_text'], if (tree(e).where((child) => child.widget is Scrollable).length == 1) 'scroll'], if (semantics != null) 'semantics': semantics, if (location != null) 'source': location, if (text != null) 'text': text.length > 1024 ? text.substring(0, 1024) : text, if (selectionPoint != null) 'selectionPoint': selectionPoint, if (inputBounds != null) 'inputBounds': inputBounds, if (inputFieldBounds != null) 'inputFieldBounds': inputFieldBounds, if (input != null) ...{'textLength': input.controller.text.length, 'focused': input.focusNode.hasFocus, 'selection': {'start': input.controller.selection.start, 'end': input.controller.selection.end}}, if (e.widget is EditableText && (e.widget as EditableText).obscureText) 'obscured': true, if (box != null) 'bounds': {'x': box.localToGlobal(Offset.zero).dx, 'y': box.localToGlobal(Offset.zero).dy, 'width': box.size.width, 'height': box.size.height}};
   }
   Future<void> frame() async {
+    binding.scheduleFrame();
     await binding.endOfFrame.timeout(const Duration(milliseconds: 800), onTimeout: () {});
+  }
+  Map<String, dynamic> geometry() {
+    final views = binding.renderViews.toList();
+    if (views.length != 1) throw 'AMBIGUOUS_VIEW';
+    final view = views.single.flutterView;
+    return {'ok': true, 'width': view.physicalSize.width / view.devicePixelRatio, 'height': view.physicalSize.height / view.devicePixelRatio, 'devicePixelRatio': view.devicePixelRatio, 'viewId': view.viewId};
+  }
+  Future<Map<String, dynamic>> gesture(dynamic tracks) async {
+    final g = geometry(), viewId = g['viewId'] as int;
+    final active = <int, Offset>{}, positions = <int, Offset>{};
+    final ids = <int>[];
+    final clock = Stopwatch()..start();
+    for (var i = 0; i < tracks.length; i++) ids.add(++state['pointer']);
+    try {
+      final ticks = (tracks as List).map((t) => (t['actions'] as List).length).reduce((a, b) => a > b ? a : b);
+      for (var tick = 0; tick < ticks; tick++) {
+        if (state['active'] != true) return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
+        var duration = 0;
+        for (var i = 0; i < tracks.length; i++) {
+          final actions = tracks[i]['actions'] as List;
+          if (tick < actions.length) { final d = (actions[tick]['duration'] ?? 0) as int; if (d > duration) duration = d; }
+        }
+        final starts = Map<int, Offset>.from(positions);
+        final steps = duration == 0 ? 1 : (duration / 16).ceil();
+        for (var step = 1; step <= steps; step++) {
+          if (duration > 0) await Future<void>.delayed(Duration(milliseconds: (duration / steps).ceil()));
+          if (state['active'] != true) return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
+          for (var i = 0; i < tracks.length; i++) {
+            final actions = tracks[i]['actions'] as List;
+            if (tick >= actions.length) continue;
+            final a = actions[tick], kind = a['type'];
+            final id = kind == 'pointerDown' ? (ids[i] = ++state['pointer']) : ids[i];
+            if (kind == 'pointerMove') {
+              final end = Offset((a['x'] as num).toDouble(), (a['y'] as num).toDouble());
+              if (end.dx < 0 || end.dy < 0 || end.dx >= g['width'] || end.dy >= g['height']) return fail('POINT_OUT_OF_BOUNDS', '手势坐标超出 Flutter 窗口。');
+              final start = starts[i] ?? end, point = start + (end - start) * (step / steps);
+              final previous = positions[i] ?? point;
+              positions[i] = point;
+              if (active.containsKey(id)) { active[id] = point; GestureBinding.instance.handlePointerEvent(PointerMoveEvent(pointer: id, position: point, delta: point - previous, viewId: viewId, timeStamp: clock.elapsed)); }
+            } else if (step == steps && kind == 'pointerDown') {
+              final point = positions[i];
+              if (point == null || active.containsKey(id)) return fail('INVALID_GESTURE', '触点序列无效。');
+              active[id] = point;
+              GestureBinding.instance.handlePointerEvent(PointerDownEvent(pointer: id, position: point, viewId: viewId, timeStamp: clock.elapsed));
+            } else if (step == steps && kind == 'pointerUp') {
+              final point = active.remove(id);
+              if (point == null) return fail('INVALID_GESTURE', '触点尚未按下。');
+              GestureBinding.instance.handlePointerEvent(PointerUpEvent(pointer: id, position: point, viewId: viewId, timeStamp: clock.elapsed));
+            }
+          }
+        }
+      }
+      await frame();
+      return {'ok': true};
+    } finally {
+      for (final entry in active.entries) GestureBinding.instance.handlePointerEvent(PointerCancelEvent(pointer: entry.key, position: entry.value, viewId: viewId, timeStamp: clock.elapsed));
+    }
+  }
+  Future<Map<String, dynamic>> keyInput(dynamic names) async {
+    final named = <String, List<dynamic>>{
+      'Enter': [PhysicalKeyboardKey.enter, LogicalKeyboardKey.enter], 'Tab': [PhysicalKeyboardKey.tab, LogicalKeyboardKey.tab], 'Escape': [PhysicalKeyboardKey.escape, LogicalKeyboardKey.escape],
+      'Backspace': [PhysicalKeyboardKey.backspace, LogicalKeyboardKey.backspace], 'Delete': [PhysicalKeyboardKey.delete, LogicalKeyboardKey.delete],
+      'ArrowLeft': [PhysicalKeyboardKey.arrowLeft, LogicalKeyboardKey.arrowLeft], 'ArrowRight': [PhysicalKeyboardKey.arrowRight, LogicalKeyboardKey.arrowRight], 'ArrowUp': [PhysicalKeyboardKey.arrowUp, LogicalKeyboardKey.arrowUp], 'ArrowDown': [PhysicalKeyboardKey.arrowDown, LogicalKeyboardKey.arrowDown],
+      'Home': [PhysicalKeyboardKey.home, LogicalKeyboardKey.home], 'End': [PhysicalKeyboardKey.end, LogicalKeyboardKey.end], 'PageUp': [PhysicalKeyboardKey.pageUp, LogicalKeyboardKey.pageUp], 'PageDown': [PhysicalKeyboardKey.pageDown, LogicalKeyboardKey.pageDown], 'Space': [PhysicalKeyboardKey.space, LogicalKeyboardKey.space],
+      'Control': [PhysicalKeyboardKey.controlLeft, LogicalKeyboardKey.controlLeft], 'Shift': [PhysicalKeyboardKey.shiftLeft, LogicalKeyboardKey.shiftLeft], 'Alt': [PhysicalKeyboardKey.altLeft, LogicalKeyboardKey.altLeft], 'Meta': [PhysicalKeyboardKey.metaLeft, LogicalKeyboardKey.metaLeft],
+    };
+    final pressed = <List<dynamic>>[];
+    final clock = Stopwatch()..start();
+    try {
+      for (final name in names as List) {
+        var pair = named[name];
+        if (pair == null && name is String && name.runes.length == 1) {
+          final code = name.toLowerCase().codeUnitAt(0);
+          if (code >= 97 && code <= 122) pair = [PhysicalKeyboardKey(0x70004 + code - 97), LogicalKeyboardKey(code)];
+          else if (code >= 48 && code <= 57) pair = [PhysicalKeyboardKey(code == 48 ? 0x70027 : 0x7001e + code - 49), LogicalKeyboardKey(code)];
+        }
+        if (pair == null) return fail('UNSUPPORTED_KEY', 'Flutter 按键通道支持命名按键和拉丁字母数字；文字请使用 enter_text。');
+        if (HardwareKeyboard.instance.physicalKeysPressed.contains(pair[0])) return fail('KEY_ALREADY_PRESSED', '该按键正被用户按住。');
+        HardwareKeyboard.instance.handleKeyEvent(KeyDownEvent(physicalKey: pair[0], logicalKey: pair[1], timeStamp: clock.elapsed, character: name is String && name.length == 1 ? name : null));
+        pressed.add(pair);
+      }
+      await frame();
+      return {'ok': true};
+    } finally {
+      for (final pair in pressed.reversed) HardwareKeyboard.instance.handleKeyEvent(KeyUpEvent(physicalKey: pair[0], logicalKey: pair[1], timeStamp: clock.elapsed));
+    }
   }
   Future<Map<String, dynamic>> pointer(Element e, [dynamic scrollArgs]) async {
     final box = boxFor(e);
@@ -120,7 +307,7 @@
       down = true;
       if (scrollArgs != null) {
         for (var step = 1; step <= 12; step++) {
-          await Future<void>.delayed(const Duration(milliseconds: 16));
+          await Future<void>.delayed(Duration(milliseconds: (((scrollArgs['durationMs'] ?? 192) as num) / 12).ceil()));
           if (state['active'] != true) return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
           GestureBinding.instance.handlePointerEvent(PointerMoveEvent(pointer: id, position: start + delta * (step / 12), delta: delta / 12, viewId: viewId));
         }
@@ -161,14 +348,46 @@
     if (state['active'] != true) return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
     if (binding.rootElement == null) return fail('APP_NOT_READY', 'Flutter 尚未挂载根 Widget。');
     if (tool == 'probe') return {'ok': true, 'experimental': true, 'keyTypes': ['string', 'int']};
+    if (tool == 'get_ui_geometry') return geometry();
+    if (tool == 'perform_gesture') return gesture(args['tracks']);
+    if (tool == 'press_key') return keyInput(args['keys']);
+    if (tool == 'get_keyboard_state') {
+      final inputs = tree().where((e) => e.widget is EditableText && (e.widget as EditableText).focusNode.hasFocus).toList();
+      final views = binding.renderViews.toList();
+      return {'ok': true, 'focused': inputs.length == 1, 'shown': views.any((v) => v.flutterView.viewInsets.bottom > 0), if (inputs.length == 1) 'widget': describe(inputs.single)};
+    }
+    if (tool == 'hide_keyboard') { await SystemChannels.textInput.invokeMethod<void>('TextInput.hide'); await frame(); return {'ok': true}; }
+    if (tool == 'editor_action') {
+      final inputs = tree().where((e) => e.widget is EditableText && (e.widget as EditableText).focusNode.hasFocus).toList();
+      if (inputs.length != 1) return fail('NO_FOCUS', '当前没有唯一聚焦输入框。');
+      final actions = {'done': TextInputAction.done, 'search': TextInputAction.search, 'send': TextInputAction.send, 'go': TextInputAction.go, 'next': TextInputAction.next, 'previous': TextInputAction.previous, 'newline': TextInputAction.newline};
+      final action = actions[args['action']];
+      if (action == null) return fail('INVALID_ARGUMENT', '不支持此编辑器动作。');
+      ((inputs.single as StatefulElement).state as EditableTextState).performAction(action);
+      await frame(); return {'ok': true};
+    }
     if (tool == 'screenshot_targets') return screenshotTargets();
     if (tool == 'take_screenshot') return takeScreenshot(args);
     if (tool == 'get_ui_snapshot' || tool == 'inspect_key_issues') {
       final all = tree();
       final limit = args['limit'] ?? args['maxNodes'] ?? 200;
       if (tool == 'get_ui_snapshot') {
-        final selected = all.where((e) => e.widget.key != null || interactive(e)).toList();
-        return {'ok': true, 'widgets': selected.take(limit).map(describe).toList(), 'truncated': selected.length > limit || all.length >= 10000, 'scope': 'mounted_onstage_tree'};
+        final selected = all.where((e) => e.widget.key != null || interactive(e) || textFor(e) != null || semanticsFor(e) != null).toList();
+        state['snapshot'] = state['snapshot'] + 1;
+        final snapshotId = 'flutter:${__REF_SESSION__}:${state['snapshot']}';
+        state['refs'].clear();
+        final widgets = <Map<String, dynamic>>[];
+        final references = <Element, String>{};
+        for (var i = 0; i < selected.length && i < limit; i++) {
+          final e = selected[i], ref = '$snapshotId:$i';
+          final info = describe(e);
+          references[e] = ref;
+          String? parentRef;
+          e.visitAncestorElements((parent) { if (references.containsKey(parent)) { parentRef = references[parent]; return false; } return true; });
+          state['refs'][ref] = {'element': e, 'widget': e.widget, 'bounds': info['bounds'], 'text': textFor(e)};
+          widgets.add({...info, 'ref': ref, if (parentRef != null) 'parentRef': parentRef});
+        }
+        return {'ok': true, 'source': 'flutter', 'snapshotId': snapshotId, 'geometry': geometry(), 'widgets': widgets, 'truncated': selected.length > limit || all.length >= 10000, 'scope': 'mounted_onstage_tree'};
       }
       final issues = <Map<String, dynamic>>[];
       for (final e in all) {
@@ -195,8 +414,13 @@
     }
     final found = select(args);
     if (found.isEmpty) return fail('NOT_FOUND', '当前已挂载界面没有匹配的 Key。');
-    if (found.length > 1) return fail('AMBIGUOUS_KEY', '范围内存在多个匹配 Key。');
+    if (found.length > 1) return {...fail(args['selector'] == null ? 'AMBIGUOUS_KEY' : 'AMBIGUOUS_SELECTOR', '范围内存在多个匹配目标。'), 'candidates': found.take(10).map(describe).toList()};
     final element = found.single;
+    if (tool == 'get_scroll_state') {
+      final scrollables = tree(element).where((e) => e.widget is Scrollable).toList();
+      if (scrollables.isEmpty) return fail('NOT_SCROLLABLE', '指定区域中没有滚动组件。');
+      return {'ok': true, 'scrolling': scrollables.any((e) => ((e as StatefulElement).state as ScrollableState).position.isScrollingNotifier.value)};
+    }
     if (tool == 'find_widget') return {'ok': true, 'count': 1, 'widget': describe(element)};
     if (tool == 'tap') {
       if (!enabled(element)) return fail('NOT_ENABLED', '目标当前不可操作。');
@@ -205,17 +429,18 @@
       return pointer(target);
     }
     if (tool == 'scroll') {
-      final scrollables = tree(element).where((e) => e.widget is Scrollable).toList();
+      final scrollables = element.widget is Scrollable ? [element] : tree(element).where((e) => e.widget is Scrollable).toList();
       if (scrollables.isEmpty) return fail('NOT_SCROLLABLE', '指定 Key 下没有滚动区域。');
       if (scrollables.length != 1) return fail('AMBIGUOUS_SCROLL_TARGET', '指定 Key 下必须只有一个滚动区域。');
-      if (args['targetKey'] == null) return pointer(scrollables.single, args);
+      if (args['targetKey'] == null && args['targetSelector'] == null) return pointer(scrollables.single, args);
       final steps = args['maxSteps'] ?? 10;
       for (var step = 0; step <= steps; step++) {
         final current = select(args);
         if (current.length != 1) return fail('NOT_FOUND', '滚动区域已发生变化。');
-        final currentScrollables = tree(current.single).where((e) => e.widget is Scrollable).toList();
+        final currentScrollables = current.single.widget is Scrollable ? [current.single] : tree(current.single).where((e) => e.widget is Scrollable).toList();
         if (currentScrollables.length != 1) return fail('AMBIGUOUS_SCROLL_TARGET', '指定 Key 下必须只有一个滚动区域。');
-        final targets = tree(current.single).where((child) => matches(child.widget.key, args['targetKey'])).toList();
+        final descendants = tree(current.single).toSet();
+        final targets = args['targetSelector'] != null ? select({'selector': args['targetSelector']}).where(descendants.contains).toList() : descendants.where((child) => matches(child.widget.key, args['targetKey'])).toList();
         if (targets.length > 1) return fail('AMBIGUOUS_KEY', '滚动区域内存在多个目标 Key。');
         if (targets.length == 1 && describe(targets.single)['visible'] == true) return {'ok': true, 'steps': step, 'widget': describe(targets.single)};
         if (step == steps) return fail('SCROLL_LIMIT', '达到滚动步数上限，目标尚未可见。');
@@ -223,18 +448,51 @@
         if (moved['ok'] != true) return moved;
       }
     }
-    if (tool == 'enter_text') {
+    if (tool == 'enter_text' || tool == 'edit_text') {
       final editable = tree(element).where((e) => e.widget is EditableText).toList();
       if (editable.length != 1) return fail('AMBIGUOUS_INPUT', '指定 Key 下必须只有一个文本输入框。');
       final input = editable.single;
       final widget = input.widget as EditableText;
       if (widget.readOnly || !enabled(element)) return fail('NOT_ENABLED', '输入框为只读或已禁用。');
-      final tapped = await pointer(input);
-      if (tapped['ok'] != true) return tapped;
+      final rangeActions = ['move_cursor', 'select_range', 'delete', 'copy', 'cut', 'paste'];
+      if (tool == 'edit_text' && rangeActions.contains(args['action'])) {
+        final existing = widget.controller.value;
+        final checked = editTextRange(existing.text, existing.selection.baseOffset, existing.selection.extentOffset, args);
+        if (checked['ok'] != true) return checked;
+      }
+      if (tool != 'edit_text' || !widget.focusNode.hasFocus) {
+        final tapped = await pointer(input);
+        if (tapped['ok'] != true) return tapped;
+      }
       if (state['active'] != true) return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
       if (!input.mounted || !widget.focusNode.hasFocus) return fail('NO_FOCUS', '输入框未能获得焦点。');
       final inputState = (input as StatefulElement).state as EditableTextState;
-      final text = args['text'] as String;
+      final before = widget.controller.value;
+      if (tool == 'edit_text') {
+        final action = args['action'];
+        var value = before;
+        final range = rangeActions.contains(action) ? editTextRange(before.text, before.selection.baseOffset, before.selection.extentOffset, args) : null;
+        if (range != null && range['ok'] != true) return range;
+        if (action == 'copy' || action == 'cut') {
+          if (widget.obscureText) return fail('OBSCURED_INPUT', '不复制密码输入内容。');
+          if (action == 'copy') inputState.copySelection(SelectionChangedCause.keyboard);
+          else inputState.cutSelection(SelectionChangedCause.keyboard);
+        } else if (action == 'paste') await inputState.pasteText(SelectionChangedCause.keyboard);
+        else if (action == 'clear') value = const TextEditingValue(text: '', selection: TextSelection.collapsed(offset: 0));
+        else if (action == 'select_all') value = before.copyWith(selection: TextSelection(baseOffset: 0, extentOffset: before.text.length), composing: TextRange.empty);
+        else if (action == 'move_cursor') {
+          value = before.copyWith(selection: TextSelection.collapsed(offset: range!['start'] as int), composing: TextRange.empty);
+        } else if (action == 'select_range') {
+          value = before.copyWith(selection: TextSelection(baseOffset: range!['start'] as int, extentOffset: range['end'] as int), composing: TextRange.empty);
+        } else if (action == 'delete') {
+          value = TextEditingValue(text: range!['text'] as String, selection: TextSelection.collapsed(offset: range['start'] as int));
+        } else return fail('INVALID_ARGUMENT', '不支持此编辑操作。');
+        if (value != before) inputState.updateEditingValue(value);
+        await frame();
+        return {'ok': true, 'length': widget.controller.text.length, 'selection': {'start': widget.controller.selection.start, 'end': widget.controller.selection.end}};
+      }
+      final requested = args['text'] as String;
+      final text = args['mode'] == 'append' ? before.text + requested : requested;
       inputState.updateEditingValue(TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length)));
       await frame();
       return {'ok': true, 'length': widget.controller.text.length, 'formatted': widget.controller.text != text};
@@ -248,7 +506,7 @@
         final args = decodeArgs(encoded);
         result = await perform(tool, args);
       } catch (error) {
-        final code = error is String && (error == 'ANCESTOR_NOT_FOUND' || error == 'AMBIGUOUS_ANCESTOR' || error == 'TREE_LIMIT') ? error : 'UI_OPERATION_FAILED';
+        final code = error is String && ['ANCESTOR_NOT_FOUND', 'AMBIGUOUS_ANCESTOR', 'TREE_LIMIT', 'STALE_REFERENCE', 'INVALID_SELECTOR', 'AMBIGUOUS_VIEW'].contains(error) ? error : 'UI_OPERATION_FAILED';
         result = fail(code, 'Flutter UI 操作未能完成。');
       }
       emitEvent('flutter_pilot.vm.ui', {'session': __SESSION__, 'operationId': operationId, 'result': result});

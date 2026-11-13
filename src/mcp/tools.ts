@@ -1,9 +1,8 @@
 import { z } from 'zod';
 import { guideTopics } from './guide';
+import { automationMcpTools } from '../automation/tools';
 
 const session = { sessionId: z.string().min(1).max(256) };
-const key = z.union([z.string().min(1).max(512), z.number().int().safe()]);
-const selector = { key, ancestorKey: key.optional() };
 const timeout = z.number().int().min(100).max(30000).optional();
 const page = {
   limit: z.number().int().min(1).max(100).optional(),
@@ -52,68 +51,7 @@ export const mcpTools = {
       '通过当前 VM 绑定的 Cursor/VS Code Flutter Debug 会话热重启，重置内存并重新执行入口。先 reload_rules 并激活所需场景；返回重启确认及网络状态，启动首请求可能早于 Mock 注入，需查新记录和 UI。旧 WS 连接及 UI 对象失效；超时勿自动重试。',
     schema: z.object({ ...session, timeoutMs: timeout }).strict(),
   },
-  get_ui_snapshot: {
-    description:
-      '不知道UI Key时先读取当前界面快照，从key/ancestorKeys发现目标，再find_widget确认唯一。详细流程见get_usage_guide(topic=ui)。',
-    schema: z.object({ ...session, maxNodes: z.number().int().min(1).max(1000).optional() }).strict(),
-  },
-  list_screenshot_targets: {
-    description: '列出当前 Flutter App 可见的向下滚动区域，供长截图选择 targetId；候选仅对当前页面有效。',
-    schema: z.object(session).strict(),
-  },
-  take_screenshot: {
-    description:
-      '截取当前 Flutter App，mode=screen 为当前屏幕，mode=long 为滚动长图。长图有多个区域时先调用 list_screenshot_targets 并传 targetId；返回 PNG 图片。长图会滚动并尝试恢复位置，超时不要自动重试。',
-    schema: z
-      .object({
-        ...session,
-        mode: z.enum(['screen', 'long']),
-        targetId: z.string().min(1).max(512).optional(),
-      })
-      .strict()
-      .refine((args) => args.mode === 'long' || args.targetId === undefined),
-  },
-  find_widget: {
-    description: '按 ValueKey<String/int> 精确定位；可用 ancestorKey 缩小范围；不使用文本回退。',
-    schema: z.object({ ...session, ...selector }).strict(),
-  },
-  tap: {
-    description: '按 Key 定位并通过实际命中测试点击。超时结果可能不确定，请勿自动重试。',
-    schema: z.object({ ...session, ...selector, timeoutMs: timeout }).strict(),
-  },
-  enter_text: {
-    description: '聚焦 Key 指定的输入目标，通过 Flutter 文本编辑链路替换文本。',
-    schema: z.object({ ...session, ...selector, text: z.string().max(16384), timeoutMs: timeout }).strict(),
-  },
-  scroll: {
-    description: '在 Key 指定区域通过 pointer 拖动滚动；可有界滚动直至 targetKey 出现。',
-    schema: z
-      .object({
-        ...session,
-        ...selector,
-        direction: z.enum(['up', 'down', 'left', 'right']).optional(),
-        distance: z.number().min(1).max(2000).optional(),
-        targetKey: key.optional(),
-        maxSteps: z.number().int().min(1).max(30).optional(),
-        timeoutMs: timeout,
-      })
-      .strict(),
-  },
-  wait_for_widget: {
-    description: '有界等待 Key 目标出现、消失或可操作。未找到不代表缺少 Key。',
-    schema: z
-      .object({
-        ...session,
-        ...selector,
-        state: z.enum(['present', 'absent', 'actionable']).optional(),
-        timeoutMs: timeout,
-      })
-      .strict(),
-  },
-  inspect_key_issues: {
-    description: '诊断当前已挂载交互目标缺少或不稳定 Key 的问题；非全项目静态审计。',
-    schema: z.object({ ...session, maxNodes: z.number().int().min(1).max(1000).optional() }).strict(),
-  },
+  ...automationMcpTools,
   get_network_status: {
     description:
       '编辑Mock前获取files.scenes准确路径及开关状态；Agent读取并增量编辑文件，格式见get_usage_guide(topic=http/ws)，保存后reload_rules，再activate_scene统一开启所需Mock。',

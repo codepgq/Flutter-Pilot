@@ -117,6 +117,7 @@ export interface ApiCatalogEntry {
   lastAt: number;
 }
 export interface WorkbenchState {
+  automation?: import('./automation/model').AutomationState;
   scenes?: import('./scene-model').SceneDocument;
   sceneRuntime?: import('./scene-model').SceneRuntime;
   selectedSceneId?: string;

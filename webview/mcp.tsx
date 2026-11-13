@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { WorkbenchState } from '../src/model';
+import { AutomationPanel } from './automation';
 import type { McpAgentId, McpScope } from '../src/mcp/model';
 
 const agents: { id: McpAgentId; label: string }[] = [
@@ -171,6 +172,7 @@ export function McpPanel({
           );
         })}
       </section>
+      <AutomationPanel state={state} send={send} />
       <details className="card secondary-details" aria-label="MCP 使用说明">
         <summary>使用说明与 Agent 工作流程</summary>
         <p>
@@ -185,7 +187,7 @@ export function McpPanel({
             <code>topic: ws</code>：scenes.json 中 wsRules 的 URL、方向、文本替换／丢弃与消息验证。
           </li>
           <li>
-            <code>topic: ui</code>：快照发现 Key、父范围定位、点击、输入、滚动及 Key 问题处理。
+            <code>topic: ui</code>：双通道快照、多种定位、手势、文本编辑、设备键盘与系统导航。
           </li>
           <li>
             <code>topic: workflow</code>：规则编辑、重载、开关、UI 操作与结果验证的完整流程。
@@ -199,7 +201,7 @@ export function McpPanel({
           编辑 <code>.flutter-pilot/scenes.json</code> → 调用 <code>reload_rules</code> →{' '}
           <code>activate_scene</code> 激活场景 → 按 Key 操作 UI → 查询网络记录。
         </p>
-        <p>缺少稳定 Key 时由 MCP 返回诊断，由编码 Agent 修复源码。正式交互不会回退到文本定位。</p>
+        <p>优先按 Key 定位，也可显式使用文字、语义、类型、祖先范围或坐标；定位失败不会静默切换策略。</p>
         <p className="muted">
           项目配置写入后，客户端可能仍需批准 MCP、重新连接或打开新会话；本页不会把配置成功当作客户端已加载。
         </p>

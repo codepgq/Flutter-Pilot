@@ -2,6 +2,7 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { GuideTopic } from './guide';
 import { mcpTools, type McpToolName } from './tools';
 import { z } from 'zod';
+import { automationPromptPlans } from '../automation/prompts';
 
 interface PromptTemplate {
   description: string;
@@ -44,7 +45,7 @@ const templates = {
     steps: [
       '先调用 get_ui_snapshot，读取当前 widgets 的 key、ancestorKeys、type、bounds、enabled/actionable 与 source，确定当前页面和目标。保留 Key 的字符串或整数类型，不猜测 Key。',
       '开发联调与多状态测试优先使用结构化快照和 Key 操作；视觉样式或布局验收时使用 take_screenshot 获取 PNG 图片。长图先用 list_screenshot_targets 查询滚动区域。',
-      '调用 find_widget 确认目标唯一；重复 Key 用 ancestorKey 限定范围。正式选择器只支持 ValueKey<String/int>，不回退文本、裸坐标或直接执行按钮回调。',
+      '调用 find_widget 确认目标唯一；重复 Key 用 ancestorKey 限定范围。Key 优先，也可显式用文字、语义、类型和坐标；失败不静默回退，不直接执行按钮回调。',
       '按任务使用 tap、enter_text、scroll 和 wait_for_widget；滚动与等待设置有限次数和超时。enter_text 替换输入内容，操作前核对目标与预期文本，不将其描述为真实系统键盘 IME 测试。',
       'NOT_FOUND 先检查是否进入目标页面、是否懒加载，再有界等待或滚动，不能直接判为缺 Key。遇到 MISSING_KEY、UNSTABLE_KEY 或交互目标歧义时，调用 inspect_key_issues，结合 source 和业务源码定位原因。',
       '任务涉及源码修复时补稳定 ValueKey，列表优先使用业务 ID；没有源码修改授权时报告诊断。保存后通过MCP hot_reload保留状态应用变更；需重置内存并重跑入口时显式选择hot_restart。仅控制当前VM准确对应的IDE Flutter Debug会话；之后重新读取快照并定位，确认修复，不复用旧对象；不把当前挂载树诊断宣称为全仓审计。',
@@ -62,7 +63,7 @@ const templates = {
       '激活目标场景统一开启所需采集与 Mock；确认 HTTP/Dio 或 WS 运行时接入有效。仅界面或只读排查任务无需修改规则或开启 Mock。',
       '场景需要重新启动时，使用MCP hot_restart重置内存并重跑入口；仅应用源码且需保留状态时用hot_reload。仅支持当前VM准确对应的IDE Flutter Debug会话，无法绑定时报告诊断，不选择其他会话。热重启不代替reload_rules；连接未断时已有开关维持并重新发现运行时对象，但启动首请求可能未拦截，检查返回的network及新记录，不能仅凭工具完成断言Mock有效。实际VM断线后需重新连接，已保存的激活场景会自动恢复；检查分域应用状态。',
       '需要主动 WS 事件时，选择 inject_ws_message 向 App 注入，或 send_ws_message 经真实连接发往服务端；使用实际业务协议的 topic/data 或原始 text，检查 outbound 规则影响，并验证事件处理结果。',
-      '按真实 Key 和 ancestorKey 确认唯一目标，再执行点击、输入、滚动和有界等待；出现 Key 问题先诊断。每个关键步骤检查状态，避免连续操作后无法判断哪一步失败。',
+      '按真实 Key、ancestorKey 或显式文字／语义／类型选择器确认唯一目标，再执行手势、输入、滚动和有界等待；歧义时进一步限定。每个关键步骤检查状态，避免连续操作后无法判断哪一步失败。',
       '将本次新 HTTP 记录或 WS 消息与规则 ID、实际内容及界面变化对应起来，分别判断规则加载、命中和业务结果。某一环节无法验证时保留已取得的证据，明确剩余阻碍和未验证项。',
     ],
   },
@@ -94,62 +95,6 @@ export const toolPromptPlans = {
     steps: [
       '确认任务需要重置内存并重跑入口；检查 capabilities.lifecycle，Mock 文件改动先 reload_rules，激活需要的场景并记录网络基线，再调用 hot_restart。',
       '检查 completed 和 network；启动首请求可能早于 Mock 注入，必要时待接入后按 Key 触发请求。重新获取 UI 与 WS 连接 ID，用新记录核验不同业务状态；磁盘数据不会自动清除。',
-    ],
-  },
-  get_ui_snapshot: {
-    topics: ['ui'],
-    steps: [
-      '调用 get_ui_snapshot，按 maxNodes 有界读取当前挂载界面；从 widgets 的 typed key、ancestorKeys、状态与 source 发现目标，再用 find_widget 确认唯一。截图验收可使用 take_screenshot。',
-    ],
-  },
-  list_screenshot_targets: {
-    topics: ['ui'],
-    steps: [
-      '选择已连接 Flutter Debug VM 的 sessionId，调用 list_screenshot_targets 查询当前可见的向下滚动区域；根据返回信息选择目标，不猜测区域 ID。页面变化后重新查询。',
-    ],
-  },
-  take_screenshot: {
-    topics: ['ui'],
-    steps: [
-      '选择已连接 Flutter Debug VM 的 sessionId，调用 take_screenshot 并指定 mode=screen 获取当前屏幕，结果为 MCP PNG 图片。',
-      '需要滚动长图时先调用 list_screenshot_targets，使用准确的 targetId 调用 take_screenshot 并指定 mode=long；采集期间保持页面与窗口稳定，完成或失败后尝试恢复原滚动位置。',
-      '长图仅适用于普通向下滚动列表，最多 32 屏、30000 像素高、2400 万像素或 45 秒；MCP 图片传输最多 32 MiB（含 Base64 和 JSON），客户端工具调用超时建议至少 90 秒。超限或采集失败不返回不完整图片。截图不包含系统状态栏、原生键盘、系统弹窗和原生平台视图。',
-    ],
-  },
-  find_widget: {
-    topics: ['ui'],
-    steps: [
-      '先从快照获得真实 ValueKey，保留字符串/整数类型，使用 find_widget；有重复 Key 时传 ancestorKey。NOT_FOUND 可能是页面未进入或懒加载，不能直接认定缺 Key；不回退文本或坐标。',
-    ],
-  },
-  tap: {
-    topics: ['ui'],
-    steps: [
-      '通过快照和 find_widget 确认可操作且唯一的 Key，记录业务基线后调用 tap。操作使用真实命中测试；遮挡或禁用应按业务导航处理，随后用页面及新网络记录确认结果。',
-    ],
-  },
-  enter_text: {
-    topics: ['ui'],
-    steps: [
-      '确认唯一且可编辑的 Key 和用户期望的完整文本，再调用 enter_text 替换内容；核对 formatter、onChanged 和界面效果。不能据此宣称已验证真实系统键盘 IME。',
-    ],
-  },
-  scroll: {
-    topics: ['ui'],
-    steps: [
-      '确认唯一滚动区域 Key；调用 scroll 并明确 direction，可传 targetKey、maxSteps 和 timeoutMs 作有界查找。滚动后重新定位目标；目标懒加载或未出现不等于缺 Key。',
-    ],
-  },
-  wait_for_widget: {
-    topics: ['ui'],
-    steps: [
-      '使用真实 Key 调用 wait_for_widget，按目标选 present/absent/actionable 并设置有界 timeoutMs。等待超时先检查当前快照、页面路径与网络，不自动重放触发业务的点击。',
-    ],
-  },
-  inspect_key_issues: {
-    topics: ['ui'],
-    steps: [
-      '调用 inspect_key_issues 诊断当前挂载交互组件，结合 source 区分 MISSING_KEY、UNSTABLE_KEY 和歧义；有授权时修复源码的稳定 ValueKey，再 hot_reload 并重新验证。它不是全仓静态审计。',
     ],
   },
   get_network_status: {
@@ -227,17 +172,21 @@ export const toolPromptPlans = {
       '调用 deactivate_scene 清除持久激活状态并停止两域 Mock；采集保留。检查状态和卸载失败提示，旧租约未到期时不要宣称已经完全停止。',
     ],
   },
+  ...automationPromptPlans,
 } as const satisfies Record<McpToolName, Pick<PromptTemplate, 'topics' | 'steps'>>;
 
 const toolTemplates: Record<string, PromptTemplate> = Object.fromEntries(
-  Object.entries(toolPromptPlans).map(([name, plan]) => [
-    name,
-    {
-      description: `${name}：${mcpTools[name as McpToolName].description}`,
-      topics: plan.topics,
-      steps: plan.steps,
-    },
-  ]),
+  Object.keys(mcpTools).map((name) => {
+    const plan = toolPromptPlans[name as McpToolName];
+    return [
+      name,
+      {
+        description: `${name}：${mcpTools[name as McpToolName].description}`,
+        topics: plan.topics,
+        steps: plan.steps,
+      },
+    ];
+  }),
 );
 const allTemplates: Record<string, PromptTemplate> = { ...templates, ...toolTemplates };
 

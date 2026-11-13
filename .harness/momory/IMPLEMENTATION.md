@@ -1,5 +1,36 @@
 # 实现与验证结论
 
+## 移动交互交付范围（2026-11-13）
+
+- 修复及复验完成后，用户授权 `commit and push`。本轮移动交互功能、六项修复、测试和文档统一提交并常规推送 main；此前的未提交记录为验证时历史状态。
+- 版本保持 0.0.14，不创建新标签，不打包、发布或安装扩展。
+
+## 移动交互审查修复（2026-11-13，用户授权 fix all）
+
+- 已处理六项审查问题：WDA 启动清理所有权、iOS 菜单目标归属、MCP 长操作宿主超时、Unicode 簇内选区、原生追加语义及跨设备 VM 长图租约。
+- 连接适配器升级 v3，在附着模式跳过 startup.cleanupApps；旧 v2 回执即使经旧安装 fallback 也不可启动，需重新准备。仍清理自身 WDA／进程，不操作其他工具资源。
+- 菜单复用和最终点击前核验目标焦点与原生活动编辑器身份；Flutter 提供唯一 RenderEditable 与 TextField／CupertinoTextField 的真实边界，兼容 iOS 无障碍整框，不能用任意外层 Key 边界替代。原生 append 在输入前明确不支持，能力项同步 false；Flutter 追加显式 backend=flutter。
+- 文本编辑基于完整原字符串字符簇，聚焦前及执行前拒绝 INVALID_TEXT_BOUNDARY；保留合法 UTF-16 反向选区、formatter／onChanged。完整生产模板由实际 Dart／Flutter 编译执行，25 项内部测试通过。
+- MCP 认证和参数校验后应用共享期限，setup 660s／connect 240s／截图 85s，宿主多 5s。真实未缩时 Unix IPC 的 50 秒 setup／connect 模拟处理分别在 50004／50003ms 完成，取消只触发一次、不重放，报告 artifacts/mcp-long-operation-fix-report.json。
+- Flutter 长图按实际 VM 设备持有临时租约，仅当前原生会话已持有同设备时复用；已连接不同原生设备不能绕过 DEVICE_BUSY。
+- iOS 页面快照的 AppiumAUT 包装层不属于 WDA XPath 查询树；仅在 iOS 查询时去除该前缀，Android 保持原路径。实际双字段菜单流程与两平台路径回归通过，独立复核未发现新增问题。
+- 505 项 Vitest／34 文件、70 项 Playwright、类型、构建、格式及 diff 检查通过；Python 代理 21 项通过、21 项缺 MITMDUMP 跳过。独立复核发现的缺失字段边界契约和实际 iOS 整框差异已修复并加入回归。
+- 独立 iPhone 17／iOS 26.5 模拟器通过真实 MCP stdio → IPC → VM／Appium 完成 152／152 项检查（含清理），completed=true、cleanupErrors=[]。涵盖四类 Unicode 簇、中间光标／选区的原生追加拒绝、A 菜单下对 B 的 cut／paste 拒绝及两字段不变；报告 artifacts/automation-flutter-smoke-report.json。
+- 本轮 fixtureSourceHash 仅指生成的 Dart main；包含 Swift fixture 的测试脚本及相关源码哈希见 artifacts/automation-fix-validation-evidence.json。模拟器与私有验证运行时清理证据见 artifacts/automation-fix-cleanup-report.json。Android／物理 iOS 未验收，保持 0.0.14，未提交或发布。
+
+## 移动交互扩展初始验收（2026-11-13，未发布源码；修复后结果见上节）
+
+- 新增 src/automation：独立锁定 Appium 3.9.0 / UiAutomator2 8.7.3 / XCUITest 12.22.8，私有 APPIUM_HOME 和原子安装指针，失败保留原可用环境。只读检查不会安装；跨工作区设备独占租约，不冒险回收崩溃后孤儿租约。
+- Flutter VM + Appium 双通道统一队列。key / ancestorKey 兼容；组合 selector、原生 accessibility/resource ID、快照引用、状态和边界；VM 会话代次、源／布局变化拒绝旧引用。映射核对 VM 设备、App PID、前台、窗口、覆盖层、方向及布局，失败不重放。
+- 共享有界多指轨迹支持双击、长按、拖拽、滑动、缩放、旋转、嵌套横纵滚动；查找限制区域后代，设备滚动后读取 Flutter isScrollingNotifier 等待惯性停止。
+- 文本替换／追加、光标／选区、剪贴板、按键、键盘状态／隐藏／编辑提交和系统导航。Flutter 精确编辑使用编辑协议，保留 formatter / onChanged；iOS 剪贴板使用可见中英文菜单及真实选区内坐标，点击 Copy / Cut 前复核选区。硬件按键另走 XCTest typeKey，依赖设备条件，不把接口接受等同业务验证。
+- 私有 XCUITest / WDA 连接适配器 v2 跳过模拟器启动／GUI／偏好修改及其他 XCTest 进程清理，并清理自身 WDA。原生附着不重启、不清数据、不自动接受权限；真机需要用户预签名 WDA，不操作钥匙串。
+- 工作台设备自动化区、42 个 MCP 工具和 46 个 Prompts、离线指南、README 和 docs/mobile-automation.md 已更新。分平台／动作能力与具体限制可读，真实 stdio 返回 PNG 图片块。
+- 最终类型检查、477 项 Vitest / 31 文件、70 项 Playwright、构建、格式及 diff 检查通过；Python 21 项通过、21 项缺 MITMDUMP 跳过。分发枚举确认独立 lockfile 入包，未生成新 VSIX。
+- 初始独立 iPhone 17 / iOS 26.5 fixture 经真实 MCP stdio → IPC → VM / Appium，107 / 107 项通过；Dart main SHA-256 ad6537d221519f549e011e6e10623ebe6d37999759fa6cd49da749b8b426f08e。artifacts/automation-flutter-smoke-report.json 已由上节修复后 152 项结果更新，四设备矩阵见 docs/mobile-automation-validation.md。
+- Android 无可用设备，iOS 真机未提供专用验收设备和签名 WDA，均未验收；已配对的用户真机未连接或操作。硬件组合键／方向键、其他语言菜单、物理断线仍未现场验收。
+- 保持 0.0.14，不提交、推送、发布、安装扩展或启动 IDE GUI；只清理本轮独立模拟器、fixture 及其进程。
+
 ## 0.0.14 发布验证与 Cursor 安装（2026-11-13）
 
 - 456 项 Vitest、68 项 Playwright、类型、格式、构建及打包通过；Python 21 项通过、21 项因未配置 MITMDUMP 跳过。场景恢复含失联模式切换保护；本轮未执行真实引擎故障注入或设备验收。
@@ -301,7 +332,6 @@
 - VmSession 在初始化提交前检查真实 socket / 状态 / generation，意外断开立即失效本次初始化，清旧 endpoint 和计数；成功状态使用实际 DDS 端点。
 - 174 项 Vitest、24 项 Playwright、类型 / 格式 / 构建通过；真实 Flutter 从原始 WS 经过 DDS 跳转后 getVM 只读验证通过。未改 EXIO 源码、未发业务请求、未保存认证地址；完整验证见 docs/validation.md。
 - 最新 VSIX 解包后的 Cursor VM 隔离宿主退出 0；已强制覆盖安装，安装的扩展和 Webview JS/CSS 与构建 SHA-256 一致。未自动重载用户窗口，需重载后输入本次有效 WS；未提交或推送。
-
 
 ## 0.0.3 WebSocket 实现与验收（2026-11-09）
 

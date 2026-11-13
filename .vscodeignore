@@ -13,6 +13,7 @@ test-results/**
 **/*.pyc
 **/*.map
 package-lock.json
+!resources/automation/package-lock.json
 tsconfig.json
 vitest.config.*
 playwright.config.*

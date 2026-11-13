@@ -1,3 +1,7 @@
+import { AutomationController } from './automation/controller';
+import { AutomationRuntime } from './automation/runtime';
+import { automationTools } from './automation/model';
+import { parseTool } from './mcp/tools';
 import * as vscode from 'vscode';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { readFile, mkdir, writeFile, rename, lstat } from 'node:fs/promises';
@@ -245,6 +249,7 @@ class Workbench {
   private mode: 'proxy' | 'vm' = 'vm';
   private readonly vm: VmSession;
   private readonly ui: VmUiController;
+  private readonly automation: AutomationController;
   private readonly mcpNetwork: McpNetworkController;
   private readonly mcpLifecycle: McpLifecycleController;
   private mcpServer?: McpSessionServer;
@@ -333,6 +338,30 @@ class Workbench {
     this.ui = new VmUiController(this.vm.client, {
       templatePath: join(context.extensionPath, 'resources', 'vm', 'ui.dart.txt'),
     });
+    this.automation = new AutomationController(
+      new AutomationRuntime({
+        root: join(this.context.globalStorageUri.fsPath, 'automation'),
+        resources: join(context.extensionPath, 'resources', 'automation'),
+      }),
+      {
+        vmExecute: (tool, args) => this.ui.execute(tool, args),
+        vmInvalidate: () => this.ui.invalidate(),
+        vmConnected: () => this.vm.state.status === 'connected',
+        vmIdentity: () => ({
+          generation: String(this.vmEpoch),
+          deviceId: vmDiscovery
+            ?.snapshot()
+            .candidates.find(
+              (item) =>
+                item.id === this.vmAuto?.snapshot.connectedSessionId &&
+                item.workspaceId === this.folder.uri.toString(),
+            )?.device,
+        }),
+        vmProcessId: async () => (await this.vm.client.call<{ pid?: number }>('getVM')).pid,
+        projectSessionId: () => this.mcpSessionId,
+        changed: () => this.push(),
+      },
+    );
     this.scenes = new SceneController(this.store, {
       snapshot: () => ({
         key: `${this.mode}:${this.vmEpoch}:${this.vm.state.status}:${this.vm.state.isolates}:${this.engineEpoch}:${this.proxyActive}`,
@@ -566,6 +595,17 @@ class Workbench {
         this.ui.invalidate();
         this.mcpState.enabled = false;
       }
+      if (input.action === 'automation.cancel') {
+        this.automation.cancel();
+        return;
+      }
+      if (input.action === 'automation.inspect') {
+        void this.automation
+          .execute('get_automation_status', {})
+          .then(() => this.push())
+          .catch((error) => this.report(error));
+        return;
+      }
       void this.enqueue(() => this.handle(message as Record<string, unknown>)).catch((error) =>
         this.report(error),
       );
@@ -647,6 +687,7 @@ class Workbench {
       vmDiscovery: this.vmAuto.snapshot,
       ws: { ...this.vm.websocket.state },
       mcp: this.mcpState,
+      automation: this.automation.snapshot,
       rules: this.rules,
       scenes: this.scenes.document,
       selectedSceneId: this.scenes.selected?.id,
@@ -929,7 +970,7 @@ class Workbench {
       if (this.mode !== 'vm' || this.vm.state.status !== 'connected')
         throw new Error('请先在“连接与诊断”连接 Flutter Debug VM，再截取 App 页面。');
       await takeAppScreenshot({
-        execute: (tool, args) => this.ui.execute(tool, args),
+        execute: (tool, args) => this.automation.execute(tool, args ?? {}),
         chooseMode: async () =>
           (
             await vscode.window.showQuickPick(
@@ -967,10 +1008,15 @@ class Workbench {
               cancellable: true,
             },
             async (_progress, token) => {
-              const cancellation = token.onCancellationRequested(() => this.ui.invalidate());
+              const controller = new AbortController();
+              const cancellation = token.onCancellationRequested(() => controller.abort());
               try {
                 if (token.isCancellationRequested) return { ok: false, code: 'CANCELLED' };
-                const result = await this.ui.execute('take_screenshot', args);
+                const result = await this.automation.execute(
+                  'take_screenshot',
+                  { ...args, rawParts: true },
+                  controller.signal,
+                );
                 return token.isCancellationRequested ? { ok: false, code: 'CANCELLED' } : result;
               } finally {
                 cancellation.dispose();
@@ -1218,9 +1264,15 @@ class Workbench {
           name: this.project.config.name,
           describe: () => ({
             vmConnected: this.vm.state.status === 'connected',
-            capabilities: { ui: this.mcpState.ui, network: true, lifecycle: this.mcpLifecycle.status() },
+            capabilities: {
+              ui: this.mcpState.ui,
+              automation: this.automation.snapshot,
+              network: true,
+              lifecycle: this.mcpLifecycle.status(),
+            },
           }),
           call: async (tool, args, context) => {
+            if (tool === 'get_automation_status') return this.automation.execute(tool, args, context.signal);
             const run = this.messageQueue.then(async () => {
               if (
                 this.disposed ||
@@ -1241,58 +1293,7 @@ class Workbench {
                   this.push();
                 }
               }
-              if (tool === 'list_screenshot_targets' || tool === 'take_screenshot') {
-                if (this.mode !== 'vm' || this.vm.state.status !== 'connected')
-                  return { ok: false, code: 'VM_DISCONNECTED', message: '请先连接 Flutter Debug VM。' };
-                const cancel = () => this.ui.invalidate();
-                context.signal.addEventListener('abort', cancel, { once: true });
-                try {
-                  const result = await executeMcpScreenshot(
-                    tool,
-                    args,
-                    (name, input) => this.ui.execute(name, input),
-                    context.signal,
-                  );
-                  if (result.ok) this.mcpState.ui = { supported: true };
-                  return result;
-                } finally {
-                  context.signal.removeEventListener('abort', cancel);
-                  this.push();
-                }
-              }
-              if (
-                [
-                  'get_ui_snapshot',
-                  'find_widget',
-                  'tap',
-                  'enter_text',
-                  'scroll',
-                  'wait_for_widget',
-                  'inspect_key_issues',
-                ].includes(tool)
-              ) {
-                const typed = (value: unknown) => ({
-                  type: typeof value === 'number' ? 'int' : 'string',
-                  value,
-                });
-                const input = {
-                  ...args,
-                  ...(args.key !== undefined ? { key: typed(args.key) } : {}),
-                  ...(args.ancestorKey !== undefined ? { ancestor: typed(args.ancestorKey) } : {}),
-                  ...(args.targetKey !== undefined ? { targetKey: typed(args.targetKey) } : {}),
-                };
-                const cancel = () => this.ui.invalidate();
-                context.signal.addEventListener('abort', cancel, { once: true });
-                let result;
-                try {
-                  result = await this.ui.execute(tool, input);
-                } finally {
-                  context.signal.removeEventListener('abort', cancel);
-                }
-                if (result.ok) this.mcpState.ui = { supported: true };
-                this.push();
-                return result;
-              }
+              if (automationTools.has(tool)) return this.automation.execute(tool, args, context.signal);
               try {
                 return await this.mcpNetwork.execute(tool, args, context.signal);
               } finally {
@@ -1419,6 +1420,23 @@ class Workbench {
               doc.scenes = doc.scenes.filter((item) => item.id !== payload.id);
               if (doc.activeSceneId === payload.id) doc.activeSceneId = null;
             });
+          break;
+        }
+        case 'automation.inspect':
+        case 'automation.setup':
+        case 'automation.connect':
+        case 'automation.disconnect': {
+          const tool = {
+            'automation.inspect': 'get_automation_status',
+            'automation.setup': 'setup_automation',
+            'automation.connect': 'connect_device',
+            'automation.disconnect': 'disconnect_device',
+          }[action]!;
+          const result = await this.automation.execute(
+            tool,
+            parseTool(tool, { ...payload, sessionId: this.mcpSessionId }),
+          );
+          if (!result.ok) throw new Error(result.message);
           break;
         }
         case 'mcp.enable':
@@ -1956,6 +1974,7 @@ class Workbench {
     ++this.mcpGeneration;
     this.ui.invalidate();
     await this.mcpServer?.stop().catch(() => undefined);
+    await this.automation.dispose();
     await this.ui.dispose();
     this.vmAuto.dispose();
     this.scenes.dispose();

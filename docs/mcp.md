@@ -52,7 +52,7 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 
 同一份指南还可通过 `resources/list` 发现，URI 为 `flutter-pilot://guides/<topic>`，使用 `resources/read` 读取。工具入口兼容只使用 MCP tools 的 Agent，资源入口方便支持参考资料的客户端；两者返回相同内容。
 
-支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 29 个模板：原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及下文工具列表中全部 25 个工具的同名独立模板。`hot_reload` 和 `hot_restart` 可以直接按同名 Prompt 查找，无需先打开其他场景模板。
+支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 46 个模板：原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及下文工具列表中全部 42 个工具的同名独立模板。`hot_reload` 和 `hot_restart` 可以直接按同名 Prompt 查找，无需先打开其他场景模板。
 
 例如读取热重启提示词：
 
@@ -64,7 +64,7 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 
 Agent 的可调用能力由 `tools/list` 提供，Prompts 是可选的使用指导；未读取 Prompts 不等于工具不存在。初始化说明已明确列出所有工具及同名 Prompt 入口。不支持 Prompts 的客户端仍可通过工具描述和 `get_usage_guide` 发现用法。新增工具必须补齐同名提示词，类型检查及真实 MCP stdio 测试会校验完整覆盖和可读性。
 
-指南明确由 Agent 文件工具增量编辑规则，先通过 `get_network_status` 获取准确路径并保留已有规则。HTTP JSON 正文必须序列化为字符串；WS 规则针对业务连接，连接临时规则不能写入持久文件。保存后调用 `reload_rules`，检查各域加载与同步结果，再用 `activate_scene` 激活目标场景并验证本次新记录。UI 先用快照发现 Key，再确认唯一目标；没有 Key 时诊断并补业务源码，不回退文本定位。
+指南明确由 Agent 文件工具增量编辑规则，先通过 `get_network_status` 获取准确路径并保留已有规则。HTTP JSON 正文必须序列化为字符串；WS 规则针对业务连接，连接临时规则不能写入持久文件。保存后调用 `reload_rules`，检查各域加载与同步结果，再用 `activate_scene` 激活目标场景并验证本次新记录。UI 先用快照发现 Key，再确认唯一目标；无 Key 时可显式使用文字、语义、类型、祖先范围或快照引用；不静默更换定位方式。
 
 例如用户要求“模拟订单列表空数据并验证页面”，Agent 应先读取 `http`／`workflow` 指南，选择对应项目会话，读取并编辑规则，再完成重载、Mock、Key 操作和结果验证。具体是否主动调用仍由客户端 Agent 根据任务和上下文决定；MCP 说明提供发现与操作指引，不替代用户授权和客户端审批。
 
@@ -91,6 +91,20 @@ VM 连接未断时，已有采集／Mock 开关维持，并重新发现运行时
 
 工具完成表示热重载／重启流程完成，业务结果需要另行验证。重新读取 UI 快照和 WS 连接，不复用旧 UI 对象或 `connectionId`；检查本次新 HTTP／WS 记录的规则命中、有效正文及页面状态。超时、取消或断线后先查询当前状态和新记录，不自动重试重启。
 
+## 移动交互与设备自动化
+
+工作台 MCP Tab 提供设备自动化准备、设备选择、连接／断开、取消和诊断。VM 可独立使用，设备通道操作原生页面、权限弹窗、系统键盘和系统导航。Appium 3.9.0、UiAutomator2 8.7.3、XCUITest 12.22.8 由插件私有管理；首次准备才下载。iOS 真机使用用户预签名 WDA。完整接口、示例、坐标与取消约束见 [移动交互指南](mobile-automation.md)，设备验收范围见 [验收表](mobile-automation-validation.md)。
+
+| 类别       | MCP 工具（均提供同名 Prompt）                                                                        |
+| ---------- | ---------------------------------------------------------------------------------------------------- |
+| 环境与设备 | `get_automation_status`、`setup_automation`、`connect_device`、`disconnect_device`                   |
+| 手势       | `tap`、`double_tap`、`long_press`、`drag`、`swipe`、`pinch`、`rotate_gesture`、`perform_gesture`     |
+| 编辑与键盘 | `enter_text`、`edit_text`、`press_key`、`get_keyboard_state`、`hide_keyboard`、`editor_action`       |
+| 定位与系统 | `get_ui_snapshot`、`find_widget`、`wait_for_widget`、`scroll`、`device_action`、`inspect_key_issues` |
+| 截图       | `list_screenshot_targets`、`take_screenshot`                                                         |
+
+auto 在设备连接后使用设备输入；失败不会换通道重放。device 快照和整屏截图包含系统 UI。Flutter 转设备坐标要求 VM／设备／App 进程身份与窗口布局均可确认。动作已发送但未确认时先检查状态，不自动重试。
+
 ## Widget 定位与 Key 诊断
 
 正式定位支持精确的 `ValueKey<String>` 与 `ValueKey<int>`，工具参数 `key` 使用字符串或整数。可用 `ancestorKey` 限定父节点范围；Key 在局部树中可重复，范围内多个匹配会报告 `AMBIGUOUS_KEY`。
@@ -99,11 +113,11 @@ VM 连接未断时，已有采集／Mock 开关维持，并重新发现运行时
 { "sessionId": "从 list_sessions 获取", "key": "login.submit", "ancestorKey": "login.page" }
 ```
 
-工具不会把 Key 的显示文本作为标识，不回退到页面文字或裸坐标。`UniqueKey`、对象身份 Key 及自定义 Key 子类不作为首版稳定选择器。每次操作重新查找，Hot Restart 后不复用旧对象。
+工具不会把 Key 的显示文本作为标识，也不会在失败后静默切换目标；可以显式选择文字、语义、类型、快照引用或坐标。`UniqueKey`、对象身份 Key 及自定义 Key 子类不作为稳定 Key 选择器。每次操作重新查找，Hot Restart 后不复用旧对象。
 
 `find_widget` 返回 `NOT_FOUND` 只说明当前未找到：页面可能尚未进入，或者列表项尚未创建。`inspect_key_issues` 检查当前已挂载交互目标的缺失／不稳定 Key，不是全项目静态审计。稳定的外层 Key 能唯一定位内部交互节点时，不会要求给框架内部所有节点补 Key。诊断尽可能包含源码位置，无法可靠映射时会说明。编码 Agent 应结合业务源码补 Key，再热重载或重启并重新验证。
 
-点击与滚动通过 Flutter pointer 事件和命中测试执行，不直接调用按钮回调；遮挡、禁用、屏幕外目标可能无法操作。输入先取得焦点，再走 Flutter 文本编辑更新链路，支持 formatter 和 `onChanged`；它模拟文本编辑协议，**不覆盖真实系统键盘 IME 组合输入**。
+未连接设备时，点击与滚动通过 Flutter pointer 事件和命中测试执行，不直接调用按钮回调；遮挡、禁用、屏幕外目标可能无法操作。输入先取得焦点，再走 Flutter 文本编辑更新链路，支持 formatter 和 `onChanged`；它模拟文本编辑协议，**不覆盖真实系统键盘 IME 组合输入**。
 
 同一会话的 UI 操作串行执行，多个 Agent 的一次手势不会穿插。多个工具调用组成的业务流程不持有跨调用锁。等待和滚动均有上限；操作超时可能已经触发业务，Agent 应先查询界面或网络结果，不能自动重试点击。
 
@@ -121,7 +135,7 @@ VM 连接未断时，已有采集／Mock 开关维持，并重新发现运行时
 { "sessionId": "从 list_sessions 获取", "mode": "long", "targetId": "从 list_screenshot_targets 获取" }
 ```
 
-只有一个候选区域时，可以省略 `targetId`；存在多个区域时须指定。区域 ID 仅对当前页面有效，页面变化后应重新查询。长图从所选区域顶部采集到末尾，完成或失败后尝试恢复原滚动位置。它适用于普通向下滚动的 Flutter 列表和懒加载项；采集时保持页面与窗口稳定，动画或异步加载可能改变内容。嵌套、反向和横向滚动，以及原生平台视图暂不支持。图像仅包含 Flutter 渲染内容，不包含系统状态栏、原生键盘和系统弹窗。
+只有一个候选区域时，可以省略 `targetId`；存在多个区域时须指定。区域 ID 仅对当前页面有效，页面变化后应重新查询。长图从所选区域顶部采集到末尾，完成或失败后尝试恢复原滚动位置。它适用于普通向下滚动的 Flutter 列表和懒加载项；采集时保持页面与窗口稳定，动画或异步加载可能改变内容。嵌套、反向和横向滚动，以及原生平台视图暂不支持。`source=flutter` 图像仅包含 Flutter 渲染内容。设备连接后使用 `source=device, mode=screen` 获得包含系统栏、原生键盘和弹窗的整屏 PNG，并返回图片尺寸、方向与窗口坐标信息。
 
 截图最高为 2 倍逻辑像素；长图最多 32 屏、30,000 像素高、2,400 万像素或 45 秒。MCP 图片传输上限为 32 MiB（含 Base64 和 JSON），客户端单次工具调用超时建议设置为至少 90 秒。超限或失败时不会返回不完整图片。
 
@@ -187,7 +201,7 @@ VM 连接未断时，已有采集／Mock 开关维持，并重新发现运行时
 
 可以向编码 Agent 下达以下任务：
 
-> 读取 Flutter Pilot 的 `get_usage_guide`（http／ui／workflow），调用 `list_sessions` 选择当前项目。查看 `get_network_status` 返回的规则路径，保留已有规则，只修改产品详情 Mock 正文。保存 `.flutter-pilot/scenes.json` 后调用 `reload_rules`，确认加载成功，再用 `activate_scene` 激活目标场景并检查 HTTP 应用状态。通过 `get_ui_snapshot` 找到实际产品及详情 Key，确认目标唯一后点击产品，等待详情出现，查询对应 HTTP 请求并验证响应字段。出现 Key 诊断问题时修改业务源码补稳定 Key，重新验证；不要用文本点击绕过问题。
+> 读取 Flutter Pilot 的 `get_usage_guide`（http／ui／workflow），调用 `list_sessions` 选择当前项目。查看 `get_network_status` 返回的规则路径，保留已有规则，只修改产品详情 Mock 正文。保存 `.flutter-pilot/scenes.json` 后调用 `reload_rules`，确认加载成功，再用 `activate_scene` 激活目标场景并检查 HTTP 应用状态。通过 `get_ui_snapshot` 找到实际产品及详情 Key，确认目标唯一后点击产品，等待详情出现，查询对应 HTTP 请求并验证响应字段。无 Key 时可明确使用唯一的文字／语义选择器；歧义时限定范围后重新验证。
 
 > 分别构造接口成功、失败和空数据三个场景。每次只激活对应场景，保存后 `reload_rules`，确认采集和 Mock 状态，再用 `hot_restart` 重置页面状态。检查重启返回的网络状态及本次新请求；如果启动请求早于 Mock 接入，待接入后按 Key 再次触发。最后核对接口命中和对应 UI，不把热重启完成当作场景通过。
 

@@ -1,10 +1,29 @@
 # 问题与验证记录
 
+## 移动交互代码审查六项修复（2026-11-13）
+
+- 状态：六项源码问题已修复并补回归。原始审查报告保留 fail 历史快照，新增修复跟踪；不得将历史 107 项设备结果当作修复后的复验。
+- WDA startup.cleanupApps 会卸载其他团队的 WDA，旧 v2 适配器未覆盖；v3 跳过该路径并拒绝旧回执，继续只清理自身资源。
+- 全局可见编辑菜单不能证明属于目标字段；复用前和点击前都须核验。iOS 无障碍字段整框可能大于 RenderEditable，生产模板同时输出所属 TextField／CupertinoTextField 边界，不能仅靠 mock 出来的 inputBounds 测试。
+- 任意 UTF-16 选区可拆坏 emoji／组合字符；用完整字符串字符簇边界，拒绝簇内偏移及外部提供的非法选区。原生 /value 保留当前光标，不能声称 append；无法可靠移动到末尾时必须在输入前拒绝。
+- 客户端超时变长不改变宿主 45 秒限制；认证后共享工具期限并留出宿主余量。50 秒真实 IPC setup／connect 与取消回归通过。
+- 长截图会滚动实际 VM 设备，租约必须由操作目标设备决定，不能依赖 auto 输入后端。
+- iOS /source 快照包含 AppiumAUT 作用域，WDA XPath 查询直接从 Application 开始。把快照路径原样查询会误报过期节点；仅移除 iOS 路径的开头包装层，Android 原路径保留，两平台回归与真实双字段身份核验通过。
+- 修复后复验：505 项 Vitest／34 文件、70 项 Playwright 通过；完整生产模板另含 25 项 Dart／Flutter 内部测试。独立 iOS 模拟器 152／152 项检查通过、无清理错误，涵盖错字段 cut／paste、Unicode 与原生追加拒绝。设备报告 artifacts/automation-flutter-smoke-report.json，清理与源码哈希见 artifacts/automation-fix-cleanup-report.json 和 artifacts/automation-fix-validation-evidence.json；Android／物理 iOS 仍未验收。
+
+## 移动交互真实设备验收（2026-11-13）
+
+- 已修复：W3C 拖拽只发起终点不能稳定触发排序。增加中间采样和释放前停顿；按实际排序／滑动删除结果通过。
+- 已修复：惯性滚动期间 Flutter 子节点命中被屏蔽，反复滚动越过目标。读取 ScrollableState.position.isScrollingNotifier 等待停止；查找按指定区域后代限定，加入区域外同名项，原生横纵嵌套查找通过。
+- 已修复：iOS 返回成功的组合键不能证明选区／剪切生效，硬件键盘偏好会影响行为。剪贴板使用可见原生菜单；从 EditableTextState.renderEditable 计算选区内点，点击而不长按折叠现有选区，并在 Copy / Cut 前复核选区。用中文文本、formatter、onChanged 和实际文本结果验证。
+- 已修复：手势包含双击识别器时普通 tap 业务回调会延迟。取消后的输入验收用状态等待确认，不能在系统接受输入后立即断言回调已运行；最终取消、等待释放及下一次 tap 通过。
+- 已修复：默认 Appium 模拟器附着会重启 headless 设备、写入共享偏好，并可能清理其他 XCTest 进程／留下自身 WDA。固定版本连接适配器 v2 跳过这些行为，仅清理自身 WDA；最终无 Appium / WDA 残留。早期试验已写入共享偏好，原始值未知，不擅自覆盖用户当前值。
+- 验收边界：Android 未提供可用设备；iOS 真机未提供专用验收设备与签名 WDA，用户已配对真机未操作。硬件修饰键／方向键、其他语言、多行／密码编辑菜单及物理断线不能按模拟器其余通过项目外推。
+
 ## 长图被 GPU 纹理尺寸限制缩放（2026-11-12）
 
 - 状态：已修复。首次真实模拟器测试在 Flutter 内合成长图，期望 804 × 9082，实际 PNG 为 725 × 8192，末尾缺失；渲染器返回成功不等同完整输出。
 - 改为 Flutter 逐条带界限裁取 PNG，校验每段尺寸；扩展端 pngjs 在 CPU 内存拼接并核验累计高度。真实输出 804 × 9082，目视确认 Item 79 和拼接处完整；超过 8192 高度的像素边界另有回归测试。
-
 
 ## API 最新详情陈旧与 Mock 接入计数残留（2026-11-11）
 
@@ -45,12 +64,12 @@
 - 自定义 Dio adapter、原生插件 / WebView、应用拦截器提前 resolve/reject 的组合需逐项目验证；周期扫描无法保证新实例首请求已经接入。
 - EXIO MFA 代理超时仍按上方条目待归因。VM 示例通过不构成 EXIO 登录修复结论，不重放认证请求或存储真实 VM 认证地址。
 
-
 ## WS 异步状态复活与旧 URL 误关联（2026-11-09）
 
 - 状态：已修复并以回归测试验证。较早的历史刷新和scan等待SQLite期间断线可能回写在线/active；现使用epoch、refresh序号及每次await后校验。
 - TCP端口可复用，单凭握手tuple不能把同一握手分配给新socket；仅成功101允许关联，维护握手所有权，不唯一时保持URL未知。关闭采集清握手缓存，不从历史导入运行时关联。
 - 出站不能只包consumer._subscription，该订阅会被addStream更换；现使用协议transformer前稳定controller订阅。恢复handler前检查身份，外部工具持有的旧wrapper用record enabled再保证旁路。
+
 ## 热重载完成事件兼容（2026-11-10）
 
 - 已修复：Dart3.13的IsolateReload成功事件可仅含isolateGroup而无isolate，按单个isolate匹配会误报TIMEOUT。现预读Flutter isolateGroupId并按准确group或isolate确认，补回归测试及真实Flutter验证。

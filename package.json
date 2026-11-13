@@ -172,10 +172,12 @@
     "test:mcp:flutter": "node scripts/mcp-flutter-smoke.mjs",
     "test:mcp:lifecycle": "node scripts/mcp-lifecycle-flutter-smoke.mjs",
     "test:mcp:agents": "node scripts/mcp-agent-smoke.mjs",
-    "test:ide:mcp": "node scripts/ide-mcp-test.mjs"
+    "test:ide:mcp": "node scripts/ide-mcp-test.mjs",
+    "test:automation:flutter": "node scripts/automation-flutter-smoke.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "fast-xml-parser": "5.12.0",
     "jsonc-parser": "^3.3.1",
     "pngjs": "^7.0.0",
     "react": "^19.0.0",

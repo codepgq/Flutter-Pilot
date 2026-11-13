@@ -1,5 +1,15 @@
 # 验收记录
 
+## 移动交互扩展与审查修复（2026-11-13，源码未发布）
+
+- Flutter VM + 私有 Appium 双通道，42 个 MCP 工具、46 个 Prompts；版本保持 0.0.14，未发布、提交、推送或安装扩展。
+- 六项审查问题已修复：WDA 启动清理所有权、编辑菜单目标归属、MCP 宿主长操作期限、Unicode 字符簇边界、原生 append 语义和 VM 长图实际设备租约。适配器升级 v3，旧 v2 环境需重新准备；原生 append 明确不支持，Flutter 追加显式使用 `backend=flutter`。
+- 类型检查、505 项 Vitest / 34 个文件、70 项 Playwright、构建、格式与 diff 检查通过。Vitest 的生产注入模板包装用例内部另有 25 项实际 Dart / Flutter 测试通过，不与 505 项相加。Python 代理 42 项发现，21 项通过，21 项缺 `MITMDUMP` 跳过。
+- 独立 iPhone 17 / iOS 26.5 模拟器 `FlutterPilot-Automation-Fix-Fixture` 通过真实 SDK MCP stdio → bridge → IPC → VM / Appium，152 / 152 项通过，`completed=true`、`nativeRequested=true`，测试进程清理无错误；覆盖业务排序／删除、多指值、Unicode 整簇编辑、formatter、原生菜单错字段拒绝、原生追加拒绝、真实权限弹窗、系统导航、嵌套滚动、旋转重新定位及取消后继续输入。
+- 真实未缩时 Unix IPC 中，50 秒 setup／connect 模拟处理分别在 50004／50003ms 完成，取消只中止一次且不重放，报告 `artifacts/mcp-long-operation-fix-report.json`。此前 107 项设备检查、477 项 Vitest / 31 个文件及适配器 v2 仅为修复前基线。
+- Android 无可用设备，iOS 真机未提供专用验收设备及预签名 WDA，均未验收；已配对的用户真机未连接或操作。四类设备逐项矩阵、限制与发现问题见 [移动交互验收表](mobile-automation-validation.md)。
+- 设备输入不自动重放，菜单归属／选区或坐标映射无法确认时拒绝执行。逐项设备结果见 `artifacts/automation-flutter-smoke-report.json`；其 `fixtureSourceHash` 仅覆盖 Dart `main.dart`，不含 Swift 或测试脚本。独立模拟器、私有环境及进程清理证据见 `artifacts/automation-fix-cleanup-report.json`，最终证据汇总见 `artifacts/automation-fix-validation-evidence.json`。
+
 ## 0.0.12 远端同步、标签与 Cursor 安装（2026-11-12）
 
 - 合并远端 Mock 场景与 App 截图，并保留本地安装记录。manifest、lockfile、MCP serverInfo、README、CHANGELOG 与 VSIX 命名统一为 0.0.12。
@@ -249,7 +259,6 @@ VM 连接默认仅采集，用户主动开启运行时 Mock 后才安装拦截�
 - 真实 EXIO worktree 的当前 Flutter VM：原始 WS 返回 HTTP 302 到本机 DDS，修复后的 VmServiceClient 从原始地址连接并完成只读 getVM，返回 VM 与 1 个 Isolate；实际端点更新为 DDS。未修改应用源码、profiling 或业务请求，完整认证地址未保存。此项仅验收传输和只读 RPC，不代表重新完成业务 Mock 或登录验收。
 - 已查看 `artifacts/workbench-vm-connected.png` 合成截图：680px 下显示“已连接 · 当前端点”，地址输入禁用，仅保留断开；连接中、失败与断开的端点和按钮状态由 Playwright 验证。
 - 原用户日志仅记录统一错误，截图端点可能残留自旧会话，不能反推出当次输入；本轮将可复现 DDS 缺陷与旧端点/状态缺陷分别修复。
-
 
 ## 0.0.3 WebSocket（2026-11-09）
 

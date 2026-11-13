@@ -76,6 +76,52 @@ test('MCP defaults to project scope and emits explicit adapter/enable controls',
     payload: { scope: 'global' },
   });
 });
+test('device automation prepares explicitly and connects only an identified app and device', async ({
+  page,
+}) => {
+  await load(page, {
+    automation: {
+      status: 'ready',
+      installed: true,
+      diagnostics: [],
+      devices: [
+        { id: 'android-test', name: 'Fixture phone', platform: 'android', kind: 'physical', state: 'device' },
+      ],
+    },
+  });
+  const panel = page.getByRole('region', { name: '设备自动化', exact: true });
+  await expect(panel.getByRole('button', { name: '连接设备自动化', exact: true })).toBeDisabled();
+  await panel.getByLabel('自动化设备').selectOption('android-test');
+  await panel.getByLabel('App 包名 / Bundle ID').fill('dev.fixture.app');
+  await panel.getByRole('button', { name: '连接设备自动化', exact: true }).click();
+  expect(await page.evaluate(() => (window as any).__messages)).toContainEqual({
+    action: 'automation.connect',
+    payload: { deviceId: 'android-test', appId: 'dev.fixture.app' },
+  });
+});
+test('iOS physical devices show signed WDA requirements and remain usable at narrow width', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await load(page, {
+    automation: {
+      status: 'ready',
+      installed: true,
+      diagnostics: [],
+      devices: [
+        { id: 'ios-test', name: 'Fixture iPhone', platform: 'ios', kind: 'physical', state: 'connected' },
+      ],
+    },
+  });
+  await page.getByLabel('自动化设备').selectOption('ios-test');
+  await page.getByLabel('App 包名 / Bundle ID').fill('dev.fixture.ios');
+  await expect(page.getByLabel('已签名 WDA 路径')).toBeVisible();
+  await expect(page.getByRole('button', { name: '连接设备自动化', exact: true })).toBeDisabled();
+  await page.getByLabel('已签名 WDA 路径').fill('/tmp/fixture.app');
+  await page.getByLabel('WDA Bundle ID').fill('dev.fixture.wda');
+  await expect(page.getByRole('button', { name: '连接设备自动化', exact: true })).toBeEnabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
 test('configured status does not imply loaded and conflicts require explicit repair', async ({ page }) => {
   await load(page, {
     mcp: {

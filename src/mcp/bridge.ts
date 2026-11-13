@@ -68,6 +68,8 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
       annotations: {
         readOnlyHint: [
           'get_usage_guide',
+          'get_automation_status',
+          'get_keyboard_state',
           'list_sessions',
           'get_ui_snapshot',
           'list_screenshot_targets',

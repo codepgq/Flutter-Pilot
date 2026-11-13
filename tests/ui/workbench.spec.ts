@@ -1265,10 +1265,16 @@ test('VM 自动发现展示候选并只提交选中的会话 ID', async ({ page 
       candidates: [{ ...candidates[0], status: 'connecting' }, candidates[1]],
     },
   });
+  await expect(discovery.getByRole('button')).toHaveCount(2);
   for (const button of await discovery.getByRole('button').all()) await expect(button).toBeDisabled();
   await state(page, { ...overrides, vm: { ...vm, status: 'connected', endpoint: '127.0.0.1:41002' } });
+  await expect(page.getByRole('status', { name: 'VM 已连接', exact: true })).toBeVisible();
+  await page.getByText('调试会话与手动地址', { exact: true }).click();
+  await expect(discovery).toBeVisible();
+  await expect(discovery.getByRole('button')).toHaveCount(2);
   for (const button of await discovery.getByRole('button').all()) await expect(button).toBeDisabled();
   await state(page, { ...overrides, busy: true });
+  await expect(discovery.getByRole('button')).toHaveCount(2);
   for (const button of await discovery.getByRole('button').all()) await expect(button).toBeDisabled();
 });
 

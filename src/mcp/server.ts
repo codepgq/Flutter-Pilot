@@ -18,6 +18,12 @@ import { McpToolError, parseTool, toolError } from './tools';
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_SCREENSHOT_BYTES = 32 * 1024 * 1024;
 const MAX_REQUEST = 512 * 1024;
+function callTimeoutMs(tool?: string): number {
+  if (tool === 'setup_automation') return 660000;
+  if (tool === 'connect_device') return 240000;
+  if (tool === 'take_screenshot') return 85000;
+  return 40000;
+}
 async function canonicalWorkspace(path: string): Promise<string> {
   try {
     return await realpath(path);
@@ -172,8 +178,10 @@ export class McpSessionServer {
       void (async () => {
         try {
           const request = JSON.parse(buffer.subarray(0, newline).toString('utf8')) as IpcRequest;
-          if (request.kind === 'call' && request.tool === 'take_screenshot') socket.setTimeout(90000);
-          const data = await this.handle(request, controller.signal);
+          const data = await this.handle(request, controller.signal, (tool) => {
+            // Keep the host alive until the bridge deadline, including installation and WDA startup.
+            socket.setTimeout(callTimeoutMs(tool) + 5000);
+          });
           if (!socket.destroyed)
             this.respond(
               socket,
@@ -197,7 +205,11 @@ export class McpSessionServer {
     socket.end(text + '\n');
   }
 
-  private async handle(request: IpcRequest, signal: AbortSignal): Promise<unknown> {
+  private async handle(
+    request: IpcRequest,
+    signal: AbortSignal,
+    onCall: (tool: string) => void,
+  ): Promise<unknown> {
     if (!this.running || !this.descriptor) throw new McpToolError('MCP_DISABLED', 'MCP 服务已关闭。');
     const supplied = Buffer.from(typeof request?.token === 'string' ? request.token : '');
     const expected = Buffer.from(this.descriptor.token);
@@ -245,6 +257,7 @@ export class McpSessionServer {
       throw new McpToolError('SESSION_MISMATCH', '工具会话不匹配。');
     const generation = this.generation;
     if (signal.aborted) throw new McpToolError('CANCELLED', '操作已取消。');
+    onCall(request.tool);
     const result = await this.options.call(request.tool, args, { signal, generation });
     if (!this.running || generation !== this.generation || signal.aborted)
       throw new McpToolError('CANCELLED', '服务已关闭或连接中断，操作结果未确认；不要自动重试。');
@@ -381,7 +394,8 @@ export function requestSession(
       finish(new McpToolError('CANCELLED', '操作已取消；已执行动作不会回滚，请勿自动重试。'));
     signal?.addEventListener('abort', abort, { once: true });
     const screenshot = request.kind === 'call' && request.tool === 'take_screenshot';
-    socket.setTimeout(request.kind === 'call' ? (screenshot ? 85000 : 40000) : 2000, () =>
+    const operationTimeout = callTimeoutMs(request.tool);
+    socket.setTimeout(request.kind === 'call' ? operationTimeout : 2000, () =>
       finish(new McpToolError('TIMEOUT', 'MCP 调用超时，执行结果未确认；请勿自动重试。')),
     );
     socket.on('error', () =>
