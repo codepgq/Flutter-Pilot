@@ -4,6 +4,8 @@ import { encodeWsMessage } from './tools';
 
 export interface NetworkHost {
   scenesPath: string;
+  workflowsPath?: string;
+  testsPath?: string;
   listScenes(): unknown;
   activateScene(id: string | null): Promise<void>;
   reloadScenes(): Promise<void>;
@@ -25,7 +27,11 @@ export class McpNetworkController {
   status() {
     return {
       ...this.host.status(),
-      files: { scenes: this.host.scenesPath },
+      files: {
+        scenes: this.host.scenesPath,
+        ...(this.host.workflowsPath ? { workflows: this.host.workflowsPath } : {}),
+        ...(this.host.testsPath ? { tests: this.host.testsPath } : {}),
+      },
       loaded: this.loaded,
       instructions:
         '编辑 files.scenes 后调用 reload_rules；用 list_scenes / activate_scene / deactivate_scene 统一控制 HTTP/WS Mock，并以新记录验证命中。',

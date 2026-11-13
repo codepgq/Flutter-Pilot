@@ -1,7 +1,16 @@
 import { AutomationController } from './automation/controller';
 import { AutomationRuntime } from './automation/runtime';
 import { automationTools } from './automation/model';
-import { parseTool } from './mcp/tools';
+import { WorkflowController } from './workflows/controller';
+import { WorkflowStore } from './workflows/store';
+import { workflowMcpTools } from './workflows/tools';
+import { TestController } from './testing/controller';
+import { TestStore } from './testing/store';
+import { testMcpTools } from './testing/tools';
+import { compileTestMock, type TestMock } from './testing/mock-model';
+import { TestNetworkObserver } from './testing/network';
+import { readVmClock } from './testing/vm-clock';
+import { McpToolError, parseTool } from './mcp/tools';
 import * as vscode from 'vscode';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { readFile, mkdir, writeFile, rename, lstat } from 'node:fs/promises';
@@ -28,7 +37,7 @@ import { VmDiscovery, createVscodeDiscoveryHost } from './vm/discovery';
 import { VmAutoConnector } from './vm/autoConnect';
 import { isWebSocketHandshake } from './vm/profiler';
 import { validateWsRuleDocument, wsUrlMatches } from './ws/rules';
-import type { WsRule, WsMessageQuery } from './ws/model';
+import type { WsRule, WsMessage, WsMessageQuery } from './ws/model';
 import { openProjectBinding, type ProjectBinding, type ProjectSettings } from './project';
 import { prepareProjectStorage } from './projectStorage';
 import {
@@ -250,6 +259,23 @@ class Workbench {
   private readonly vm: VmSession;
   private readonly ui: VmUiController;
   private readonly automation: AutomationController;
+  private readonly workflows: WorkflowController;
+  private readonly workflowStore: WorkflowStore;
+  private workflowOwner?: string;
+  private workflowRunId?: string;
+  private workflowList: Awaited<ReturnType<WorkflowController['list']>> | undefined;
+  private workflowError?: string;
+  private executionEpoch = 0;
+  private workflowLaunch?: { key: string; signal?: AbortSignal };
+  private testLaunch?: { key: string; signal?: AbortSignal };
+  private readonly tests: TestController;
+  private readonly testStore: TestStore;
+  private readonly testObserver: TestNetworkObserver;
+  private testRunId?: string;
+  private testList: Awaited<ReturnType<TestController['list']>> | undefined;
+  private testError?: string;
+  private readonly testEnvironments = new Map<string, { http: boolean; ws: boolean; needsWs: boolean }>();
+  private readonly testCleanup = new Map<string, Promise<void>>();
   private readonly mcpNetwork: McpNetworkController;
   private readonly mcpLifecycle: McpLifecycleController;
   private mcpServer?: McpSessionServer;
@@ -362,6 +388,33 @@ class Workbench {
         changed: () => this.push(),
       },
     );
+    this.workflowStore = new WorkflowStore(project.rulesDirectory);
+    this.workflows = new WorkflowController(this.workflowStore, {
+      acquire: async (owner) => {
+        if (
+          this.workflowLaunch &&
+          (this.workflowLaunch.key !== this.executionKey() || this.workflowLaunch.signal?.aborted)
+        )
+          throw new McpToolError('SESSION_INVALIDATED', '流程预检期间会话已取消或变更，未执行 UI。');
+        if (this.testEnvironments.size)
+          throw new McpToolError('TEST_CLEANUP_REQUIRED', '上次测试环境尚未恢复，请先在业务测试中恢复环境。');
+        if (this.workflowOwner && this.workflowOwner !== owner)
+          throw new McpToolError('WORKFLOW_BUSY', '已有流程或测试正在运行。');
+        this.workflowOwner = owner;
+        try {
+          await this.automation.acquireWorkflow(owner);
+        } catch (error) {
+          if (this.workflowOwner === owner) this.workflowOwner = undefined;
+          throw error;
+        }
+      },
+      execute: (owner, tool, args, signal) => this.automation.executeWorkflow(owner, tool, args, signal),
+      release: async (owner) => {
+        await this.automation.releaseWorkflow(owner);
+        if (this.workflowOwner === owner) this.workflowOwner = undefined;
+      },
+      changed: () => this.push(),
+    });
     this.scenes = new SceneController(this.store, {
       snapshot: () => ({
         key: `${this.mode}:${this.vmEpoch}:${this.vm.state.status}:${this.vm.state.isolates}:${this.engineEpoch}:${this.proxyActive}`,
@@ -426,8 +479,66 @@ class Workbench {
       stopUnreachableProxy: () => this.engine.stop(),
       changed: () => this.push(),
     });
+    this.testStore = new TestStore(project.rulesDirectory);
+    this.testObserver = new TestNetworkObserver({
+      clock: () => readVmClock(this.vm.client),
+      subscribe: (callbacks) => {
+        const http = (entry: HistoryEntry) => callbacks.http(entry);
+        const ws = (entry: WsMessage) => callbacks.ws(entry);
+        const loss = () => callbacks.loss();
+        this.vm.on('observation.http', http);
+        this.vm.on('observation.loss', loss);
+        this.vm.websocket.on('observation.ws', ws);
+        this.vm.websocket.on('observation.loss', loss);
+        return () => {
+          this.vm.off('observation.http', http);
+          this.vm.off('observation.loss', loss);
+          this.vm.websocket.off('observation.ws', ws);
+          this.vm.websocket.off('observation.loss', loss);
+        };
+      },
+      connections: () => this.vm.websocket.store.connections(),
+    });
+    this.tests = new TestController(this.testStore, {
+      acquire: async (owner) => {
+        if (
+          this.testLaunch &&
+          (this.testLaunch.key !== this.executionKey() || this.testLaunch.signal?.aborted)
+        )
+          throw new McpToolError('SESSION_INVALIDATED', '测试预检期间会话已取消或变更，未执行 UI。');
+        if (this.workflowOwner && this.workflowOwner !== owner)
+          throw new McpToolError('WORKFLOW_BUSY', '已有流程或测试正在运行。');
+        this.workflowOwner = owner;
+        try {
+          await this.automation.acquireWorkflow(owner);
+        } catch (error) {
+          if (this.workflowOwner === owner) this.workflowOwner = undefined;
+          throw error;
+        }
+      },
+      execute: (owner, tool, args, signal) => this.automation.executeWorkflow(owner, tool, args, signal),
+      release: async (owner) => {
+        await this.automation.releaseWorkflow(owner);
+        if (this.workflowOwner === owner) this.workflowOwner = undefined;
+      },
+      changed: () => this.push(),
+      loadWorkflows: () => this.workflowStore.read(),
+      prepare: (runId, sceneId, mock, requirements) => this.prepareTest(runId, sceneId, mock, requirements),
+      ready: (runId, signal) => this.prepareTestReady(runId, signal),
+      cleanup: (runId) => this.cleanupTest(runId),
+      baseline: () => this.testObserver.baseline(),
+      http: (baseline) => this.testObserver.http(baseline),
+      ws: (baseline) => this.testObserver.ws(baseline),
+      injectWs: async (url, text, signal) => {
+        const connectionId = await this.resolveTestSocket(url, signal);
+        await this.vm.websocket.push(connectionId, text, signal);
+        return { connectionId };
+      },
+    });
     this.mcpNetwork = new McpNetworkController({
       scenesPath: this.store.file,
+      workflowsPath: this.workflowStore.file,
+      testsPath: this.testStore.file,
       listScenes: () => this.scenes.summary(),
       activateScene: (id) => this.scenes.activate(id),
       reloadScenes: () => this.scenes.reload(),
@@ -475,6 +586,7 @@ class Workbench {
     this.vm.client.on('disconnected', () => {
       this.vmEpoch++;
       this.ui.invalidate();
+      this.cancelCurrentWorkflow();
       this.mcpState.ui = { supported: false, reason: 'VM 已断开，请连接后重新探测' };
     });
     this.vmAuto = new VmAutoConnector({
@@ -591,12 +703,35 @@ class Workbench {
       if (this.panel !== panel || !message || typeof message !== 'object') return;
       const input = message as { action?: string; payload?: { enabled?: boolean } };
       if (input.action === 'mcp.enable' && input.payload?.enabled === false) {
+        this.cancelCurrentWorkflow();
         ++this.mcpGeneration;
         this.ui.invalidate();
         this.mcpState.enabled = false;
       }
       if (input.action === 'automation.cancel') {
+        if (this.workflowOwner) {
+          this.cancelCurrentWorkflow();
+          return;
+        }
         this.automation.cancel();
+        return;
+      }
+      if (input.action === 'workflows.cancel') {
+        try {
+          const runId = (input.payload as { runId?: unknown } | undefined)?.runId;
+          if (typeof runId === 'string') this.workflows.cancel(runId);
+        } catch (error) {
+          this.report(error);
+        }
+        return;
+      }
+      if (input.action === 'tests.cancel') {
+        try {
+          const runId = (input.payload as { runId?: unknown } | undefined)?.runId;
+          if (typeof runId === 'string') this.tests.cancel(runId);
+        } catch (error) {
+          this.report(error);
+        }
         return;
       }
       if (input.action === 'automation.inspect') {
@@ -681,6 +816,10 @@ class Workbench {
   private push() {
     this.onChange();
     if (this.disposed || !this.panel) return;
+    const activeWorkflow = this.workflows.snapshot.activeRunId;
+    if (activeWorkflow) this.workflowRunId = activeWorkflow;
+    const activeTest = this.tests.snapshot.activeRunId;
+    if (activeTest) this.testRunId = activeTest;
     const state: WorkbenchState = {
       mode: this.mode,
       vm: { ...this.vm.state },
@@ -688,6 +827,23 @@ class Workbench {
       ws: { ...this.vm.websocket.state },
       mcp: this.mcpState,
       automation: this.automation.snapshot,
+      workflows: {
+        file: this.workflowStore.file,
+        catalogue: this.workflowList,
+        ...(this.workflowRunId ? { run: this.workflows.get(this.workflowRunId).run } : {}),
+        running: !!activeWorkflow,
+        locked: !!this.workflowOwner,
+        error: this.workflowError,
+      },
+      tests: {
+        file: this.testStore.file,
+        catalogue: this.testList,
+        ...(this.testRunId ? { run: this.tests.get(this.testRunId).run } : {}),
+        running: !!activeTest,
+        locked: !!this.workflowOwner,
+        error: this.testError,
+        cleanupPending: [...this.testEnvironments.keys()].filter((id) => id !== activeTest),
+      },
       rules: this.rules,
       scenes: this.scenes.document,
       selectedSceneId: this.scenes.selected?.id,
@@ -745,6 +901,8 @@ class Workbench {
   private async initializeSession() {
     await mkdir(this.storage, { recursive: true, mode: 0o700 });
     await this.scenes.initialize();
+    await this.refreshWorkflows();
+    await this.refreshTests();
     await this.vm.websocket.init();
     // Existing HTTP facts stay intact; only positively identified upgrade records are projected.
     for (let offset = 0; offset < 100000; offset += 100) {
@@ -924,6 +1082,8 @@ class Workbench {
     );
   }
   async stop() {
+    this.cancelCurrentWorkflow();
+    await Promise.all([this.workflows.waitForIdle(), this.tests.waitForIdle()]);
     await this.initialize();
     await this.enqueue(() =>
       this.operation(async () => {
@@ -964,8 +1124,258 @@ class Workbench {
       this.push();
     }
   }
+  private async refreshWorkflows() {
+    try {
+      this.workflowList = await this.workflows.list();
+      this.workflowError = undefined;
+    } catch (error) {
+      this.workflowList = undefined;
+      this.workflowError = messageOf(error);
+    }
+    this.push();
+  }
+  private cancelCurrentWorkflow() {
+    ++this.executionEpoch;
+    const id = this.workflows.snapshot.activeRunId;
+    if (id) this.workflows.cancel(id);
+    const testId = this.tests.snapshot.activeRunId;
+    if (testId) this.tests.cancel(testId);
+  }
+  private executionKey() {
+    return `${this.mcpGeneration}:${this.vmEpoch}:${this.executionEpoch}`;
+  }
+  private ensureTestCleanupComplete() {
+    if (this.testEnvironments.size && !this.tests.snapshot.activeRunId)
+      throw new McpToolError('TEST_CLEANUP_REQUIRED', '上次测试环境尚未恢复，请先在业务测试中恢复环境。');
+  }
+  private async refreshTests() {
+    try {
+      this.testList = await this.tests.list();
+      this.testError = undefined;
+    } catch (error) {
+      this.testList = undefined;
+      this.testError = messageOf(error);
+    }
+    this.push();
+  }
+  private async prepareTest(
+    runId: string,
+    sceneId: string | undefined,
+    mock: TestMock | undefined,
+    requirements: { http: boolean; ws: boolean } = { http: true, ws: false },
+  ) {
+    if (this.mode !== 'vm' || this.vm.state.status !== 'connected')
+      throw new McpToolError(
+        'TEST_VM_REQUIRED',
+        '业务测试需要当前已连接的 Flutter Debug VM，并使用 VM 模式采集本轮网络。',
+      );
+    this.testEnvironments.set(runId, {
+      http: this.vm.state.captureEnabled === true,
+      ws: this.vm.websocket.state.captureEnabled,
+      needsWs: requirements.ws,
+    });
+    const source = sceneId
+      ? this.scenes.document.scenes.find((scene) => scene.id === sceneId)
+      : this.scenes.active;
+    const wsRules = (source?.wsRules ?? []).filter((rule) => rule.enabled);
+    const sockets = this.vm.websocket.state.connections.filter(
+      (connection) => connection.status === 'open' && connection.capture === 'attached',
+    );
+    const deferWs = wsRules.some(
+      (rule) =>
+        !sockets.some(
+          (connection) =>
+            rule.match.connectionId === connection.id ||
+            (!!rule.match.url && wsUrlMatches(rule.match.url, connection.url)),
+        ),
+    );
+    this.testEnvironments.get(runId)!.needsWs ||= wsRules.length > 0;
+    await this.scenes.beginRun(runId, sceneId, mock ? compileTestMock(mock, runId) : [], { deferWs });
+    if (requirements.http) await this.vm.setCaptureEnabled(true);
+    if (this.testEnvironments.get(runId)!.needsWs) {
+      await this.vm.websocket.setCaptureEnabled(true);
+    }
+    const deadline = Date.now() + 10000;
+    while (true) {
+      if (this.disposed || this.tests.get(runId).run.cancelRequested || this.vm.state.status !== 'connected')
+        throw new McpToolError('TEST_PREPARATION_CANCELLED', '测试准备已取消或 VM 已断开。');
+      const runtime = this.scenes.runtime;
+      const pending = [runtime.http].filter((domain) => domain.status === 'pending');
+      if (!pending.length) {
+        const failure = [runtime.http].find((domain) =>
+          ['error', 'unsupported', 'paused'].includes(domain.status),
+        );
+        if (failure) throw new McpToolError('TEST_MOCK_NOT_READY', '临时 Mock 未实际应用，请检查接入状态。');
+        break;
+      }
+      if (Date.now() >= deadline)
+        throw new McpToolError('TEST_MOCK_NOT_READY', '临时 Mock 接入超时，尚未执行测试流程。');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await this.scenes.reconcile();
+    }
+  }
+  private async prepareTestReady(runId: string, signal: AbortSignal) {
+    if (!this.testEnvironments.get(runId)?.needsWs) return;
+    const deadline = Date.now() + 10000;
+    while (true) {
+      signal.throwIfAborted();
+      if (this.vm.state.status !== 'connected')
+        throw new McpToolError('VM_DISCONNECTED', '等待 WS 接入时 VM 已断开。');
+      await this.vm.websocket.rescan();
+      signal.throwIfAborted();
+      const rules = this.scenes.wsRules(this.scenes.active).filter((rule) => rule.enabled);
+      const socketsReady = () => {
+        const sockets = this.vm.websocket.state.connections.filter(
+          (connection) => connection.status === 'open' && connection.capture === 'attached',
+        );
+        return (
+          sockets.length > 0 &&
+          rules.every((rule) =>
+            sockets.some(
+              (connection) =>
+                rule.match.connectionId === connection.id ||
+                (!!rule.match.url && wsUrlMatches(rule.match.url, connection.url)),
+            ),
+          )
+        );
+      };
+      if (socketsReady()) {
+        await this.scenes.activateRunWs(runId);
+        signal.throwIfAborted();
+        const runtime = this.scenes.runtime.ws;
+        if (['error', 'unsupported', 'paused'].includes(runtime.status))
+          throw new McpToolError('TEST_WS_NOT_READY', '测试 WS 规则未实际应用，未执行主流程。');
+        if (socketsReady() && (!rules.length || runtime.status === 'applied')) return;
+      }
+      if (Date.now() >= deadline)
+        throw new McpToolError('TEST_WS_NOT_READY', '前置流程结束后仍未确认目标 WS 接入，未执行主流程。');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  private async resolveTestSocket(url: string, signal: AbortSignal): Promise<string> {
+    const deadline = Date.now() + 10000;
+    while (true) {
+      signal.throwIfAborted();
+      if (this.vm.state.status !== 'connected')
+        throw new McpToolError('VM_DISCONNECTED', '等待事件目标时 VM 已断开。');
+      const matches = this.vm.websocket.state.connections.filter(
+        (connection) =>
+          connection.status === 'open' && connection.capture === 'attached' && connection.url === url,
+      );
+      if (matches.length > 1)
+        throw new McpToolError('AMBIGUOUS_WS_CONNECTION', '事件 URL 匹配多个在线连接，未投递事件。');
+      if (matches.length === 1) return matches[0].id;
+      if (Date.now() >= deadline)
+        throw new McpToolError('WS_CONNECTION_NOT_READY', '事件 URL 未匹配已接入在线连接，未投递事件。');
+      await this.vm.websocket.rescan();
+      signal.throwIfAborted();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  private cleanupTest(runId: string): Promise<void> {
+    const existing = this.testCleanup.get(runId);
+    if (existing) return existing;
+    const operation = this.restoreTestEnvironment(runId).finally(() => {
+      this.testCleanup.delete(runId);
+      this.push();
+    });
+    this.testCleanup.set(runId, operation);
+    return operation;
+  }
+  private async restoreTestEnvironment(runId: string) {
+    this.testObserver.close();
+    const capture = this.testEnvironments.get(runId);
+    const results = await Promise.allSettled([this.scenes.endRun(runId)]);
+    if (capture) {
+      // Restore both domains even if restoring one fails or the VM disconnected.
+      results.push(
+        ...(await Promise.allSettled([
+          this.vm.setCaptureEnabled(capture.http),
+          this.vm.websocket.setCaptureEnabled(capture.ws),
+        ])),
+      );
+    }
+    const failures = results.filter((result) => result.status === 'rejected');
+    if (failures.length)
+      throw new McpToolError('TEST_CLEANUP_FAILED', '测试临时环境未能完整恢复，请检查连接与场景状态。');
+    this.testEnvironments.delete(runId);
+  }
+  private async executeTestTool(tool: string, args: Record<string, unknown>, signal?: AbortSignal) {
+    try {
+      if (tool === 'list_tests') {
+        const result = await this.tests.list();
+        this.testList = result;
+        this.testError = undefined;
+        this.push();
+        return result;
+      }
+      if (tool === 'run_test') {
+        if (!this.tests.snapshot.activeRunId)
+          for (const id of this.testEnvironments.keys()) await this.cleanupTest(id);
+        this.testLaunch = { key: this.executionKey(), signal };
+        let result;
+        try {
+          result = await this.tests.start(
+            args.testId as string,
+            args.inputs as Record<string, string> | undefined,
+            args.backend as 'auto' | 'flutter' | 'device' | undefined,
+          );
+        } finally {
+          this.testLaunch = undefined;
+        }
+        this.testRunId = result.runId;
+        this.push();
+        return result;
+      }
+      if (tool === 'cancel_test_run') {
+        const result = this.tests.cancel(args.runId as string);
+        if (result.status !== 'running' && this.testEnvironments.has(args.runId as string))
+          await this.cleanupTest(args.runId as string);
+        return result;
+      }
+      return this.tests.get(args.runId as string);
+    } catch (error) {
+      if (error instanceof Error && typeof (error as Error & { code?: string }).code === 'string')
+        throw new McpToolError((error as Error & { code: string }).code, error.message);
+      throw error;
+    }
+  }
+  private async executeWorkflowTool(tool: string, args: Record<string, unknown>, signal?: AbortSignal) {
+    try {
+      if (tool === 'list_workflows') {
+        const result = await this.workflows.list();
+        this.workflowList = result;
+        this.workflowError = undefined;
+        this.push();
+        return result;
+      }
+      if (tool === 'run_workflow') {
+        this.workflowLaunch = { key: this.executionKey(), signal };
+        let result;
+        try {
+          result = await this.workflows.start(
+            args.workflowId as string,
+            args.inputs as Record<string, string> | undefined,
+            args.backend as 'auto' | 'flutter' | 'device' | undefined,
+          );
+        } finally {
+          this.workflowLaunch = undefined;
+        }
+        this.workflowRunId = result.runId;
+        this.push();
+        return result;
+      }
+      if (tool === 'cancel_workflow_run') return this.workflows.cancel(args.runId as string);
+      return this.workflows.get(args.runId as string);
+    } catch (error) {
+      if (error instanceof Error && typeof (error as Error & { code?: string }).code === 'string')
+        throw new McpToolError((error as Error & { code: string }).code, error.message);
+      throw error;
+    }
+  }
   async screenshot(): Promise<void> {
     if (this.busy) return;
+    this.ensureTestCleanupComplete();
     await this.operation(async () => {
       if (this.mode !== 'vm' || this.vm.state.status !== 'connected')
         throw new Error('请先在“连接与诊断”连接 Flutter Debug VM，再截取 App 页面。');
@@ -1244,6 +1654,10 @@ class Workbench {
     }
   }
   private async setMcpEnabled(enabled: boolean, persist = true) {
+    if (this.workflowOwner) {
+      this.cancelCurrentWorkflow();
+      await Promise.all([this.workflows.waitForIdle(), this.tests.waitForIdle()]);
+    }
     ++this.mcpGeneration;
     this.ui.invalidate();
     this.mcpState.error = undefined;
@@ -1269,10 +1683,26 @@ class Workbench {
               automation: this.automation.snapshot,
               network: true,
               lifecycle: this.mcpLifecycle.status(),
+              workflows: { supported: true, file: this.workflowStore.file, running: !!this.workflowOwner },
+              tests: {
+                supported: true,
+                file: this.testStore.file,
+                running: !!this.tests.snapshot.activeRunId,
+              },
             },
           }),
           call: async (tool, args, context) => {
+            if (
+              this.disposed ||
+              context.signal.aborted ||
+              epoch !== this.mcpGeneration ||
+              !this.mcpState.enabled
+            )
+              return { ok: false, code: 'SESSION_INVALIDATED', message: 'MCP 会话已关闭，操作未执行。' };
             if (tool === 'get_automation_status') return this.automation.execute(tool, args, context.signal);
+            if (['get_workflow_run', 'cancel_workflow_run'].includes(tool))
+              return this.executeWorkflowTool(tool, args);
+            if (['get_test_run', 'cancel_test_run'].includes(tool)) return this.executeTestTool(tool, args);
             const run = this.messageQueue.then(async () => {
               if (
                 this.disposed ||
@@ -1282,6 +1712,13 @@ class Workbench {
               )
                 return { ok: false, code: 'SESSION_INVALIDATED', message: 'MCP 会话已关闭，操作未执行。' };
               if (tool === 'hot_reload' || tool === 'hot_restart') {
+                this.ensureTestCleanupComplete();
+                if (this.workflowOwner)
+                  return {
+                    ok: false,
+                    code: 'WORKFLOW_BUSY',
+                    message: '流程运行期间不能热更新，请先取消流程。',
+                  };
                 try {
                   return await this.mcpLifecycle.execute(
                     tool,
@@ -1293,7 +1730,29 @@ class Workbench {
                   this.push();
                 }
               }
-              if (automationTools.has(tool)) return this.automation.execute(tool, args, context.signal);
+              if (Object.hasOwn(workflowMcpTools, tool))
+                return this.executeWorkflowTool(tool, args, context.signal);
+              if (Object.hasOwn(testMcpTools, tool)) return this.executeTestTool(tool, args, context.signal);
+              if (automationTools.has(tool)) {
+                this.ensureTestCleanupComplete();
+                return this.automation.execute(tool, args, context.signal);
+              }
+              if (
+                this.testEnvironments.size &&
+                [
+                  'reload_rules',
+                  'activate_scene',
+                  'deactivate_scene',
+                  'set_capture_enabled',
+                  'inject_ws_message',
+                  'send_ws_message',
+                ].includes(tool)
+              )
+                return {
+                  ok: false,
+                  code: 'TEST_BUSY',
+                  message: '测试环境尚未释放，请先取消、等待完成或恢复测试环境。',
+                };
               try {
                 return await this.mcpNetwork.execute(tool, args, context.signal);
               } finally {
@@ -1359,6 +1818,70 @@ class Workbench {
       return;
     }
     await this.initialize();
+    if (action === 'workflows.refresh') {
+      await this.refreshWorkflows();
+      return;
+    }
+    if (action === 'workflows.run') {
+      await this.executeWorkflowTool(
+        'run_workflow',
+        parseTool('run_workflow', { ...payload, sessionId: this.mcpSessionId }),
+      );
+      return;
+    }
+    if (action === 'workflows.open') {
+      try {
+        await writeFile(
+          this.workflowStore.file,
+          JSON.stringify({ version: 1, workflows: [] }, null, 2) + '\n',
+          { flag: 'wx', mode: 0o600 },
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+      await vscode.window.showTextDocument(vscode.Uri.file(this.workflowStore.file), { preview: false });
+      return;
+    }
+    if (action === 'tests.refresh') {
+      await this.refreshTests();
+      return;
+    }
+    if (action === 'tests.cleanup') {
+      if (this.tests.snapshot.activeRunId) throw new Error('请先取消或等待当前测试结束。');
+      for (const id of this.testEnvironments.keys()) await this.cleanupTest(id);
+      return;
+    }
+    if (action === 'tests.run') {
+      await this.executeTestTool(
+        'run_test',
+        parseTool('run_test', { ...payload, sessionId: this.mcpSessionId }),
+      );
+      return;
+    }
+    if (action === 'tests.open') {
+      try {
+        await writeFile(this.testStore.file, JSON.stringify({ version: 1, tests: [] }, null, 2) + '\n', {
+          flag: 'wx',
+          mode: 0o600,
+        });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+      await vscode.window.showTextDocument(vscode.Uri.file(this.testStore.file), { preview: false });
+      return;
+    }
+    if (
+      this.workflowOwner &&
+      ['vm.disconnect', 'vm.connect', 'vm.discovery.connect', 'connection.mode', 'mcp.probe'].includes(action)
+    )
+      throw new Error('流程正在运行，请先取消流程再更改连接或探测 UI。');
+    if (
+      this.testEnvironments.size &&
+      /^(scenes\.(?!select)|rules\.|ws\.(rules\.|capture|mock|push|send|clear|rescan)|vm\.(capture|rescan)|history\.(delete|clear)|project.reload|start$|stop$|proxy.stop|setLan$|setup\.(apply|revert))/.test(
+        action,
+      )
+    )
+      throw new Error('测试环境尚未释放，请先取消、等待完成或恢复测试环境。');
     if (action === 'screenshot.capture') {
       await this.screenshot();
       return;
@@ -1426,6 +1949,7 @@ class Workbench {
         case 'automation.setup':
         case 'automation.connect':
         case 'automation.disconnect': {
+          this.ensureTestCleanupComplete();
           const tool = {
             'automation.inspect': 'get_automation_status',
             'automation.setup': 'setup_automation',
@@ -1972,6 +2496,9 @@ class Workbench {
     if (this.disposed) return;
     this.disposed = true;
     ++this.mcpGeneration;
+    await this.workflows.dispose();
+    await this.tests.dispose();
+    this.testObserver.close();
     this.ui.invalidate();
     await this.mcpServer?.stop().catch(() => undefined);
     await this.automation.dispose();

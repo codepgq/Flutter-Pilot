@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Rule } from './model';
+import { validateRuleDocument, type Rule } from './model';
 import type { WsRule } from './ws/model';
 import type { Scene, SceneDocument, SceneRuntime } from './scene-model';
 import { SceneStore } from './scenes';
@@ -39,17 +39,27 @@ export class SceneController {
   private loaded = false;
   private applying = false;
   private retryTimer?: ReturnType<typeof setTimeout>;
+  private run?: {
+    id: string;
+    scene: Scene;
+    paused: Set<Domain>;
+    pendingCaptures: Map<Domain, boolean>;
+    temporary: WsRule[];
+    restoring?: boolean;
+  };
   constructor(
     readonly store: SceneStore,
     private readonly host: SceneHost,
   ) {}
   get active() {
+    if (this.run && !this.run.restoring) return this.run.scene;
     return this.document.scenes.find((scene) => scene.id === this.document.activeSceneId);
   }
   summary() {
     return {
       version: this.document.version,
       activeSceneId: this.document.activeSceneId,
+      runtimeRunId: this.run?.id,
       scenes: this.document.scenes.map((scene) => ({
         id: scene.id,
         name: scene.name,
@@ -87,6 +97,112 @@ export class SceneController {
     this.loaded = true;
     await this.reconcile();
   }
+  private ensureNoRun() {
+    if (this.run) throw new Error(`测试运行 ${this.run.id} 正在使用场景，请等待结束或取消后再修改`);
+  }
+  /** Apply an in-memory test environment without persisting or changing activeSceneId. */
+  beginRun(runId: string, sceneId?: string, httpOverrides: Rule[] = [], options: { deferWs?: boolean } = {}) {
+    return this.enqueue(async () => {
+      this.ensureNoRun();
+      if (!runId || runId.trim().length === 0 || runId.length > 128 || /[\x00-\x1f\x7f]/.test(runId))
+        throw new Error('运行 ID 无效');
+      if (!this.loaded) throw new Error('场景尚未初始化');
+      const snapshot = this.host.snapshot();
+      if (!snapshot.connected || snapshot.proxyRulesUnreachable)
+        throw new Error('测试环境尚未连接，不能开始测试');
+      const source =
+        sceneId === undefined ? this.active : this.document.scenes.find((scene) => scene.id === sceneId);
+      if (sceneId !== undefined && !source) throw new Error('测试场景不存在');
+      const scene: Scene = source
+        ? structuredClone(source)
+        : { id: `run-${randomUUID()}`, name: '测试临时场景', httpRules: [], wsRules: [] };
+      // Each group retains descending priority and stable tie order. Dense ranks
+      // ensure overrides outrank even a base rule using MAX_SAFE_INTEGER.
+      const ordered = [httpOverrides, scene.httpRules].flatMap((rules) =>
+        rules.slice().sort((a, b) => b.priority - a.priority),
+      );
+      scene.httpRules = validateRuleDocument({
+        version: 1,
+        rules: ordered.map((rule, index) => ({ ...rule, priority: ordered.length - index })),
+      }).rules;
+      this.run = {
+        id: runId,
+        scene,
+        paused: new Set(this.paused),
+        pendingCaptures: new Map(this.pendingCaptures),
+        temporary: structuredClone(this.temporary),
+      };
+      if (source?.id !== this.document.activeSceneId) this.temporary = [];
+      this.paused.clear();
+      // Login/setup may be responsible for creating the target socket. HTTP
+      // fixtures are ready before setup; WS activation follows the ready hook.
+      if (options.deferWs) this.paused.add('ws');
+      this.pendingCaptures.clear();
+      // Keep ownership on failure so endRun can remove partially applied rules.
+      await this.apply(true);
+      if (Object.keys(this.errors).length)
+        throw new Error(`测试场景应用失败：${Object.values(this.errors).join('；')}`);
+      if (!this.host.snapshot().connected) throw new Error('应用测试场景时连接已断开');
+      this.host.changed();
+    });
+  }
+  /** Resume this run's WS domain without detaching HTTP or resetting fixture state. */
+  activateRunWs(runId: string) {
+    return this.enqueue(async () => {
+      if (!this.run || this.run.id !== runId || this.run.restoring)
+        throw new Error('当前测试未持有可激活的 WS 场景');
+      const before = this.host.snapshot();
+      if (!before.connected || before.proxyRulesUnreachable) throw new Error('测试 WS 环境尚未连接');
+      if (this.appliedKey !== this.applicationKey(before) || this.errors.http)
+        throw new Error('测试环境在 setup 期间发生变化，不能继续激活 WS');
+      if (this.run.scene.httpRules.some((rule) => rule.enabled) && (!before.httpApplied || before.httpError))
+        throw new Error('测试 HTTP 环境尚未实际接入，不能继续激活 WS');
+      if (!this.paused.has('ws')) return;
+      const needed = this.wsRules(this.run.scene).some((rule) => rule.enabled);
+      if (needed && before.mode !== 'vm') throw new Error('代理模式不支持测试 WS Mock');
+      try {
+        if (needed) await this.host.enable('ws');
+        const after = this.host.snapshot();
+        if (!after.connected || after.key !== before.key || after.proxyRulesUnreachable)
+          throw new Error('激活测试 WS 时连接发生变化');
+        this.paused.delete('ws');
+        delete this.errors.ws;
+        this.appliedKey = this.applicationKey(after);
+        ++this.revision;
+      } catch (error) {
+        this.errors.ws = (error as Error).message;
+        throw error;
+      } finally {
+        this.host.changed();
+      }
+    });
+  }
+  /** Restore the saved environment. Failed restoration can be retried by the owner. */
+  endRun(runId: string) {
+    return this.enqueue(async () => {
+      if (!this.run) return;
+      if (this.run.id !== runId) throw new Error('不能结束其他测试运行的场景');
+      const run = this.run;
+      run.restoring = true;
+      this.paused = new Set(run.paused);
+      this.pendingCaptures = new Map(run.pendingCaptures);
+      this.temporary = structuredClone(run.temporary);
+      if (this.host.snapshot().proxyRulesUnreachable) {
+        if (!this.host.stopUnreachableProxy)
+          throw new Error('代理控制连接已断开，无法确认测试规则已移除；请停止代理后重试恢复');
+        await this.host.stopUnreachableProxy();
+        if (this.host.snapshot().proxyRulesUnreachable)
+          throw new Error('代理仍无法控制，无法确认测试规则已移除');
+      }
+      await this.apply(true);
+      if (this.host.snapshot().proxyRulesUnreachable)
+        throw new Error('恢复测试场景时代理控制连接已断开，测试规则移除结果未确认');
+      if (Object.keys(this.errors).length)
+        throw new Error(`测试场景恢复失败：${Object.values(this.errors).join('；')}`);
+      this.run = undefined;
+      this.host.changed();
+    });
+  }
   private ensureSafeChange(next: SceneDocument) {
     if (!this.host.snapshot().proxyRulesUnreachable) return;
     const activeRules = (doc: SceneDocument) => {
@@ -108,6 +224,7 @@ export class SceneController {
   }
   reload() {
     return this.enqueue(async () => {
+      this.ensureNoRun();
       const doc = await this.store.read();
       this.ensureSafeChange(doc);
       if (doc.activeSceneId !== this.document.activeSceneId) {
@@ -124,6 +241,7 @@ export class SceneController {
   }
   change(edit: (document: SceneDocument) => void, force = false, resetPaused = false) {
     return this.enqueue(async () => {
+      this.ensureNoRun();
       const before = this.document;
       const next = structuredClone(before);
       edit(next);
@@ -172,6 +290,7 @@ export class SceneController {
     if (temporary.length && id !== this.active?.id)
       return Promise.reject(new Error('临时连接规则只能加入当前激活场景'));
     return this.enqueue(async () => {
+      this.ensureNoRun();
       const doc = structuredClone(this.document);
       const scene = doc.scenes.find((scene) => scene.id === id);
       if (!scene) throw new Error('请选择目标场景');
@@ -193,6 +312,8 @@ export class SceneController {
   }
   expireTemporary(ids: string[]) {
     this.temporary = this.temporary.filter((rule) => ids.includes(rule.match.connectionId!));
+    if (this.run)
+      this.run.temporary = this.run.temporary.filter((rule) => ids.includes(rule.match.connectionId!));
   }
   dispose() {
     this.loaded = false;
@@ -201,6 +322,7 @@ export class SceneController {
   }
   setCapture(domain: Domain, enabled: boolean) {
     return this.enqueue(async () => {
+      this.ensureNoRun();
       if (domain === 'http' && this.host.snapshot().proxyRulesUnreachable)
         throw new Error('代理控制连接已断开，旧规则可能仍在生效。请等待重连或停止代理后再调整采集。');
       this.pendingCaptures.set(domain, enabled);

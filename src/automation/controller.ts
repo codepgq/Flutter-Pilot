@@ -1,6 +1,7 @@
 import { access } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
+import { performance } from 'node:perf_hooks';
 import type { UiResult } from '../vm/ui';
 import { executeMcpScreenshot } from '../screenshot';
 import { AutomationRuntime } from './runtime';
@@ -40,6 +41,16 @@ interface Resolved {
   nativeNode?: NativeNode;
   flutter?: Record<string, any>;
   geometry?: any;
+}
+interface WorkflowOwnership {
+  owner: string;
+  ready: boolean;
+  releasing: boolean;
+  cancellation: AbortController;
+  acquisition?: Promise<void>;
+  release?: Promise<void>;
+  vmIdentity?: { generation: string; deviceId?: string };
+  vmLease?: DeviceLease;
 }
 const gestureNames = new Set([
   'tap',
@@ -100,6 +111,8 @@ export class AutomationController {
   private connectionState?: AutomationState['status'];
   private diagnostics: string[] = [];
   private active?: AbortController;
+  private actionTimings?: Record<string, number>;
+  private workflow?: WorkflowOwnership;
   private boundVm?: { generation: string; deviceId: string };
   private readonly lease: DeviceLease;
   private readonly leaseRoot: string;
@@ -129,10 +142,107 @@ export class AutomationController {
     };
   }
   execute(tool: string, args: Record<string, any>, signal?: AbortSignal): Promise<UiResult> {
-    if (tool === 'get_automation_status' && this.active)
+    if (this.disposed) return Promise.resolve(fail('SESSION_INVALIDATED', '设备自动化已关闭。'));
+    if (tool === 'get_automation_status' && (this.active || this.workflow))
       return Promise.resolve(success({ automation: this.snapshot }));
+    if (this.workflow)
+      return Promise.resolve(fail('WORKFLOW_BUSY', '业务流程正在占用自动化操作，请等待完成或取消流程。'));
+    return this.enqueue(tool, args, signal);
+  }
+  /** Reserve admission immediately, then drain operations accepted before the workflow. */
+  acquireWorkflow(owner: string): Promise<void> {
+    if (!owner)
+      return Promise.reject(new AutomationError('INVALID_WORKFLOW_OWNER', '流程运行 ID 不能为空。'));
+    if (this.disposed)
+      return Promise.reject(new AutomationError('SESSION_INVALIDATED', '设备自动化已关闭。'));
+    if (this.workflow)
+      return Promise.reject(new AutomationError('WORKFLOW_BUSY', '已有业务流程占用自动化操作。'));
+    const workflow: WorkflowOwnership = {
+      owner,
+      ready: false,
+      releasing: false,
+      cancellation: new AbortController(),
+    };
+    this.workflow = workflow;
+    const barrier = this.queue;
+    workflow.acquisition = (async () => {
+      try {
+        await barrier;
+        if (this.disposed) throw new AutomationError('SESSION_INVALIDATED', '设备自动化已关闭。');
+        checkCancelled(workflow.cancellation.signal);
+        const identity = this.host.vmIdentity?.();
+        workflow.vmIdentity = identity ? { ...identity } : undefined;
+        const vmDevice = workflow.vmIdentity?.deviceId;
+        if (vmDevice && (!this.native || this.native.binding.deviceId !== vmDevice)) {
+          workflow.vmLease = new DeviceLease(this.leaseRoot);
+          await workflow.vmLease.acquire(vmDevice);
+        }
+        if (this.disposed) throw new AutomationError('SESSION_INVALIDATED', '设备自动化已关闭。');
+        checkCancelled(workflow.cancellation.signal);
+        workflow.ready = true;
+      } catch (error) {
+        await workflow.vmLease?.release();
+        if (this.workflow === workflow) this.workflow = undefined;
+        throw error;
+      } finally {
+        this.host.changed();
+      }
+    })();
+    this.host.changed();
+    return workflow.acquisition;
+  }
+  /** Execute through the original serial route and all VM/device safeguards. */
+  executeWorkflow(
+    owner: string,
+    tool: string,
+    args: Record<string, any>,
+    signal?: AbortSignal,
+  ): Promise<UiResult> {
+    if (this.disposed) return Promise.resolve(fail('SESSION_INVALIDATED', '设备自动化已关闭。'));
+    const workflow = this.workflow;
+    if (!workflow || workflow.owner !== owner)
+      return Promise.resolve(fail('WORKFLOW_OWNER_MISMATCH', '流程未持有自动化操作权。'));
+    if (!workflow.ready || workflow.releasing)
+      return Promise.resolve(fail('WORKFLOW_BUSY', '流程操作权正在准备或释放。'));
+    const combined = signal
+      ? AbortSignal.any([signal, workflow.cancellation.signal])
+      : workflow.cancellation.signal;
+    return this.enqueue(tool, args, combined, workflow);
+  }
+  /** Keep admission closed until every accepted workflow step has settled. */
+  releaseWorkflow(owner: string): Promise<void> {
+    const workflow = this.workflow;
+    if (!workflow || workflow.owner !== owner)
+      return Promise.reject(new AutomationError('WORKFLOW_OWNER_MISMATCH', '流程未持有自动化操作权。'));
+    if (workflow.release) return workflow.release;
+    workflow.releasing = true;
+    workflow.release = (async () => {
+      await workflow.acquisition?.catch(() => undefined);
+      await this.queue;
+      await workflow.vmLease?.release();
+      if (this.workflow === workflow) this.workflow = undefined;
+      this.host.changed();
+    })();
+    return workflow.release;
+  }
+  private enqueue(
+    tool: string,
+    args: Record<string, any>,
+    signal?: AbortSignal,
+    workflow?: WorkflowOwnership,
+  ): Promise<UiResult> {
     const operation = this.queue.then(async () => {
       if (this.disposed) return fail('SESSION_INVALIDATED', '设备自动化已关闭。');
+      if (workflow) {
+        if (this.workflow !== workflow) return fail('WORKFLOW_OWNER_MISMATCH', '流程未持有自动化操作权。');
+        const identity = this.host.vmIdentity?.();
+        if (
+          workflow.vmIdentity &&
+          (identity?.generation !== workflow.vmIdentity.generation ||
+            identity?.deviceId !== workflow.vmIdentity.deviceId)
+        )
+          return fail('SESSION_INVALIDATED', '流程执行期间 VM 会话发生变化，请检查当前页面后重新运行。');
+      }
       const controller = new AbortController();
       this.active = controller;
       const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
@@ -155,6 +265,28 @@ export class AutomationController {
       };
       let vmLease: DeviceLease | undefined;
       const nativeSequence = this.native?.dispatchSequence ?? 0;
+      const startedAt = performance.now();
+      const timings: Record<string, number> = {};
+      this.actionTimings = timings;
+      const measured = (result: UiResult): UiResult => {
+        const intrinsic = result.timings;
+        const valid =
+          intrinsic && typeof intrinsic === 'object' && !Array.isArray(intrinsic)
+            ? Object.fromEntries(
+                Object.entries(intrinsic).filter(
+                  ([key, value]) =>
+                    ['resolveMs', 'inputMs', 'waitMs'].includes(key) &&
+                    typeof value === 'number' &&
+                    Number.isFinite(value) &&
+                    value >= 0,
+                ),
+              )
+            : {};
+        return {
+          ...result,
+          timings: { ...valid, ...timings, totalMs: Math.max(0, performance.now() - startedAt) },
+        };
+      };
       combined.addEventListener('abort', cancel, { once: true });
       try {
         checkCancelled(combined);
@@ -162,6 +294,7 @@ export class AutomationController {
         if (
           vmDevice &&
           (!this.native || this.native.binding.deviceId !== vmDevice) &&
+          !(workflow?.vmLease && workflow.vmIdentity?.deviceId === vmDevice) &&
           ((tool === 'take_screenshot' && args.source !== 'device' && args.mode === 'long') ||
             (this.backend(args) === 'flutter' &&
               (gestureNames.has(tool) ||
@@ -172,35 +305,57 @@ export class AutomationController {
           vmLease = new DeviceLease(this.leaseRoot);
           await vmLease.acquire(vmDevice);
         }
-        const result = await this.perform(tool, args, combined);
+        const result =
+          tool === 'wait_for_widget'
+            ? await this.measure('waitMs', () => this.perform(tool, args, combined))
+            : await this.perform(tool, args, combined);
         if (combined.aborted)
-          return fail('CANCELLED', '操作已取消，结果未确认；请先检查界面。', {
-            uncertain: true,
-            backend: result.backend,
-          });
-        return result;
+          return measured(
+            fail('CANCELLED', '操作已取消，结果未确认；请先检查界面。', {
+              uncertain: true,
+              backend: result.backend,
+              timings: result.timings,
+            }),
+          );
+        return measured(result);
       } catch (error) {
-        return error instanceof AutomationError
-          ? fail(error.code, error.message, {
-              uncertain:
-                error.uncertain ||
-                ((this.native?.dispatchSequence ?? 0) > nativeSequence &&
-                  ['CANCELLED', 'DEVICE_CONNECTION_FAILED', 'DEVICE_DISCONNECTED'].includes(error.code)),
-              ...((error as any).candidates ? { candidates: (error as any).candidates } : {}),
-            })
-          : fail('AUTOMATION_FAILED', '操作失败，请检查设备连接和自动化诊断。');
+        return measured(
+          error instanceof AutomationError
+            ? fail(error.code, error.message, {
+                uncertain:
+                  error.uncertain ||
+                  ((this.native?.dispatchSequence ?? 0) > nativeSequence &&
+                    ['CANCELLED', 'DEVICE_CONNECTION_FAILED', 'DEVICE_DISCONNECTED'].includes(error.code)),
+                ...((error as any).candidates ? { candidates: (error as any).candidates } : {}),
+              })
+            : fail('AUTOMATION_FAILED', '操作失败，请检查设备连接和自动化诊断。'),
+        );
       } finally {
         await vmLease?.release();
         if (deadline) clearTimeout(deadline);
         combined.removeEventListener('abort', cancel);
         if (this.active === controller) this.active = undefined;
+        if (this.actionTimings === timings) this.actionTimings = undefined;
         this.host.changed();
       }
     });
     this.queue = operation.catch(() => undefined);
     return operation;
   }
+  private async measure<T>(
+    stage: 'resolveMs' | 'inputMs' | 'waitMs',
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const timings = this.actionTimings;
+    const started = performance.now();
+    try {
+      return await operation();
+    } finally {
+      if (timings) timings[stage] = (timings[stage] ?? 0) + Math.max(0, performance.now() - started);
+    }
+  }
   cancel() {
+    this.workflow?.cancellation.abort();
     this.active?.abort();
   }
   private device() {
@@ -323,6 +478,9 @@ export class AutomationController {
     return success({ disconnected: true });
   }
   private async find(args: Record<string, any>, signal: AbortSignal): Promise<UiResult> {
+    return this.measure('resolveMs', () => this.findInternal(args, signal));
+  }
+  private async findInternal(args: Record<string, any>, signal: AbortSignal): Promise<UiResult> {
     if (this.isNativeSelector(args)) {
       const { xpath: _, ...widget } = await this.device().find(selectorFor(args), signal, args.scopeSelector);
       return success({ source: 'device', count: 1, widget });
@@ -330,6 +488,13 @@ export class AutomationController {
     return this.vm('find_widget', args);
   }
   private async resolve(
+    args: Record<string, any>,
+    backend: 'flutter' | 'device',
+    signal: AbortSignal,
+  ): Promise<Resolved> {
+    return this.measure('resolveMs', () => this.resolveInternal(args, backend, signal));
+  }
+  private async resolveInternal(
     args: Record<string, any>,
     backend: 'flutter' | 'device',
     signal: AbortSignal,
@@ -433,7 +598,9 @@ export class AutomationController {
     if (
       JSON.stringify(widget.bounds) !== JSON.stringify(after.widget.bounds) ||
       widget.type !== after.widget.type ||
-      JSON.stringify(geometry) !== JSON.stringify(afterGeometry) ||
+      ['width', 'height', 'devicePixelRatio', 'viewId'].some(
+        (field) => geometry[field] !== afterGeometry[field],
+      ) ||
       JSON.stringify(screenGeometry) !== JSON.stringify(currentGeometry)
     )
       throw new AutomationError('LAYOUT_CHANGED', '定位期间布局或屏幕方向发生变化，请重新定位。');
@@ -459,10 +626,10 @@ export class AutomationController {
       destination?.point,
     );
     if (backend === 'device') {
-      await this.device().perform(tracks, signal);
+      await this.measure('inputMs', () => this.device().perform(tracks, signal));
       return success({ backend, inputMethod: 'system_pointer', dispatched: true, verified: false });
     }
-    const result = await this.vm('perform_gesture', { tracks });
+    const result = await this.measure('inputMs', () => this.vm('perform_gesture', { tracks }));
     if (!result.ok && ['TIMEOUT', 'UI_UNAVAILABLE', 'SESSION_INVALIDATED'].includes(result.code ?? ''))
       result.uncertain = true;
     return { ...result, backend, inputMethod: 'flutter_pointer', dispatched: result.ok, verified: false };
@@ -514,10 +681,10 @@ export class AutomationController {
         region.point,
         region.screen,
       );
-      await this.device().perform(tracks, signal);
+      await this.measure('inputMs', () => this.device().perform(tracks, signal));
       // Flutter ignores hit tests during ballistic scrolling. Wait for the region
       // to accept input again before checking a target or sending the next swipe.
-      await pause(100, signal);
+      await this.measure('waitMs', () => pause(100, signal));
       if (!args.point && !this.isNativeSelector(args)) {
         const until = Date.now() + 1500;
         while (true) {
@@ -529,7 +696,7 @@ export class AutomationController {
               dispatched: true,
               uncertain: true,
             });
-          await pause(50, signal);
+          await this.measure('waitMs', () => pause(50, signal));
         }
       }
     }
@@ -637,13 +804,15 @@ export class AutomationController {
       );
     const device = this.device(),
       target = await this.resolve(args, backend, signal);
-    await device.perform(buildGesture('tap', {}, target.point, target.screen), signal);
-    const active = await device.call('GET', '/element/active', undefined, signal);
-    const id = active?.['element-6066-11e4-a52e-4f735466cecf'];
-    if (typeof id !== 'string') throw new AutomationError('NO_FOCUS', '未找到获得焦点的输入框。');
-    const path = `/element/${encodeURIComponent(id)}`;
-    await device.call('POST', `${path}/clear`, {}, signal);
-    await device.call('POST', `${path}/value`, { text: args.text, value: Array.from(args.text) }, signal);
+    await this.measure('inputMs', async () => {
+      await device.perform(buildGesture('tap', {}, target.point, target.screen), signal);
+      const active = await device.call('GET', '/element/active', undefined, signal);
+      const id = active?.['element-6066-11e4-a52e-4f735466cecf'];
+      if (typeof id !== 'string') throw new AutomationError('NO_FOCUS', '未找到获得焦点的输入框。');
+      const path = `/element/${encodeURIComponent(id)}`;
+      await device.call('POST', `${path}/clear`, {}, signal);
+      await device.call('POST', `${path}/value`, { text: args.text, value: Array.from(args.text) }, signal);
+    });
     return success({
       backend,
       inputMethod: 'native_text_editing',
@@ -978,7 +1147,10 @@ export class AutomationController {
   }
   async dispose() {
     this.disposed = true;
+    const workflow = this.workflow;
+    workflow?.cancellation.abort();
     this.active?.abort();
+    if (workflow) await this.releaseWorkflow(workflow.owner);
     await this.queue;
     await this.disconnect();
     await this.runtime.dispose();

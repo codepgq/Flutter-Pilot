@@ -63,6 +63,9 @@ export class VmSession extends EventEmitter {
     this.injector.on('history', (entry: HistoryEntry) => {
       if (this.state.mockEnabled) this.record(entry, 'vm-dio');
     });
+    this.injector.on('observation.http', (entry: HistoryEntry) => {
+      if (this.state.mockEnabled) this.observe(entry, 'vm-dio');
+    });
     this.profiler.on('isolates', (ids: string[]) => {
       if (this.state.status === 'disconnected') return;
       this.isolateIds = ids;
@@ -82,6 +85,7 @@ export class VmSession extends EventEmitter {
         }).catch(() => this.warn('应用 Isolate 已变化，Mock 尚未确认重新接入；请重新发现并同步。'));
       }
     });
+    this.profiler.on('observation.loss', () => this.emit('observation.loss'));
     this.profiler.on('warning', (message: string) => this.warn(message));
     this.client.on('disconnected', () => {
       if (this.intentionalDisconnect || this.closed) return;
@@ -126,10 +130,18 @@ export class VmSession extends EventEmitter {
     this.state.warnings = [...new Set([...this.state.warnings, message])].slice(-8);
     this.changed();
   }
-  private record(entry: HistoryEntry, source: 'vm' | 'vm-dio') {
+  private observe(entry: HistoryEntry, source: 'vm' | 'vm-dio') {
     if (this.closed || this.state.status !== 'connected' || this.state.captureEnabled === false) return;
     // Prefix source IDs so observation and injection sessions never overwrite facts.
     const item = { ...entry, id: `${source}:${entry.id}`, source };
+    // Test observation owns a separate bounded window before SQLite retention
+    // and disk queues, so pruning cannot hide a duplicate submission.
+    this.emit('observation.http', item);
+    return item;
+  }
+  private record(entry: HistoryEntry, source: 'vm' | 'vm-dio') {
+    const item = this.observe(entry, source);
+    if (!item) return;
     void this.store
       .put(item)
       .then(() => {

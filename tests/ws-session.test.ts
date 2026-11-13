@@ -366,4 +366,22 @@ describe('independent WS session lifecycle', () => {
     expect(session.state.captureEnabled).toBe(true);
     expect(injector.detach).not.toHaveBeenCalled();
   });
+  it('publishes passive observations before a full write queue and reports source omissions', async () => {
+    session.connected();
+    await session.setCaptureEnabled(true);
+    const observed: WsMessage[] = [];
+    const losses = vi.fn();
+    session.on('observation.ws', (value) => observed.push(value));
+    session.on('observation.loss', losses);
+    (session as any).queuedWrites = 100;
+    injector.emit('message', message);
+    expect(observed).toEqual([message]);
+    expect(store.putMessage).not.toHaveBeenCalled();
+    expect(session.state.omitted).toBe(1);
+    // A history write omission does not lose the dedicated observer's copy.
+    expect(losses).not.toHaveBeenCalled();
+    injector.emit('omitted', 2);
+    expect(losses).toHaveBeenCalledTimes(1);
+    (session as any).queuedWrites = 0;
+  });
 });

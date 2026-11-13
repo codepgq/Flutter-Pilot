@@ -3222,3 +3222,46 @@ footer {
 .automation-panel p {
   overflow-wrap: anywhere;
 }
+.workflows-page {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  overflow: auto;
+}
+.workflows-page .card {
+  min-width: 0;
+}
+.workflows-page p,
+.workflow-steps {
+  overflow-wrap: anywhere;
+}
+.workflow-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+.workflow-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.workflow-fields input,
+.workflow-fields select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.workflow-steps {
+  padding-left: 24px;
+}
+.workflow-steps li {
+  margin: 12px 0;
+}
+.workflow-steps li > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}

@@ -44,6 +44,7 @@ const server = createServer(async (req, res) => {
   hits++;
   let body = '';
   for await (const chunk of req) body += chunk;
+  if (req.url === '/delayed-observation') await new Promise((resolve) => setTimeout(resolve, 250));
   res.writeHead(req.url.startsWith('/upstream-error') ? 503 : 200, { 'content-type': 'application/json' });
   res.end(
     JSON.stringify({
@@ -156,8 +157,10 @@ try {
   const vm = await rpc.call('getVM');
   const isolateId = vm.isolates.find((i) => i.name === 'main').id;
   injector = new DioVmInjector(rpc, { templatePath: join(root, 'resources/vm/interceptor.dart.txt') });
-  const histories = [];
+  const histories = [],
+    observations = [];
   injector.on('history', (entry) => histories.push(entry));
+  injector.on('observation.http', (entry) => observations.push(entry));
   const command = async (options, expectHistory = true) => {
     const before = histories.length;
     const result = await new Promise((resolve, reject) => {
@@ -203,6 +206,18 @@ try {
   ];
   const initial = await injector.sync(isolateId, rules);
   assert.equal(initial.instances, 2);
+  const observedBefore = observations.length,
+    completedBefore = histories.length;
+  const pendingObservation = command({ url: base + '/delayed-observation' });
+  const observationDeadline = Date.now() + 1500;
+  while (observations.length === observedBefore && Date.now() < observationDeadline)
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(observations.length, observedBefore + 1);
+  assert.equal(histories.length, completedBefore, 'pending request is visible before its response');
+  assert.equal(observations.at(-1).response, undefined);
+  await pendingObservation;
+  assert.equal(histories.at(-1).id, observations.at(-1).id, 'completion retains the observed request id');
+  console.log('PASS pending request observed before delivery without adding incomplete history');
   let before = hits;
   let result = await command({ url: base + '/mock' });
   assert.deepEqual(result.data, { mocked: true });
@@ -483,6 +498,60 @@ try {
   result = await command({ url: base + '/mock' });
   assert.deepEqual(result.data, { newInstance: true });
   console.log('PASS mock off/on reuses injector with live history events');
+  const statefulRules = (runId, invalid = false) => [
+    rule('initial-list', {
+      match: { method: 'GET', path: '/orders' },
+      scenario: { id: runId, initial: 'empty', when: 'empty' },
+      mock: { status: 200, headers: {}, body: '[]' },
+    }),
+    rule('submit-once', {
+      match: { method: 'POST', path: '/orders' },
+      scenario: { id: runId, initial: 'empty', when: 'empty', next: 'pending' },
+      mock: { status: 200, headers: {}, body: invalid ? '{invalid' : '{"orderId":"order-current"}' },
+    }),
+    rule('pending-list', {
+      match: { method: 'GET', path: '/orders' },
+      scenario: { id: runId, initial: 'empty', when: 'pending' },
+      mock: { status: 200, headers: {}, body: '[{"orderId":"order-current","status":"pending"}]' },
+    }),
+  ];
+  let scenarioRules = statefulRules('isolated-run-one');
+  await injector.sync(isolateId, scenarioRules);
+  assert.deepEqual((await command({ url: base + '/orders' })).data, []);
+  const response = await command({
+    url: base + '/orders',
+    method: 'POST',
+    body: { price: '10', quantity: '2' },
+  });
+  assert.equal(response.data.orderId, 'order-current');
+  const pendingOrders = [{ orderId: 'order-current', status: 'pending' }];
+  assert.deepEqual((await command({ url: base + '/orders' })).data, pendingOrders);
+  await injector.heartbeat();
+  await injector.sync(isolateId, scenarioRules);
+  assert.deepEqual((await command({ url: base + '/orders' })).data, pendingOrders);
+  await injector.sync(
+    isolateId,
+    scenarioRules.map((r) => ({ ...r, name: r.name + ' refreshed' })),
+  );
+  assert.deepEqual((await command({ url: base + '/orders' })).data, pendingOrders);
+  await injector.sync(
+    isolateId,
+    scenarioRules.map((r) => ({ ...r, enabled: false })),
+  );
+  await injector.sync(isolateId, scenarioRules);
+  assert.deepEqual((await command({ url: base + '/orders' })).data, pendingOrders);
+  await injector.sync(isolateId, statefulRules('isolated-run-two'));
+  assert.deepEqual((await command({ url: base + '/orders' })).data, []);
+  await injector.sync(isolateId, []);
+  await injector.sync(isolateId, scenarioRules);
+  assert.deepEqual((await command({ url: base + '/orders' })).data, []);
+  await injector.sync(isolateId, statefulRules('invalid-response-run', true));
+  assert.equal((await command({ url: base + '/orders', method: 'POST', body: {} })).error, 'unknown');
+  assert.deepEqual((await command({ url: base + '/orders' })).data, []);
+  console.log(
+    'PASS stateful mock synchronous commit, immediate refresh, sync/heartbeat/disabled preservation, run isolation, scope removal and malformed response does not commit',
+  );
+
   console.log('Checking 15-second lease expiration without heartbeat...');
   await new Promise((r) => setTimeout(r, 15500));
   before = hits;
@@ -495,7 +564,7 @@ try {
       result: 'passed',
       dioInstances: 3,
       events: histories.length,
-      checks: 22,
+      checks: 32,
       upstreamHits: hits,
     }),
   );

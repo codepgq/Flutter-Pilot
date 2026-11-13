@@ -1,6 +1,7 @@
 (() {
   final state = <String, dynamic>{
     'rules': jsonDecode(__RULES__),
+    'scenarioStates': <String, String>{},
     'expiresAt': DateTime.now().millisecondsSinceEpoch + 15000,
     'tag': __TAG__,
     'clients': Expando<Object>('flutter-pilot-clients'),
@@ -47,6 +48,8 @@
   Map<String, dynamic> request(dynamic options) => <String, dynamic>{'method': options.method, 'url': options.uri.toString(), 'headers': headers(options.headers), ...body(options.data, options.contentType)};
   Map<String, dynamic> response(dynamic value) => <String, dynamic>{'status': value.statusCode ?? 0, 'headers': headers(value.headers.map), ...body(value.data, value.headers.value('content-type'))};
   bool matches(dynamic rule, dynamic original) {
+    final scenario = rule['scenario'];
+    if (scenario != null && (state['scenarioStates'][scenario['id']] ?? scenario['initial']) != scenario['when']) return false;
     final match = rule['match'] ?? {};
     final uri = Uri.parse(original['url']);
     final method = match['method'];
@@ -178,6 +181,9 @@
           'mocked': false, 'note': '', 'tags': <String>[],
         };
         state['requests'][options] = flow;
+        // Publish the request before waiting for its response. A second request
+        // that remains in flight must still invalidate an exact-once assertion.
+        try { emitEvent('flutter_pilot.vm.request', {'session': state['tag'], 'entry': <String, dynamic>{...flow, 'automaticRequest': original, 'request': original}}); } catch (_) {}
         try {
           final rule = select(original, 'request');
           final responseRule = select(original, 'response');
@@ -205,7 +211,12 @@
             // Apply response stage here as this interceptor's onResponse is not
             // guaranteed to run after another interceptor resolves the request.
             finish(flow, value, null);
-            if (accepted(value)) handler.resolve(value, true);
+            final valid = accepted(value);
+            final scenario = rule['scenario'];
+            // Commit synchronously before delivery: an immediate list refresh
+            // must observe the new fixture state. Never retry the request.
+            if (scenario != null && scenario['next'] != null) state['scenarioStates'][scenario['id']] = scenario['next'];
+            if (valid) handler.resolve(value, true);
             else handler.reject(DioException.badResponse(statusCode: value.statusCode!, requestOptions: options, response: value), true);
             return;
           }

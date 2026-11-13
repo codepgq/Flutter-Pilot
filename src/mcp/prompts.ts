@@ -3,6 +3,8 @@ import type { GuideTopic } from './guide';
 import { mcpTools, type McpToolName } from './tools';
 import { z } from 'zod';
 import { automationPromptPlans } from '../automation/prompts';
+import { workflowPromptPlans } from '../workflows/prompts';
+import { testPromptPlans } from '../testing/prompts';
 
 interface PromptTemplate {
   description: string;
@@ -56,6 +58,8 @@ const templates = {
     description: '通过 API 状态和 WS 事件构造业务场景，按 Key 操作界面并逐项验证，辅助开发联调。',
     topics: ['workflow'],
     steps: [
+      '重复的登录、填表、下单确认操作优先复用 Workflow：先 list_workflows。首次探索和验证后保存稳定目标与参数化步骤，后续 run_workflow 一次启动，由插件执行，不逐步重新寻找控件或调用模型；get_workflow_run 查看进度，cancel_workflow_run 停止。',
+      '需要可重复业务测试时，先 list_tests，按 files.tests 引用同一 Workflow，配置本轮 HTTP 参数/响应提取、关联 WS 和精确订单行 UI 断言；run_test 启动、get_test_run 查询，只有 passed 表示通过，cancel_test_run 取消。临时 Scene/有状态 Mock 随本轮恢复；先验证本轮请求，再注入同一订单事件。',
       '把任务拆成接口或消息条件、Mock 预期、界面操作和可观察的通过标准；按实际涉及的域读取 http、ws、ui 指南。不要求不存在的网络事件，不凭空增加测试场景。',
       '任务要求多状态验证时，按本次指定场景逐个执行，例如下单成功、失败和资产变化；每个场景先构造 API 响应或 WS 事件，再操作目标 Key 并核对结果，避免前一场景的规则、消息或页面状态干扰下一场景。',
       '用 get_network_status 记录规则文件路径和当前开关；查询已有请求或连接确认目标，再用 get_ui_snapshot 确认起始页面和真实 Key，记录请求/消息 ID 或时间基线。',
@@ -173,6 +177,8 @@ export const toolPromptPlans = {
     ],
   },
   ...automationPromptPlans,
+  ...workflowPromptPlans,
+  ...testPromptPlans,
 } as const satisfies Record<McpToolName, Pick<PromptTemplate, 'topics' | 'steps'>>;
 
 const toolTemplates: Record<string, PromptTemplate> = Object.fromEntries(

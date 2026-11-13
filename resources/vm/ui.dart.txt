@@ -344,7 +344,17 @@
     return yes;
   }
   __SCREENSHOT__
-  Future<Map<String, dynamic>> perform(String tool, dynamic args) async {
+  Future<Map<String, dynamic>> perform(String tool, dynamic args, Map<String, dynamic> timings) async {
+    List<Element> locate(dynamic selectorArgs) {
+      final clock = Stopwatch()..start();
+      try { return select(selectorArgs); }
+      finally { timings['resolveMs'] = (timings['resolveMs'] ?? 0) + clock.elapsedMicroseconds / 1000; }
+    }
+    Future<Map<String, dynamic>> measureInput(Future<Map<String, dynamic>> Function() operation) async {
+      final clock = Stopwatch()..start();
+      try { return await operation(); }
+      finally { timings['inputMs'] = (timings['inputMs'] ?? 0) + clock.elapsedMicroseconds / 1000; }
+    }
     if (state['active'] != true) return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
     if (binding.rootElement == null) return fail('APP_NOT_READY', 'Flutter 尚未挂载根 Widget。');
     if (tool == 'probe') return {'ok': true, 'experimental': true, 'keyTypes': ['string', 'int']};
@@ -404,7 +414,7 @@
       final deadline = DateTime.now().add(Duration(milliseconds: args['timeoutMs'] ?? 5000));
       final condition = args['condition'] ?? args['state'] ?? 'present';
       while (state['active'] == true) {
-        final found = select(args);
+        final found = locate(args);
         if (found.length > 1) return fail('AMBIGUOUS_KEY', '范围内存在多个匹配 Key。');
         if ((condition == 'absent' && found.isEmpty) || (found.length == 1 && (condition == 'present' || (condition == 'visible' && describe(found.single)['visible'] == true) || (condition == 'enabled' && describe(found.single)['enabled'] == true) || (condition == 'actionable' && describe(found.single)['actionable'] == true)))) return {'ok': true, 'condition': condition, if (found.isNotEmpty) 'widget': describe(found.single)};
         if (DateTime.now().isAfter(deadline)) return fail('WAIT_TIMEOUT', '等待 Widget 状态超时。');
@@ -412,7 +422,7 @@
       }
       return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
     }
-    final found = select(args);
+    final found = locate(args);
     if (found.isEmpty) return fail('NOT_FOUND', '当前已挂载界面没有匹配的 Key。');
     if (found.length > 1) return {...fail(args['selector'] == null ? 'AMBIGUOUS_KEY' : 'AMBIGUOUS_SELECTOR', '范围内存在多个匹配目标。'), 'candidates': found.take(10).map(describe).toList()};
     final element = found.single;
@@ -426,30 +436,32 @@
       if (!enabled(element)) return fail('NOT_ENABLED', '目标当前不可操作。');
       final target = actionTarget(element);
       if (target == null) return fail('AMBIGUOUS_ACTION_TARGET', '指定 Key 必须对应唯一交互目标。');
-      return pointer(target);
+      return measureInput(() => pointer(target));
     }
     if (tool == 'scroll') {
       final scrollables = element.widget is Scrollable ? [element] : tree(element).where((e) => e.widget is Scrollable).toList();
       if (scrollables.isEmpty) return fail('NOT_SCROLLABLE', '指定 Key 下没有滚动区域。');
       if (scrollables.length != 1) return fail('AMBIGUOUS_SCROLL_TARGET', '指定 Key 下必须只有一个滚动区域。');
-      if (args['targetKey'] == null && args['targetSelector'] == null) return pointer(scrollables.single, args);
+      if (args['targetKey'] == null && args['targetSelector'] == null) return measureInput(() => pointer(scrollables.single, args));
       final steps = args['maxSteps'] ?? 10;
       for (var step = 0; step <= steps; step++) {
-        final current = select(args);
+        final current = locate(args);
         if (current.length != 1) return fail('NOT_FOUND', '滚动区域已发生变化。');
         final currentScrollables = current.single.widget is Scrollable ? [current.single] : tree(current.single).where((e) => e.widget is Scrollable).toList();
         if (currentScrollables.length != 1) return fail('AMBIGUOUS_SCROLL_TARGET', '指定 Key 下必须只有一个滚动区域。');
         final descendants = tree(current.single).toSet();
-        final targets = args['targetSelector'] != null ? select({'selector': args['targetSelector']}).where(descendants.contains).toList() : descendants.where((child) => matches(child.widget.key, args['targetKey'])).toList();
+        final targets = args['targetSelector'] != null ? locate({'selector': args['targetSelector']}).where(descendants.contains).toList() : descendants.where((child) => matches(child.widget.key, args['targetKey'])).toList();
         if (targets.length > 1) return fail('AMBIGUOUS_KEY', '滚动区域内存在多个目标 Key。');
         if (targets.length == 1 && describe(targets.single)['visible'] == true) return {'ok': true, 'steps': step, 'widget': describe(targets.single)};
         if (step == steps) return fail('SCROLL_LIMIT', '达到滚动步数上限，目标尚未可见。');
-        final moved = await pointer(currentScrollables.single, args);
+        final moved = await measureInput(() => pointer(currentScrollables.single, args));
         if (moved['ok'] != true) return moved;
       }
     }
     if (tool == 'enter_text' || tool == 'edit_text') {
+      final resolveClock = Stopwatch()..start();
       final editable = tree(element).where((e) => e.widget is EditableText).toList();
+      timings['resolveMs'] = (timings['resolveMs'] ?? 0) + resolveClock.elapsedMicroseconds / 1000;
       if (editable.length != 1) return fail('AMBIGUOUS_INPUT', '指定 Key 下必须只有一个文本输入框。');
       final input = editable.single;
       final widget = input.widget as EditableText;
@@ -460,55 +472,61 @@
         final checked = editTextRange(existing.text, existing.selection.baseOffset, existing.selection.extentOffset, args);
         if (checked['ok'] != true) return checked;
       }
-      if (tool != 'edit_text' || !widget.focusNode.hasFocus) {
-        final tapped = await pointer(input);
-        if (tapped['ok'] != true) return tapped;
-      }
-      if (state['active'] != true) return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
-      if (!input.mounted || !widget.focusNode.hasFocus) return fail('NO_FOCUS', '输入框未能获得焦点。');
-      final inputState = (input as StatefulElement).state as EditableTextState;
-      final before = widget.controller.value;
-      if (tool == 'edit_text') {
-        final action = args['action'];
-        var value = before;
-        final range = rangeActions.contains(action) ? editTextRange(before.text, before.selection.baseOffset, before.selection.extentOffset, args) : null;
-        if (range != null && range['ok'] != true) return range;
-        if (action == 'copy' || action == 'cut') {
-          if (widget.obscureText) return fail('OBSCURED_INPUT', '不复制密码输入内容。');
-          if (action == 'copy') inputState.copySelection(SelectionChangedCause.keyboard);
-          else inputState.cutSelection(SelectionChangedCause.keyboard);
-        } else if (action == 'paste') await inputState.pasteText(SelectionChangedCause.keyboard);
-        else if (action == 'clear') value = const TextEditingValue(text: '', selection: TextSelection.collapsed(offset: 0));
-        else if (action == 'select_all') value = before.copyWith(selection: TextSelection(baseOffset: 0, extentOffset: before.text.length), composing: TextRange.empty);
-        else if (action == 'move_cursor') {
-          value = before.copyWith(selection: TextSelection.collapsed(offset: range!['start'] as int), composing: TextRange.empty);
-        } else if (action == 'select_range') {
-          value = before.copyWith(selection: TextSelection(baseOffset: range!['start'] as int, extentOffset: range['end'] as int), composing: TextRange.empty);
-        } else if (action == 'delete') {
-          value = TextEditingValue(text: range!['text'] as String, selection: TextSelection.collapsed(offset: range['start'] as int));
-        } else return fail('INVALID_ARGUMENT', '不支持此编辑操作。');
-        if (value != before) inputState.updateEditingValue(value);
+      final inputClock = Stopwatch()..start();
+      try {
+        if (tool != 'edit_text' || !widget.focusNode.hasFocus) {
+          final tapped = await pointer(input);
+          if (tapped['ok'] != true) return tapped;
+        }
+        if (state['active'] != true) return fail('SESSION_INVALIDATED', 'UI 会话已失效。');
+        if (!input.mounted || !widget.focusNode.hasFocus) return fail('NO_FOCUS', '输入框未能获得焦点。');
+        final inputState = (input as StatefulElement).state as EditableTextState;
+        final before = widget.controller.value;
+        if (tool == 'edit_text') {
+          final action = args['action'];
+          var value = before;
+          final range = rangeActions.contains(action) ? editTextRange(before.text, before.selection.baseOffset, before.selection.extentOffset, args) : null;
+          if (range != null && range['ok'] != true) return range;
+          if (action == 'copy' || action == 'cut') {
+            if (widget.obscureText) return fail('OBSCURED_INPUT', '不复制密码输入内容。');
+            if (action == 'copy') inputState.copySelection(SelectionChangedCause.keyboard);
+            else inputState.cutSelection(SelectionChangedCause.keyboard);
+          } else if (action == 'paste') await inputState.pasteText(SelectionChangedCause.keyboard);
+          else if (action == 'clear') value = const TextEditingValue(text: '', selection: TextSelection.collapsed(offset: 0));
+          else if (action == 'select_all') value = before.copyWith(selection: TextSelection(baseOffset: 0, extentOffset: before.text.length), composing: TextRange.empty);
+          else if (action == 'move_cursor') {
+            value = before.copyWith(selection: TextSelection.collapsed(offset: range!['start'] as int), composing: TextRange.empty);
+          } else if (action == 'select_range') {
+            value = before.copyWith(selection: TextSelection(baseOffset: range!['start'] as int, extentOffset: range['end'] as int), composing: TextRange.empty);
+          } else if (action == 'delete') {
+            value = TextEditingValue(text: range!['text'] as String, selection: TextSelection.collapsed(offset: range['start'] as int));
+          } else return fail('INVALID_ARGUMENT', '不支持此编辑操作。');
+          if (value != before) inputState.updateEditingValue(value);
+          await frame();
+          return {'ok': true, 'length': widget.controller.text.length, 'selection': {'start': widget.controller.selection.start, 'end': widget.controller.selection.end}};
+        }
+        final requested = args['text'] as String;
+        final text = args['mode'] == 'append' ? before.text + requested : requested;
+        inputState.updateEditingValue(TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length)));
         await frame();
-        return {'ok': true, 'length': widget.controller.text.length, 'selection': {'start': widget.controller.selection.start, 'end': widget.controller.selection.end}};
-      }
-      final requested = args['text'] as String;
-      final text = args['mode'] == 'append' ? before.text + requested : requested;
-      inputState.updateEditingValue(TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length)));
-      await frame();
-      return {'ok': true, 'length': widget.controller.text.length, 'formatted': widget.controller.text != text};
+        return {'ok': true, 'length': widget.controller.text.length, 'formatted': widget.controller.text != text};
+      } finally { timings['inputMs'] = (timings['inputMs'] ?? 0) + inputClock.elapsedMicroseconds / 1000; }
     }
     return fail('UNKNOWN_TOOL', '不支持此 UI 工具。');
   }
   state['launch'] = (String operationId, String tool, String encoded) {
     Future<void>(() async {
       Map<String, dynamic> result;
+      final timings = <String, dynamic>{};
+      final clock = Stopwatch()..start();
       try {
         final args = decodeArgs(encoded);
-        result = await perform(tool, args);
+        result = await perform(tool, args, timings);
       } catch (error) {
         final code = error is String && ['ANCESTOR_NOT_FOUND', 'AMBIGUOUS_ANCESTOR', 'TREE_LIMIT', 'STALE_REFERENCE', 'INVALID_SELECTOR', 'AMBIGUOUS_VIEW'].contains(error) ? error : 'UI_OPERATION_FAILED';
         result = fail(code, 'Flutter UI 操作未能完成。');
       }
+      result['timings'] = {...timings, 'totalMs': clock.elapsedMicroseconds / 1000};
       emitEvent('flutter_pilot.vm.ui', {'session': __SESSION__, 'operationId': operationId, 'result': result});
     });
     return true;

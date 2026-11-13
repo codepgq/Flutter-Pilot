@@ -284,4 +284,22 @@ describe('VM profiling lifecycle', () => {
     expect(profiler.isolateIds).toEqual(['isolates/2']);
     await profiler.stop();
   });
+  it('reports every source-read loss even when the visible warning is deduplicated', async () => {
+    const vm = new FakeVm();
+    const original = vm.call.bind(vm);
+    vm.call = async (method, params) => {
+      if (method === 'ext.dart.io.getHttpProfile') throw new Error('source unavailable');
+      return original(method, params);
+    };
+    const profiler = new VmNetworkProfiler(vm, { intervalMs: 60000 });
+    const warnings: string[] = [],
+      losses: boolean[] = [];
+    profiler.on('warning', (warning) => warnings.push(warning));
+    profiler.on('observation.loss', () => losses.push(true));
+    await profiler.start();
+    await profiler.pollNow();
+    expect(warnings.filter((warning) => warning.includes('读取 VM 网络记录失败'))).toHaveLength(1);
+    expect(losses.length).toBeGreaterThanOrEqual(2);
+    await profiler.stop();
+  });
 });

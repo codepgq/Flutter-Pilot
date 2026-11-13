@@ -162,6 +162,41 @@ afterEach(async () => {
 });
 
 describe('VM session without a proxy engine', () => {
+  it('observes in-flight Dio requests without storing them, then updates their stable identity on completion', async () => {
+    const { session, injector, store } = fixture();
+    await session.connect('ws://127.0.0.1:1234/ws', []);
+    await session.setMockEnabled(true);
+    const observed: HistoryEntry[] = [];
+    session.on('observation.http', (value) => observed.push(value));
+    injector.emit('observation.http', entry);
+    expect(store.put).not.toHaveBeenCalled();
+    expect(observed).toEqual([{ ...entry, id: 'vm-dio:one', source: 'vm-dio' }]);
+    const completed = { ...entry, response: { ...snapshot, status: 200 } };
+    injector.emit('history', completed);
+    expect(observed.map((value) => value.id)).toEqual(['vm-dio:one', 'vm-dio:one']);
+    expect(observed.at(-1)?.response?.status).toBe(200);
+    expect(store.put).toHaveBeenCalledExactlyOnceWith({ ...completed, id: 'vm-dio:one', source: 'vm-dio' });
+    await session.setCaptureEnabled(false);
+    injector.emit('observation.http', { ...entry, id: 'capture-off' });
+    expect(observed).toHaveLength(2);
+  });
+  it('publishes complete passive test observations before retention or disk failure', async () => {
+    const { session, profiler, store } = fixture();
+    await session.connect('ws://127.0.0.1:1234/ws', []);
+    const observed: HistoryEntry[] = [];
+    const losses = vi.fn();
+    session.on('observation.http', (value) => observed.push(value));
+    session.on('observation.loss', losses);
+    store.put.mockRejectedValueOnce(new Error('disk full'));
+    profiler.emit('history', entry);
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toMatchObject({ id: 'vm:one', source: 'vm', originalRequest: snapshot });
+    profiler.emit('history', { ...entry, id: 'two' });
+    expect(observed.map((value) => value.id)).toEqual(['vm:one', 'vm:two']);
+    profiler.emit('observation.loss');
+    expect(losses).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+  });
   it('rebinds enabled Mock after lifecycle without enabling disabled controls', async () => {
     const { session, profiler, injector } = fixture();
     await session.connect('ws://127.0.0.1:1234/ws', [originalRule]);

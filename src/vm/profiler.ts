@@ -226,6 +226,7 @@ export class VmNetworkProfiler extends EventEmitter {
   };
 
   private warn(kind: string, message: string): void {
+    this.emit('observation.loss');
     if (this.warningKinds.has(kind)) return;
     this.warningKinds.add(kind);
     this.emit('warning', message);

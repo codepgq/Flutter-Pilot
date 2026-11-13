@@ -50,13 +50,18 @@ export class WsSession extends EventEmitter {
       templatePath,
       maxBodyBytes: Math.min(settings.maxBodyBytes ?? 1048576, 262144),
     });
-    this.injector.on('warning', (message: string) => this.warn(message));
+    this.injector.on('warning', (message: string) => {
+      this.emit('observation.loss');
+      this.warn(message);
+    });
     this.injector.on('omitted', (count: number) => {
+      this.emit('observation.loss');
       this.state.omitted += count;
       this.changed();
     });
     this.injector.on('message', (message: WsMessage) => {
       if (!this.online || !this.acceptingEvents) return;
+      this.emit('observation.ws', message);
       if (this.queuedWrites >= 100) {
         this.state.omitted++;
         this.scheduleRefresh();

@@ -6,15 +6,19 @@
 
 配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key、文字或语义定位页面，通过 VM 或设备输入操作，减少逐步截图识别的耗时与 token 消耗。
 
-当前版本为 **0.0.14**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+当前版本为 **0.0.15**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
 
-**0.0.14 更新**：MCP 支持 App 截图与长图；修复场景断线恢复和 JSON 编辑精度，并为 API 目录提供分页。
+**0.0.15 更新**：新增可复用 Workflow、业务测试与运行范围的有状态 HTTP Mock，支持本轮 HTTP / WS / UI 关联断言；同时发布私有 Appium 移动交互通道及稳定性修复。
 
 **0.0.12 更新**：同步远端最新版并重新构建 Cursor 安装包，包含可持久保存和切换的统一 HTTP / WebSocket Mock 场景，MCP 同步提供场景查询、激活和停用；侧栏与工作台新增 App 当前屏幕和滚动长截图，保存 PNG 并自动预览。
 
-**本轮源码扩展**：新增私有 Appium 设备通道，支持无 Key 定位、多指手势、文本编辑、键盘和系统操作，详见 [移动交互指南](docs/mobile-automation.md)。尚未发布或安装本轮改动。
+**移动交互**：新增私有 Appium 设备通道，支持无 Key 定位、多指手势、文本编辑、键盘和系统操作，详见 [移动交互指南](docs/mobile-automation.md)。
 
-**MCP 全能力提示词**：42 个工具均有同名独立 Prompt，包括 `hot_reload` / `hot_restart` 和截图工具；保留四个场景模板，共 46 个。每个工具提示词提供操作步骤和生产参数定义，新增能力漏写模板会被检查发现。
+**可复用 Workflow**：Agent 首次探索并保存登录、填表、下单确认等流程，后续通过 `run_workflow` 一次启动，由插件执行参数化步骤；支持进度、耗时、失败位置和取消。流程与 Mock Scene 分开，连接恢复不会重复执行 UI；`completed` 表示操作完成。详见 [Workflow 指南](docs/workflows.md)。
+
+**业务测试**：Test Case 复用 Workflow，组合临时 Scene、有状态 HTTP Mock、本轮请求参数断言、响应变量提取、关联 WS 事件和精确订单行验证。`run_test` 后台执行，`get_test_run` 查询证据，只有 `passed` 表示测试通过；取消和断线不自动重放提交。详见 [测试指南](docs/testing.md)。
+
+**MCP 全能力提示词**：50 个工具均有同名独立 Prompt，包括 `hot_reload` / `hot_restart`、截图、Workflow 和测试工具；保留四个场景模板，共 54 个。每个工具提示词提供操作步骤和生产参数定义，新增能力漏写模板会被检查发现。
 
 **0.0.6 修复 Cursor 设置卡死和已有 VM 会话补查恢复**：打开工作台会重新补查先前已运行的 Flutter Debug 会话；新增 MCP `hot_reload` / `hot_restart`，精确控制当前 VM 绑定的 IDE 调试会话。
 
@@ -98,7 +102,7 @@ Agent 可按 `ValueKey<String/int>`、文字、语义、类型、祖先或快照
 
 WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服务端消息，`send_ws_message` 通过 App 当前真实 WS 连接发给服务端。均需开启 WS 采集并确认连接已接入，并选择准确的在线连接；不新建连接。可传原始 `text`，或传 `topic` 和 `data` 组装为 `{"topic": "...", "data": ...}`；自定义业务协议使用完整原始文本。真实发送经过当前 outbound 规则，可能被替换或丢弃；工具调用成功后仍需核对消息和业务结果。
 
-服务提供 `overview`、`http`、`ws`、`ui`、`workflow` 五个指南主题，以及 46 个 MCP 提示模板：保留 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，全部 42 个工具另有同名独立模板，包含 `hot_reload` 和 `hot_restart`。每个工具模板提供准备、操作、验证步骤及与工具共用的参数 schema；新增工具遗漏模板会使类型或测试检查失败。指南可通过工具或资源读取；支持 Prompts 的客户端可按需读取并填写任务。Agent 通过 `tools/list` 获取可调用能力，初始化说明与 Prompts 补充用法；是否主动使用仍取决于客户端和 Agent。
+服务提供 `overview`、`http`、`ws`、`ui`、`workflow` 五个指南主题，以及 54 个 MCP 提示模板：保留 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，全部 50 个工具另有同名独立模板，包含 `hot_reload`、`hot_restart`、Workflow 和 Test Case。每个工具模板提供准备、操作、验证步骤及与工具共用的参数 schema；新增工具遗漏模板会使类型或测试检查失败。指南可通过工具或资源读取；支持 Prompts 的客户端可按需读取并填写任务。Agent 通过 `tools/list` 获取可调用能力，初始化说明与 Prompts 补充用法；是否主动使用仍取决于客户端和 Agent。
 
 | 能力 | MCP 工具及同名 Prompt |
 | --- | --- |
@@ -112,6 +116,8 @@ WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服�
 | 网络状态与 HTTP 记录 | `get_network_status`、`get_requests`、`get_request` |
 | WebSocket | `get_ws_connections`、`get_ws_messages`、`inject_ws_message`、`send_ws_message` |
 | 场景与采集 | `reload_rules`、`set_capture_enabled`、`list_scenes`、`activate_scene`、`deactivate_scene` |
+| 可复用流程           | `list_workflows`、`run_workflow`、`get_workflow_run`、`cancel_workflow_run`                              |
+| 业务测试             | `list_tests`、`run_test`、`get_test_run`、`cancel_test_run`                                              |
 
 支持标准 MCP Prompts 的客户端可通过 `prompts/list` 发现这些模板，并用 `prompts/get` 按名称读取；`task` 是可选的提示词参数，不是工具参数。截图示例：先通过 `list_sessions` 选择已连接 VM 的项目，调用 `take_screenshot` 并传入 `sessionId` 和 `mode: "screen"`；需要长图时使用 `mode: "long"`，有多个滚动区域时先通过 `list_screenshot_targets` 选择 `targetId`。结果是 MCP PNG 图片内容，由客户端显示。
 
@@ -151,7 +157,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 
 ### 从 VSIX 安装
 
-1. 获取 `flutter-pilot-0.0.14.vsix`。从源码构建见下方步骤。
+1. 获取 `flutter-pilot-0.0.15.vsix`。从源码构建见下方步骤。
 2. 在 VS Code 或 Cursor 扩展面板右上角菜单选择 **Install from VSIX… / 从 VSIX 安装…**。
 3. 选择安装包，按 IDE 提示重新加载窗口。
 4. 打开包含 `pubspec.yaml` 的 Flutter 项目根目录，并信任工作区。
@@ -161,7 +167,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 安装当前 Flutter Pilot 包，例如：
 
 ```sh
-cursor --install-extension artifacts/flutter-pilot-0.0.14.vsix --force
+cursor --install-extension artifacts/flutter-pilot-0.0.15.vsix --force
 # VS Code 使用 code --install-extension 同一文件 --force
 ```
 
@@ -184,7 +190,7 @@ npm test
 npm run package
 ```
 
-产物为 `artifacts/flutter-pilot-0.0.14.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
+产物为 `artifacts/flutter-pilot-0.0.15.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
 
 ### 使用已有引擎
 
@@ -372,7 +378,7 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 首次升级将当前 `.flutter-pilot/rules.json` 与 `ws-rules.json` 一次性归入“默认场景”，保留规则 ID、顺序和启停，默认不激活；新项目创建空默认场景。生成 `scenes.json` 后旧文件保留但不再读取或更新。文件无效或被外部修改时拒绝覆盖，修复后使用 **读取项目文件**。
 
-复制场景重新生成场景与规则 ID，保留启停状态且不自动激活；复制单条规则仍默认禁用。导入使用场景格式，重新生成 ID 后追加，保留启停状态并保持当前激活场景。导出整份场景配置，不含历史或 CA。持久 WS 使用 URL；当前连接的临时规则仅属于激活场景，连接失效或切换场景时清除。WS 手动推送继续在 WebSocket 页面操作，不提供自动推送、定时或重放。代理模式仅支持 HTTP，混合场景的 WS 显示不支持。
+复制场景重新生成场景与规则 ID，保留启停状态且不自动激活；复制单条规则仍默认禁用。导入使用场景格式，重新生成 ID 后追加，保留启停状态并保持当前激活场景。导出整份场景配置，不含历史或 CA。持久 WS 使用 URL；当前连接的临时规则仅属于激活场景，连接失效或切换场景时清除。WS 手动推送继续在 WebSocket 页面操作；Test Case 可在指定 HTTP 断言成功后注入本轮关联事件，不提供通用定时或重放。代理模式仅支持 HTTP，混合场景的 WS 显示不支持。
 
 ### 断点队列
 
@@ -595,7 +601,9 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 项目根目录/
 └── .flutter-pilot/
     ├── project.json              # 项目 UUID、格式版本、接入方式和项目设置
-    └── scenes.json               # 场景及持久激活状态，统一包含 HTTP / WS 规则
+    ├── scenes.json               # 场景及持久激活状态，统一包含 HTTP / WS 规则
+    ├── workflows.json            # 可选：已探索验证的参数化操作流程
+    └── tests.json                # 可选：复用流程的业务测试与关联断言
 ```
 
 `project.json` 示例（UUID 由插件生成，下面仅演示结构）：
@@ -796,7 +804,7 @@ python3 tool/device_smoke.py --mitmdump /absolute/path/to/mitmdump --ios YOUR_SI
 
 ```sh
 npm run package
-shasum -a 256 artifacts/flutter-pilot-0.0.14.vsix
+shasum -a 256 artifacts/flutter-pilot-0.0.15.vsix
 ```
 
 VSIX 包含扩展构建产物、VM 注入模板、代理 addon、引擎清单及文档，不包含 Node 开发依赖、Flutter 示例构建结果或真实证书。首次引擎下载单独发生。源码中的 README 修改后，应重新打包，安装包内的文档才会更新。

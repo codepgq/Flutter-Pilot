@@ -21,7 +21,7 @@ from mitmproxy import ctx, http
 
 # mitmdump -s does not guarantee that an addon's siblings are importable.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from rules import resolve_redirect_url, select_rule, validate_rules, validate_url
+from rules import advance_scenario, resolve_redirect_url, select_rule, sync_scenarios, validate_rules, validate_url
 from storage import HistoryStore
 
 PROTOCOL_VERSION = 1
@@ -35,6 +35,7 @@ def _now():
 class FlutterPilotAddon:
     def __init__(self):
         self.rules = []
+        self.scenario_states = {}
         self.revision = 0
         self.writer = None
         self.control_task = None
@@ -169,6 +170,7 @@ class FlutterPilotAddon:
             return self._health()
         if method == "rules.sync":
             rules = validate_rules(params)
+            sync_scenarios(rules, self.scenario_states)
             self.rules = rules
             self.revision = params.get("revision", self.revision + 1)
             return {"revision": self.revision, "count": len(rules)}
@@ -353,7 +355,7 @@ class FlutterPilotAddon:
         if not ctx.options.server:
             flow.response = http.Response.make(503, b"Flutter Pilot proxy is paused. Disable the client proxy to connect directly.", {"Content-Type": "text/plain", "Connection": "close"})
             return
-        rule = select_rule(self.rules, entry["originalRequest"], "request")
+        rule = select_rule(self.rules, entry["originalRequest"], "request", self.scenario_states)
         if rule:
             entry["requestRuleId"] = rule["id"]
             patch = copy.deepcopy(rule.get("request", {}))
@@ -367,6 +369,8 @@ class FlutterPilotAddon:
                     headers["Content-Type"] = "application/json; charset=utf-8"
                 flow.response = http.Response.make(mock["status"], mock["body"].encode("utf-8"), headers)
                 entry["mocked"] = True
+                # No await between response construction and state transition.
+                advance_scenario(rule, self.scenario_states)
         entry["automaticRequest"] = self._snapshot(flow.request, flow, "request")
         entry["request"] = copy.deepcopy(entry["automaticRequest"])
         entry["targetUrl"] = flow.request.pretty_url

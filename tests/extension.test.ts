@@ -224,6 +224,486 @@ function latestSelected() {
     .at(-1)
     .webview.messages.findLast((message: any) => message.type === 'state' && 'selected' in message)?.selected;
 }
+
+describe('Workflow 与业务测试扩展整合', () => {
+  const workflowDocument = {
+    version: 1,
+    workflows: [
+      {
+        id: 'submit',
+        name: '提交操作',
+        inputs: { price: { required: true } },
+        targets: { confirm: { key: 'confirm' } },
+        steps: [{ id: 'confirm', type: 'tap', target: 'confirm' }],
+      },
+    ],
+  };
+  async function enable() {
+    await open();
+    await message('mcp.enable', { enabled: true });
+    return (await discoverSessions(join(directory, 'bridge', 'sessions'), fake.workspace))[0];
+  }
+  async function call(descriptor: any, tool: string, args: Record<string, unknown> = {}) {
+    return (await requestSession(descriptor, {
+      kind: 'call',
+      tool,
+      args: { sessionId: descriptor.sessionId, ...args },
+    })) as any;
+  }
+  it('discovers both definition files offline without creating them, and opens malformed files for repair', async () => {
+    const descriptor = await enable();
+    const workflows = await call(descriptor, 'list_workflows');
+    const tests = await call(descriptor, 'list_tests');
+    expect(workflows.workflows).toEqual([]);
+    expect(tests.tests).toEqual([]);
+    const file = workflows.files.workflows;
+    await expect(readFile(file)).rejects.toHaveProperty('code', 'ENOENT');
+    await expect(readFile(join(fake.workspace, '.flutter-pilot', 'tests.json'))).rejects.toHaveProperty(
+      'code',
+      'ENOENT',
+    );
+    const status = await call(descriptor, 'get_network_status');
+    expect(status.files).toMatchObject({ workflows: file, tests: tests.files.tests });
+    await writeFile(file, '{broken');
+    await message('workflows.refresh');
+    expect(latest().state.workflows.error).toBeTruthy();
+    await message('workflows.open');
+    expect(fake.shownDocuments).toContain(file);
+    expect(await readFile(file, 'utf8')).toBe('{broken');
+  });
+  it('keeps an asynchronously started workflow alive after the start socket closes and cancels without replay', async () => {
+    const { AutomationController } = await import('../src/automation/controller');
+    const spy = vi
+      .spyOn(AutomationController.prototype, 'executeWorkflow')
+      .mockImplementation(async (_owner, _tool, _args, signal) => {
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) resolve();
+          else signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+        return { ok: false, code: 'CANCELLED', uncertain: true };
+      });
+    try {
+      const descriptor = await enable();
+      await writeFile(
+        join(fake.workspace, '.flutter-pilot', 'workflows.json'),
+        JSON.stringify(workflowDocument),
+      );
+      const start = await call(descriptor, 'run_workflow', {
+        workflowId: 'submit',
+        inputs: { price: '1.2300' },
+      });
+      expect(start.runId).toBeTypeOf('string');
+      await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+      expect((await call(descriptor, 'get_workflow_run', { runId: start.runId })).run.status).toBe('running');
+      expect((await call(descriptor, 'tap', { selector: { key: 'other' } })).code).toBe('WORKFLOW_BUSY');
+      await message('workflows.cancel', { runId: start.runId });
+      await vi.waitFor(async () =>
+        expect((await call(descriptor, 'get_workflow_run', { runId: start.runId })).run.status).toBe(
+          'uncertain',
+        ),
+      );
+      expect(latest().state.workflows.locked).toBe(false);
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  it('fails an offline Test Run before UI execution, preserves the saved Scene and releases its owner', async () => {
+    const descriptor = await enable();
+    await writeFile(
+      join(fake.workspace, '.flutter-pilot', 'workflows.json'),
+      JSON.stringify(workflowDocument),
+    );
+    await writeFile(
+      join(fake.workspace, '.flutter-pilot', 'tests.json'),
+      JSON.stringify({
+        version: 1,
+        tests: [
+          {
+            id: 'submit_test',
+            name: '提交测试',
+            workflowId: 'submit',
+            inputs: { price: '1.2300' },
+            expect: { ui: [{ id: 'pending', selector: { key: 'pending' }, state: 'visible' }] },
+          },
+        ],
+      }),
+    );
+    const before = await readFile(rulesFile(), 'utf8');
+    const start = await call(descriptor, 'run_test', { testId: 'submit_test' });
+    await vi.waitFor(async () => {
+      const { run } = await call(descriptor, 'get_test_run', { runId: start.runId });
+      expect(run.status).toBe('error');
+      expect(run.failure.code).toBe('TEST_VM_REQUIRED');
+      expect(run.steps).toEqual([]);
+    });
+    expect(latest().state.tests.locked).toBe(false);
+    expect(await readFile(rulesFile(), 'utf8')).toBe(before);
+  });
+  it('retains failed cleanup for a same-run retry without replaying its Workflow', async () => {
+    const { VmSession } = await import('../src/vm/session');
+    const { AutomationController } = await import('../src/automation/controller');
+    const { SceneController } = await import('../src/scene-controller');
+    const { TestNetworkObserver } = await import('../src/testing/network');
+    const connect = vi.spyOn(VmSession.prototype, 'connect').mockImplementation(async function (this: any) {
+      this.state.status = 'connected';
+      this.state.isolates = 1;
+      this.emit('change');
+    });
+    const capture = vi.spyOn(VmSession.prototype, 'setCaptureEnabled').mockImplementation(async function (
+      this: any,
+      enabled,
+    ) {
+      this.state.captureEnabled = enabled;
+    });
+    const action = vi
+      .spyOn(AutomationController.prototype, 'executeWorkflow')
+      .mockResolvedValue({ ok: true });
+    const baseline = vi
+      .spyOn(TestNetworkObserver.prototype, 'baseline')
+      .mockImplementation(async () => ({ at: Date.now(), httpIds: [], wsIds: [] }));
+    const restore = SceneController.prototype.endRun;
+    const cleanup = vi.spyOn(SceneController.prototype, 'endRun').mockImplementationOnce(async () => {
+      throw new Error('temporary cleanup failure');
+    });
+    try {
+      const descriptor = await enable();
+      await message('connection.mode', { mode: 'vm' });
+      await message('vm.connect', { url: 'ws://127.0.0.1:12345/ws' });
+      await writeFile(
+        join(fake.workspace, '.flutter-pilot', 'workflows.json'),
+        JSON.stringify(workflowDocument),
+      );
+      await writeFile(
+        join(fake.workspace, '.flutter-pilot', 'tests.json'),
+        JSON.stringify({
+          version: 1,
+          tests: [
+            {
+              id: 'cleanup',
+              name: '环境恢复',
+              workflowId: 'submit',
+              inputs: { price: '1.00' },
+              expect: { ui: [{ id: 'visible', selector: { key: 'result' }, state: 'visible' }] },
+            },
+          ],
+        }),
+      );
+      const start = await call(descriptor, 'run_test', { testId: 'cleanup' });
+      await vi.waitFor(async () =>
+        expect((await call(descriptor, 'get_test_run', { runId: start.runId })).run.status).toBe('error'),
+      );
+      const actionsBeforeCleanup = action.mock.calls.length;
+      expect(actionsBeforeCleanup).toBeGreaterThan(0);
+      expect(latest().state.tests.cleanupPending).toEqual([start.runId]);
+      expect((await call(descriptor, 'get_test_run', { runId: start.runId })).run.cleanup.status).toBe(
+        'failed',
+      );
+      const external = vi.spyOn(AutomationController.prototype, 'execute').mockResolvedValue({ ok: true });
+      try {
+        await expect(call(descriptor, 'tap', { key: 'confirm' })).rejects.toMatchObject({
+          code: 'TEST_CLEANUP_REQUIRED',
+        });
+        expect(external).not.toHaveBeenCalled();
+      } finally {
+        external.mockRestore();
+      }
+      cleanup.mockImplementation(restore);
+      await call(descriptor, 'cancel_test_run', { runId: start.runId });
+      expect(action).toHaveBeenCalledTimes(actionsBeforeCleanup);
+      expect(latest().state.tests.cleanupPending).toEqual([]);
+      expect((await call(descriptor, 'get_test_run', { runId: start.runId })).run.status).toBe('error');
+      expect(capture).toHaveBeenLastCalledWith(false);
+    } finally {
+      connect.mockRestore();
+      capture.mockRestore();
+      action.mockRestore();
+      baseline.mockRestore();
+      cleanup.mockRestore();
+    }
+  });
+  it.each(['workflow', 'test'] as const)(
+    'rejects a pending %s launch when MCP is disabled during preflight',
+    async (kind) => {
+      const { WorkflowStore } = await import('../src/workflows/store');
+      const { TestStore } = await import('../src/testing/store');
+      const { AutomationController } = await import('../src/automation/controller');
+      await enable();
+      const document = {
+        version: 1,
+        tests: [
+          {
+            id: 'test',
+            name: '取消预检',
+            workflowId: 'submit',
+            inputs: { price: '1.00' },
+            expect: { ui: [{ id: 'visible', selector: { key: 'result' }, state: 'visible' }] },
+          },
+        ],
+      };
+      await writeFile(
+        join(fake.workspace, '.flutter-pilot', 'workflows.json'),
+        JSON.stringify(workflowDocument),
+      );
+      await writeFile(join(fake.workspace, '.flutter-pilot', 'tests.json'), JSON.stringify(document));
+      let resume!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const read =
+        kind === 'workflow'
+          ? vi.spyOn(WorkflowStore.prototype, 'read')
+          : vi.spyOn(TestStore.prototype, 'read');
+      (read as any).mockImplementationOnce(async () => {
+        await gate;
+        return kind === 'workflow' ? workflowDocument : document;
+      });
+      const action = vi
+        .spyOn(AutomationController.prototype, 'executeWorkflow')
+        .mockResolvedValue({ ok: true });
+      try {
+        const panel = fake.panels.at(-1);
+        panel.receive({
+          action: kind === 'workflow' ? 'workflows.run' : 'tests.run',
+          payload:
+            kind === 'workflow' ? { workflowId: 'submit', inputs: { price: '1.00' } } : { testId: 'test' },
+        });
+        await vi.waitFor(() => expect(read).toHaveBeenCalled());
+        panel.receive({ action: 'mcp.enable', payload: { enabled: false } });
+        resume();
+        await vi.waitFor(() =>
+          expect(latest().state[kind === 'workflow' ? 'workflows' : 'tests'].run?.failure?.code).toBe(
+            'SESSION_INVALIDATED',
+          ),
+        );
+        expect(action).not.toHaveBeenCalled();
+        expect(latest().state[kind === 'workflow' ? 'workflows' : 'tests'].locked).toBe(false);
+      } finally {
+        resume();
+        read.mockRestore();
+        action.mockRestore();
+      }
+    },
+  );
+  it.each(['workflow', 'test'] as const)(
+    'does not launch a %s when its MCP request closes during preflight',
+    async (kind) => {
+      const { WorkflowStore } = await import('../src/workflows/store');
+      const { TestStore } = await import('../src/testing/store');
+      const { AutomationController } = await import('../src/automation/controller');
+      const descriptor = await enable();
+      const document = {
+        version: 1,
+        tests: [
+          {
+            id: 'test',
+            name: '取消预检',
+            workflowId: 'submit',
+            inputs: { price: '1.00' },
+            expect: { ui: [{ id: 'visible', selector: { key: 'result' }, state: 'visible' }] },
+          },
+        ],
+      };
+      await writeFile(
+        join(fake.workspace, '.flutter-pilot', 'workflows.json'),
+        JSON.stringify(workflowDocument),
+      );
+      await writeFile(join(fake.workspace, '.flutter-pilot', 'tests.json'), JSON.stringify(document));
+      let resume!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const read =
+        kind === 'workflow'
+          ? vi.spyOn(WorkflowStore.prototype, 'read')
+          : vi.spyOn(TestStore.prototype, 'read');
+      (read as any).mockImplementationOnce(async () => {
+        await gate;
+        return kind === 'workflow' ? workflowDocument : document;
+      });
+      const acquire = vi.spyOn(AutomationController.prototype, 'acquireWorkflow');
+      const action = vi
+        .spyOn(AutomationController.prototype, 'executeWorkflow')
+        .mockResolvedValue({ ok: true });
+      const controller = new AbortController();
+      try {
+        const pending = requestSession(
+          descriptor,
+          {
+            kind: 'call',
+            tool: kind === 'workflow' ? 'run_workflow' : 'run_test',
+            args: {
+              sessionId: descriptor.sessionId,
+              ...(kind === 'workflow'
+                ? { workflowId: 'submit', inputs: { price: '1.00' } }
+                : { testId: 'test' }),
+            },
+          },
+          controller.signal,
+        );
+        const rejected = expect(pending).rejects.toHaveProperty('code', 'CANCELLED');
+        await vi.waitFor(() => expect(read).toHaveBeenCalled());
+        controller.abort();
+        await rejected;
+        // Allow the host socket's close event to invalidate the pending request.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        resume();
+        await vi.waitFor(() =>
+          expect(latest().state[kind === 'workflow' ? 'workflows' : 'tests'].run?.status).toMatch(
+            /failed|error/,
+          ),
+        );
+        expect(latest().state[kind === 'workflow' ? 'workflows' : 'tests'].run.failure.code).toBe(
+          'SESSION_INVALIDATED',
+        );
+        expect(acquire).not.toHaveBeenCalled();
+        expect(action).not.toHaveBeenCalled();
+      } finally {
+        resume();
+        read.mockRestore();
+        acquire.mockRestore();
+        action.mockRestore();
+      }
+    },
+  );
+  it.each([false, true])('waits for WS after login and activation (socket lost: %s)', async (socketLost) => {
+    const { VmSession } = await import('../src/vm/session');
+    const { WsSession } = await import('../src/ws/session');
+    const { AutomationController } = await import('../src/automation/controller');
+    const { TestNetworkObserver } = await import('../src/testing/network');
+    const sequence: string[] = [];
+    let loginFinished = false;
+    const connect = vi.spyOn(VmSession.prototype, 'connect').mockImplementation(async function (this: any) {
+      this.state.status = 'connected';
+      this.state.isolates = 1;
+      this.emit('change');
+    });
+    const httpCapture = vi.spyOn(VmSession.prototype, 'setCaptureEnabled').mockImplementation(async function (
+      this: any,
+      enabled,
+    ) {
+      this.state.captureEnabled = enabled;
+    });
+    const wsCapture = vi.spyOn(WsSession.prototype, 'setCaptureEnabled').mockImplementation(async function (
+      this: any,
+      enabled,
+    ) {
+      this.state.captureEnabled = enabled;
+    });
+    const wsMock = vi.spyOn(WsSession.prototype, 'setMockEnabled').mockImplementation(async function (
+      this: any,
+      enabled,
+    ) {
+      this.state.mockEnabled = enabled;
+      if (enabled) {
+        sequence.push('enableWS');
+        if (socketLost) this.state.connections = [];
+      }
+    });
+    const scan = vi.spyOn(WsSession.prototype, 'rescan').mockImplementation(async function (this: any) {
+      expect(loginFinished).toBe(true);
+      sequence.push('attachWS');
+      this.state.status = 'active';
+      this.state.connections = [
+        { id: 'socket', status: 'open', capture: 'attached', url: 'wss://example.test/orders' },
+      ];
+    });
+    const action = vi
+      .spyOn(AutomationController.prototype, 'executeWorkflow')
+      .mockImplementation(async (_owner, tool, args) => {
+        if (tool === 'tap' && args.selector?.key === 'login') {
+          loginFinished = true;
+          sequence.push('login');
+        }
+        if (tool === 'tap' && args.selector?.key === 'confirm') sequence.push('confirm');
+        return { ok: true };
+      });
+    const baseline = vi
+      .spyOn(TestNetworkObserver.prototype, 'baseline')
+      .mockImplementation(async () => ({ at: Date.now(), httpIds: [], wsIds: [] }));
+    try {
+      const descriptor = await enable();
+      await message('connection.mode', { mode: 'vm' });
+      await message('vm.connect', { url: 'ws://127.0.0.1:12345/ws' });
+      await writeFile(
+        rulesFile(),
+        JSON.stringify({
+          version: 1,
+          activeSceneId: null,
+          scenes: [
+            {
+              id: 'ws',
+              name: 'WS fixture',
+              httpRules: [],
+              wsRules: [
+                {
+                  id: 'ws_rule',
+                  name: 'pending rule',
+                  enabled: true,
+                  priority: 1,
+                  match: { url: 'wss://example.test/orders', direction: 'inbound' },
+                  action: { type: 'replace', text: '{}' },
+                },
+              ],
+            },
+          ],
+        }),
+      );
+      await message('project.reload');
+      await writeFile(
+        join(fake.workspace, '.flutter-pilot', 'workflows.json'),
+        JSON.stringify({
+          ...workflowDocument,
+          workflows: [
+            ...workflowDocument.workflows,
+            {
+              id: 'login',
+              name: '登录',
+              targets: { login: { key: 'login' } },
+              steps: [{ id: 'login', type: 'tap', target: 'login' }],
+            },
+          ],
+        }),
+      );
+      await writeFile(
+        join(fake.workspace, '.flutter-pilot', 'tests.json'),
+        JSON.stringify({
+          version: 1,
+          tests: [
+            {
+              id: 'setup_ws',
+              name: '登录后下单',
+              workflowId: 'submit',
+              inputs: { price: '1.00' },
+              sceneId: 'ws',
+              setup: [{ workflowId: 'login' }],
+              expect: { ui: [{ id: 'result', selector: { key: 'pending' }, state: 'visible' }] },
+            },
+          ],
+        }),
+      );
+      const start = await call(descriptor, 'run_test', { testId: 'setup_ws' });
+      await vi.waitFor(async () =>
+        expect((await call(descriptor, 'get_test_run', { runId: start.runId })).run.status).toBe('passed'),
+      );
+      expect(sequence).toEqual([
+        'login',
+        'attachWS',
+        'enableWS',
+        ...(socketLost ? ['attachWS'] : []),
+        'confirm',
+      ]);
+    } finally {
+      connect.mockRestore();
+      httpCapture.mockRestore();
+      wsCapture.mockRestore();
+      wsMock.mockRestore();
+      scan.mockRestore();
+      action.mockRestore();
+      baseline.mockRestore();
+    }
+  });
+});
 function workspaceHash(workspace: string) {
   return createHash('sha256').update(pathToFileURL(workspace).toString()).digest('hex').slice(0, 24);
 }

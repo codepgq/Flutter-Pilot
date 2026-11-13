@@ -18,6 +18,8 @@ class FakeRpc extends EventEmitter {
   activeIsolates = ['isolates/1'];
   gate?: Promise<void>;
   failEvaluate = false;
+  totalCount = 2;
+  installed?: number;
   async call<T = any>(method: string, params: Record<string, any> = {}): Promise<T> {
     this.calls.push({ method, params });
     if (method === 'getVM') return { isolates: this.activeIsolates.map((id) => ({ id })) } as T;
@@ -39,7 +41,10 @@ class FakeRpc extends EventEmitter {
         classes: [{ id: 'classes/Dio', name: 'Dio', library: { uri: 'package:dio/src/dio.dart' } }],
       } as T;
     if (method === 'getInstances')
-      return { totalCount: 2, instances: [{ id: 'objects/client1' }, { id: 'objects/client2' }] } as T;
+      return {
+        totalCount: this.totalCount,
+        instances: [{ id: 'objects/client1' }, { id: 'objects/client2' }],
+      } as T;
     if (method === 'createIdZone') return { id: 'zones/anchor' } as T;
     if (method === 'evaluate' && this.failEvaluate) throw new Error('temporary evaluate failure');
     if (method === 'evaluate')
@@ -47,12 +52,41 @@ class FakeRpc extends EventEmitter {
         type: '@Instance',
         id: params.idZoneId ? 'objects/anchor' : 'objects/result',
         kind: 'Map',
+        ...(this.installed === undefined ? {} : { valueAsString: String(this.installed) }),
       } as T;
     return { type: 'Success' } as T;
   }
 }
 
 describe('VM Dio injection lifecycle', () => {
+  it('rejects known partial coverage for stateful tests while retaining ordinary Mock warning behavior', async () => {
+    const rpc = new FakeRpc();
+    const injector = new DioVmInjector(rpc);
+    const stateful = [{ ...rules[0], scenario: { id: 'run', initial: 'empty', when: 'empty' } }];
+    rpc.totalCount = 129;
+    await expect(injector.sync('isolates/1', stateful)).rejects.toThrow('全部 Dio');
+    expect(rpc.calls.some((call) => call.method === 'createIdZone')).toBe(false);
+    const ordinary = await injector.sync('isolates/1', rules);
+    expect(ordinary.warnings.join(' ')).toContain('128');
+    rpc.totalCount = 2;
+    rpc.installed = 1;
+    await expect(injector.sync('isolates/1', stateful)).rejects.toThrow('未接入全部 Dio');
+    expect((await injector.sync('isolates/1', rules)).warnings.join(' ')).toContain('部分自定义 Dio');
+    await injector.dispose();
+  });
+  it('rejects an incomplete first stateful installation so its owning session can roll it back', async () => {
+    const rpc = new FakeRpc();
+    rpc.installed = 1;
+    const injector = new DioVmInjector(rpc);
+    await expect(
+      injector.sync('isolates/1', [
+        { ...rules[0], scenario: { id: 'run', initial: 'empty', when: 'empty' } },
+      ]),
+    ).rejects.toThrow('未接入全部 Dio');
+    await injector.detach();
+    expect(rpc.calls.some((call) => call.method === 'deleteIdZone')).toBe(true);
+    await injector.dispose();
+  });
   it('escapes Dart interpolation and fnmatch characters without interpreting rule text as code', () => {
     expect(dartLiteral('$HOME ${1+1}')).toBe('"\\$HOME \\${1+1}"');
     for (const [pattern, path, expected] of [
@@ -177,6 +211,33 @@ describe('VM Dio injection lifecycle', () => {
     expect(received).toHaveLength(0);
     rpc.emit('notification', event(session, entry));
     expect(received).toEqual([entry]);
+    await injector.dispose();
+  });
+  it('publishes pending requests separately from completed history with the same source identity', async () => {
+    const rpc = new FakeRpc();
+    const injector = new DioVmInjector(rpc);
+    const observed: unknown[] = [],
+      history: unknown[] = [];
+    injector.on('observation.http', (entry) => observed.push(entry));
+    injector.on('history', (entry) => history.push(entry));
+    await injector.sync('isolates/1', rules);
+    const expression = rpc.calls.find((x) => x.method === 'evaluate' && x.params.idZoneId)!.params.expression;
+    expect(expression).toContain("emitEvent('flutter_pilot.vm.request'");
+    const session = JSON.parse(/'tag': ("[^"]+")/.exec(expression)![1]);
+    const pending = { id: 'pending-flow', startedAt: 1, originalRequest: {}, request: {} };
+    const event = (kind: string, tag: string, entry: unknown) => ({
+      params: { event: { extensionKind: kind, extensionData: { session: tag, entry } } },
+    });
+    rpc.emit('notification', event('flutter_pilot.vm.request', 'another-session', pending));
+    rpc.emit('notification', event('flutter_pilot.vm.request', session, {}));
+    expect(observed).toEqual([]);
+    rpc.emit('notification', event('flutter_pilot.vm.request', session, pending));
+    expect(observed).toEqual([pending]);
+    expect(history).toEqual([]);
+    const completed = { ...pending, response: { status: 200 } };
+    rpc.emit('notification', event('flutter_pilot.vm.flow', session, completed));
+    expect(history).toEqual([completed]);
+    expect(observed).toHaveLength(1);
     await injector.dispose();
   });
 });

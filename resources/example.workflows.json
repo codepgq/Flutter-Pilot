@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "workflows": [
+    {
+      "id": "login",
+      "name": "登录并确认账号（替换为实际 Key）",
+      "inputs": {
+        "username": { "required": true },
+        "password": { "required": true, "secret": true }
+      },
+      "targets": {
+        "loginPage": { "key": "login.page" },
+        "usernameInput": { "key": "login.username" },
+        "passwordInput": { "key": "login.password" },
+        "submitButton": { "key": "login.submit" },
+        "accountLabel": { "key": "account.identity" }
+      },
+      "steps": [
+        { "id": "waitLogin", "type": "wait_for_widget", "target": "loginPage", "state": "visible" },
+        {
+          "id": "fillUsername",
+          "type": "enter_text",
+          "target": "usernameInput",
+          "text": "${inputs.username}"
+        },
+        {
+          "id": "fillPassword",
+          "type": "enter_text",
+          "target": "passwordInput",
+          "text": "${inputs.password}"
+        },
+        { "id": "submitLogin", "type": "tap", "target": "submitButton" },
+        {
+          "id": "waitAccountIdentity",
+          "type": "wait_for_widget",
+          "target": "accountLabel",
+          "state": "text_equals",
+          "text": "${inputs.username}",
+          "timeoutMs": 10000
+        }
+      ]
+    },
+    {
+      "id": "submit_order",
+      "name": "填入价格数量并确认下单（替换为实际 Key）",
+      "inputs": {
+        "price": { "required": true },
+        "quantity": { "required": true }
+      },
+      "targets": {
+        "priceInput": { "key": "order.price" },
+        "quantityInput": { "key": "order.quantity" },
+        "submitButton": { "key": "order.submit" },
+        "confirmation": { "key": "order.confirmation" },
+        "confirmPrice": { "key": "order.confirm.price", "ancestor": { "key": "order.confirmation" } },
+        "confirmQuantity": {
+          "key": "order.confirm.quantity",
+          "ancestor": { "key": "order.confirmation" }
+        },
+        "confirmButton": {
+          "key": "order.confirm.submit",
+          "ancestor": { "key": "order.confirmation" }
+        }
+      },
+      "steps": [
+        { "id": "fillPrice", "type": "enter_text", "target": "priceInput", "text": "${inputs.price}" },
+        {
+          "id": "fillQuantity",
+          "type": "enter_text",
+          "target": "quantityInput",
+          "text": "${inputs.quantity}"
+        },
+        { "id": "waitSubmit", "type": "wait_for_widget", "target": "submitButton", "state": "actionable" },
+        { "id": "openConfirmation", "type": "tap", "target": "submitButton" },
+        { "id": "waitConfirmation", "type": "wait_for_widget", "target": "confirmation", "state": "visible" },
+        {
+          "id": "checkConfirmPrice",
+          "type": "wait_for_widget",
+          "target": "confirmPrice",
+          "state": "text_equals",
+          "text": "${inputs.price}"
+        },
+        {
+          "id": "checkConfirmQuantity",
+          "type": "wait_for_widget",
+          "target": "confirmQuantity",
+          "state": "text_equals",
+          "text": "${inputs.quantity}"
+        },
+        { "id": "confirmOnce", "type": "tap", "target": "confirmButton" }
+      ]
+    },
+    {
+      "id": "login_and_submit_order",
+      "name": "登录后下单（顺序复用子流程）",
+      "inputs": {
+        "username": { "required": true },
+        "password": { "required": true, "secret": true },
+        "price": { "required": true },
+        "quantity": { "default": "2" }
+      },
+      "targets": {},
+      "steps": [
+        {
+          "id": "login",
+          "type": "call",
+          "workflowId": "login",
+          "inputs": { "username": "${inputs.username}", "password": "${inputs.password}" }
+        },
+        {
+          "id": "submitOrder",
+          "type": "call",
+          "workflowId": "submit_order",
+          "inputs": { "price": "${inputs.price}", "quantity": "${inputs.quantity}" }
+        }
+      ]
+    }
+  ]
+}

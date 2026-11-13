@@ -1,5 +1,24 @@
 # 实现与验证结论
 
+## 0.0.15 审核与发布验证（2026-11-13）
+
+- 本轮全量审核包含全部未提交修改和新增文件，三组并行审查工作流、业务测试和有状态 Mock，主控审查扩展及 MCP 集成。8 项问题已修复，详情见 docs/review-0.0.15.md。
+- 修复布局与计时混淆、秘密参数默认值、嵌套凭据证据脱敏、空 HTTP 匹配、在途重复 Dio 请求观察、状态 Mock 接入覆盖、MCP 预检取消和清理失败后外部操作保护。
+- 最终 664 项 Vitest / 42 文件、74 项 Playwright、28 项 Python 代理测试通过；23 项缺 MITMDUMP 跳过。类型、格式、构建和 diff 检查通过；独立 Dart / Dio 5.11.1 smoke 32 项检查通过，临时依赖目录已清理。
+- 递增为 0.0.15，发布包包含此前未发版的移动交互增量。VSIX、安装一致性与构建/安装桥接 SDK stdio 证据保存于 artifacts/v0.0.15-install-report.json；不自动重载用户窗口。
+- 请求开始观察覆盖已接入 Dio；SDK-only 仍只观察轮询完成请求，测试结束后的请求不在观察范围。本轮未重新操作真实设备、业务 App 或后端。
+
+## Workflow 与业务测试（2026-11-13，本轮未发布源码）
+
+- 用户明确要求本轮同时完成两阶段。新增 `.flutter-pilot/workflows.json` 与 `tests.json`，Scene 继续只负责持久 HTTP/WS 环境；激活、重连和 IDE 重开不会执行 UI。
+- Workflow 使用稳定选择器、字符串参数、线性动作和子流程，复用 AutomationController 队列与设备独占；异步启动返回 runId，查询/取消独立可用，记录步骤、定位/输入/等待/总耗时。completed 仅表示操作完成。
+- Test Case 复用同一流程内核，支持 setup、临时 Scene、有状态 HTTP Mock、App 原始请求断言、响应提取、关联 WS 注入与订单行 UI 断言。状态转换先于 Mock 响应，观察保留到最终 UI 检查；重复请求、采集遗漏和容量溢出不能通过。
+- 测试要求已连接的 Debug VM；观察使用 App 源时钟及独立有界内存窗口，排除旧在途请求和历史保留策略影响。有状态 Mock 在同一 isolate 的 Dio 实例间共享，跨 isolate 编排不支持。HTTP 先于 setup 生效，登录创建 WS 后先确认接入再运行主流程。
+- 测试结束恢复自身 Scene/采集状态，恢复失败保留清理记录并阻止新操作污染环境；工作台及 cancel_test_run 可重试清理。取消、断线或 confirm 超时不重放动作；MCP 在异步预检阶段关闭也阻止后续操作。
+- 新增业务流程/业务测试页面、8 个 MCP 工具及同名 Prompt，合计 50 工具/54 Prompts；示例与指南见 docs/workflows.md、docs/testing.md。示例 Key/URL 为占位，需实际探索后调整。
+- 最终 650 项 Vitest / 42 文件、73 项 Playwright、类型检查、构建及改动格式通过；Python 28 项通过、23 项缺 MITMDUMP 跳过。独立 Dart/Dio 状态机与源时钟、headless Flutter 动作耗时 smoke 已通过；没有操作用户业务 App、真实订单或后端，也未完成物理设备业务 E2E。
+- 保持 0.0.14，未提交、推送、打包、安装或发布本轮改动。验证子代理误用 `dart --disable-analytics --version` 关闭了全局 Dart analytics，原状态未知，未擅自启用；已向用户说明。
+
 ## 移动交互交付范围（2026-11-13）
 
 - 修复及复验完成后，用户授权 `commit and push`。本轮移动交互功能、六项修复、测试和文档统一提交并常规推送 main；此前的未提交记录为验证时历史状态。

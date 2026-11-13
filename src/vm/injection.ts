@@ -18,6 +18,7 @@ interface Anchor {
   stateId: string;
   zoneId: string;
   rules: string;
+  scenarios: string;
 }
 
 /** Dart expression string literals must also escape interpolation, unlike JSON. */
@@ -49,7 +50,10 @@ export class DioVmInjector extends EventEmitter {
     super();
     this.listener = (notification: any) => {
       const event = notification?.params?.event;
-      if (event?.extensionKind !== 'flutter_pilot.vm.flow' || event.extensionData?.session !== this.session)
+      if (
+        !['flutter_pilot.vm.flow', 'flutter_pilot.vm.request'].includes(event?.extensionKind) ||
+        event.extensionData?.session !== this.session
+      )
         return;
       const entry = event.extensionData.entry as HistoryEntry;
       if (
@@ -60,7 +64,7 @@ export class DioVmInjector extends EventEmitter {
         !entry.request
       )
         return;
-      this.emit('history', entry);
+      this.emit(event.extensionKind === 'flutter_pilot.vm.request' ? 'observation.http' : 'history', entry);
     };
     (rpc as VmRpc & { on?: (event: string, listener: (value: any) => void) => void }).on?.(
       'notification',
@@ -133,6 +137,9 @@ export class DioVmInjector extends EventEmitter {
         }))
         .sort((a, b) => b.priority - a.priority || a._index - b._index),
     );
+    const scenarios = JSON.stringify([
+      ...new Set(rules.flatMap((rule) => (rule.scenario ? [rule.scenario.id] : []))),
+    ]);
     if (Buffer.byteLength(serialized, 'utf8') > 2 * 1024 * 1024)
       throw new Error('VM 模式已启用规则的总快照超过 2 MiB，请减少规则或正文');
     const found = await this.discover(isolateId);
@@ -143,13 +150,27 @@ export class DioVmInjector extends EventEmitter {
       };
     if (!found.instances.length)
       return { instances: 0, warnings: [...warnings, '尚未创建 Dio 实例，等待下一次扫描。'] };
-    if (found.total > 128) warnings.push('当前只接入前 128 个 Dio 实例；其余实例未保证覆盖。');
+    const stateful = rules.some((rule) => rule.enabled && rule.scenario);
+    if (found.total > 128) {
+      if (stateful) throw new Error('测试 Mock 无法覆盖全部 Dio 实例，不能验证完整请求记录。');
+      warnings.push('当前只接入前 128 个 Dio 实例；其余实例未保证覆盖。');
+    }
+    const checkInstalled = (count: number) => {
+      if (!Number.isInteger(count) || count < 0 || count > found.instances.length)
+        throw new Error('VM 返回的 Dio 接入数量无效，无法确认运行时覆盖。');
+      if (count < found.instances.length) {
+        if (stateful) throw new Error('测试 Mock 未接入全部 Dio 实例，不能验证完整请求记录。');
+        warnings.push('部分自定义 Dio 实例无法添加拦截器，已保持原样。');
+      }
+    };
     const scope = Object.fromEntries(found.instances.map((item, index) => [`client${index}`, item.id]));
     const list = `[${found.instances.map((_, index) => `client${index}`).join(',')}]`;
     const anchor = this.anchors.get(isolateId);
     if (anchor) {
       const update =
-        anchor.rules === serialized ? '' : `state['rules'] = jsonDecode(${dartLiteral(serialized)});`;
+        anchor.rules === serialized && anchor.scenarios === scenarios
+          ? ''
+          : `state['rules'] = jsonDecode(${dartLiteral(serialized)}); final scenarioIds = jsonDecode(${dartLiteral(scenarios)}); state['scenarioStates'].removeWhere((dynamic key, dynamic value) => !scenarioIds.contains(key));`;
       const updated = await this.evaluate(
         isolateId,
         found.libraryId,
@@ -157,9 +178,10 @@ export class DioVmInjector extends EventEmitter {
         { ...scope, state: anchor.stateId },
       );
       anchor.rules = serialized;
+      anchor.scenarios = scenarios;
       const count =
         updated.valueAsString === undefined ? found.instances.length : Number(updated.valueAsString);
-      if (count < found.instances.length) warnings.push('部分自定义 Dio 实例无法添加拦截器，已保持原样。');
+      checkInstalled(count);
       return { instances: count, warnings };
     }
     const isolate = await this.rpc.call<any>('getIsolate', { isolateId });
@@ -210,13 +232,14 @@ export class DioVmInjector extends EventEmitter {
         stateId: result.id,
         zoneId: zone.id,
         rules: serialized,
+        scenarios,
       });
       const installed = await this.evaluate(isolateId, found.libraryId, `state['installed']`, {
         state: result.id,
       });
       const count =
         installed.valueAsString === undefined ? found.instances.length : Number(installed.valueAsString);
-      if (count < found.instances.length) warnings.push('部分自定义 Dio 实例无法添加拦截器，已保持原样。');
+      checkInstalled(count);
       return { instances: count, warnings };
     } catch (error) {
       if (!this.anchors.has(isolateId)) {

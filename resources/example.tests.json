@@ -1,0 +1,182 @@
+{
+  "version": 1,
+  "tests": [
+    {
+      "id": "order_pending",
+      "name": "本次订单进入 pending（Mock 与模拟推送）",
+      "workflowId": "submit_order",
+      "inputs": { "price": "100.00", "quantity": "2" },
+      "timeoutMs": 60000,
+      "mock": {
+        "initialState": "empty",
+        "states": [
+          {
+            "id": "empty",
+            "httpRules": [
+              {
+                "id": "orders-empty",
+                "name": "提交前列表为空",
+                "enabled": true,
+                "priority": 10,
+                "match": { "method": "GET", "host": "api.example.test", "path": "/v1/orders" },
+                "mock": {
+                  "status": 200,
+                  "headers": { "content-type": "application/json" },
+                  "body": "{\"data\":[]}"
+                }
+              },
+              {
+                "id": "create-order",
+                "name": "创建订单后先切换列表状态",
+                "enabled": true,
+                "priority": 10,
+                "match": { "method": "POST", "host": "api.example.test", "path": "/v1/orders" },
+                "mock": {
+                  "status": 200,
+                  "headers": { "content-type": "application/json" },
+                  "body": "{\"data\":{\"orderId\":\"${run.id}\",\"price\":\"${inputs.price}\",\"quantity\":\"${inputs.quantity}\",\"status\":\"pending\"}}"
+                },
+                "nextState": "pending"
+              }
+            ]
+          },
+          {
+            "id": "pending",
+            "httpRules": [
+              {
+                "id": "orders-pending",
+                "name": "提交后立即查询同一订单",
+                "enabled": true,
+                "priority": 10,
+                "match": { "method": "GET", "host": "api.example.test", "path": "/v1/orders" },
+                "mock": {
+                  "status": 200,
+                  "headers": { "content-type": "application/json" },
+                  "body": "{\"data\":[{\"orderId\":\"${run.id}\",\"price\":\"${inputs.price}\",\"quantity\":\"${inputs.quantity}\",\"status\":\"pending\"}]}"
+                }
+              },
+              {
+                "id": "reject-duplicate-create",
+                "name": "拒绝重复提交",
+                "enabled": true,
+                "priority": 10,
+                "match": { "method": "POST", "host": "api.example.test", "path": "/v1/orders" },
+                "mock": {
+                  "status": 409,
+                  "headers": { "content-type": "application/json" },
+                  "body": "{\"code\":\"DUPLICATE_SUBMIT\"}"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "http": [
+          {
+            "id": "createOrder",
+            "match": { "method": "POST", "host": "api.example.test", "path": "/v1/orders" },
+            "requestJson": { "/price": "${inputs.price}", "/quantity": "${inputs.quantity}" },
+            "status": 200,
+            "mocked": true,
+            "responseJson": { "/data/orderId": "${run.id}", "/data/status": "pending" },
+            "extract": { "orderId": "/response/body/data/orderId" },
+            "timeoutMs": 15000
+          }
+        ],
+        "ws": [
+          {
+            "id": "pendingEvent",
+            "url": "wss://api.example.test/orders",
+            "direction": "inbound",
+            "outcome": "synthetic",
+            "json": {
+              "/topic": "order.pending",
+              "/data/orderId": "${vars.orderId}",
+              "/data/price": "${inputs.price}",
+              "/data/quantity": "${inputs.quantity}"
+            },
+            "timeoutMs": 15000
+          }
+        ],
+        "ui": [
+          {
+            "id": "rowPrice",
+            "selector": { "key": "order.row.price", "ancestor": { "key": "order-${vars.orderId}" } },
+            "state": "text_equals",
+            "text": "${inputs.price}"
+          },
+          {
+            "id": "rowQuantity",
+            "selector": { "key": "order.row.quantity", "ancestor": { "key": "order-${vars.orderId}" } },
+            "state": "text_equals",
+            "text": "${inputs.quantity}"
+          },
+          {
+            "id": "rowPending",
+            "selector": { "key": "order.row.status", "ancestor": { "key": "order-${vars.orderId}" } },
+            "state": "text_equals",
+            "text": "pending",
+            "stableForMs": 200
+          }
+        ]
+      },
+      "events": [
+        {
+          "id": "pushPending",
+          "after": "createOrder",
+          "url": "wss://api.example.test/orders",
+          "text": "{\"topic\":\"order.pending\",\"data\":{\"orderId\":\"${vars.orderId}\",\"price\":\"${inputs.price}\",\"quantity\":\"${inputs.quantity}\",\"status\":\"pending\"}}"
+        }
+      ]
+    },
+    {
+      "id": "order_insufficient_balance",
+      "name": "余额不足（复用同一提交流程）",
+      "workflowId": "submit_order",
+      "inputs": { "price": "100.00", "quantity": "2" },
+      "mock": {
+        "initialState": "rejected",
+        "states": [
+          {
+            "id": "rejected",
+            "httpRules": [
+              {
+                "id": "reject-order",
+                "name": "HTTP 200 中的业务拒绝",
+                "enabled": true,
+                "priority": 10,
+                "match": { "method": "POST", "host": "api.example.test", "path": "/v1/orders" },
+                "mock": {
+                  "status": 200,
+                  "headers": { "content-type": "application/json" },
+                  "body": "{\"code\":\"INSUFFICIENT_BALANCE\",\"message\":\"余额不足\"}"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "http": [
+          {
+            "id": "rejectedOrder",
+            "match": { "method": "POST", "host": "api.example.test", "path": "/v1/orders" },
+            "requestJson": { "/price": "${inputs.price}", "/quantity": "${inputs.quantity}" },
+            "status": 200,
+            "mocked": true,
+            "responseJson": { "/code": "INSUFFICIENT_BALANCE" }
+          }
+        ],
+        "ui": [
+          {
+            "id": "balanceError",
+            "selector": { "key": "order.error.message", "ancestor": { "key": "order.error" } },
+            "state": "text_equals",
+            "text": "余额不足"
+          }
+        ]
+      }
+    }
+  ]
+}

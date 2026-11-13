@@ -29,6 +29,8 @@ export interface Rule {
   mock?: { status: number; headers: Record<string, string>; body: string };
   response?: ResponsePatch;
   breakpoint?: { request?: boolean; response?: boolean; timeout?: number };
+  /** Ephemeral HTTP fixture state, scoped by a test run. */
+  scenario?: { id: string; initial: string; when: string; next?: string };
 }
 export interface RuleDocument {
   version: 1;
@@ -117,6 +119,23 @@ export interface ApiCatalogEntry {
   lastAt: number;
 }
 export interface WorkbenchState {
+  workflows?: {
+    file: string;
+    catalogue?: Awaited<ReturnType<import('./workflows/controller').WorkflowController['list']>>;
+    run?: ReturnType<import('./workflows/controller').WorkflowController['get']>['run'];
+    running: boolean;
+    locked?: boolean;
+    error?: string;
+  };
+  tests?: {
+    file: string;
+    catalogue?: Awaited<ReturnType<import('./testing/controller').TestController['list']>>;
+    run?: ReturnType<import('./testing/controller').TestController['get']>['run'];
+    running: boolean;
+    locked?: boolean;
+    cleanupPending?: string[];
+    error?: string;
+  };
   automation?: import('./automation/model').AutomationState;
   scenes?: import('./scene-model').SceneDocument;
   sceneRuntime?: import('./scene-model').SceneRuntime;
@@ -262,7 +281,19 @@ export function validateRuleDocument(input: unknown): RuleDocument {
     assert(object(item), `第 ${index + 1} 条规则必须是对象`);
     fields(
       item,
-      ['id', 'name', 'enabled', 'priority', 'match', 'request', 'redirect', 'mock', 'response', 'breakpoint'],
+      [
+        'id',
+        'name',
+        'enabled',
+        'priority',
+        'match',
+        'request',
+        'redirect',
+        'mock',
+        'response',
+        'breakpoint',
+        'scenario',
+      ],
       '规则',
     );
     assert(typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 128, '规则 ID 无效');
@@ -293,6 +324,29 @@ export function validateRuleDocument(input: unknown): RuleDocument {
       assert(typeof item.mock.body === 'string', 'mock.body 必须为字符串');
     }
     assert(!(item.mock !== undefined && item.redirect !== undefined), '同一规则不能同时直接 Mock 和转发');
+    if (item.scenario !== undefined) {
+      assert(object(item.scenario), 'scenario 必须为对象');
+      fields(item.scenario, ['id', 'initial', 'when', 'next'], 'scenario');
+      for (const key of ['id', 'initial', 'when', 'next']) {
+        if (key === 'next' && item.scenario[key] === undefined) continue;
+        const value = item.scenario[key];
+        assert(
+          typeof value === 'string' &&
+            value.trim().length > 0 &&
+            value.length <= 128 &&
+            !/[\x00-\x1f\x7f]/.test(value),
+          `scenario.${key} 必须为非空字符串，最多 128 字符且不能包含控制字符`,
+        );
+      }
+      assert(
+        item.mock !== undefined &&
+          item.request === undefined &&
+          item.redirect === undefined &&
+          item.response === undefined &&
+          item.breakpoint === undefined,
+        '有状态规则仅支持直接 HTTP Mock',
+      );
+    }
     if (item.breakpoint !== undefined) {
       assert(object(item.breakpoint), 'breakpoint 必须为对象');
       fields(item.breakpoint, ['request', 'response', 'timeout'], 'breakpoint');
@@ -320,6 +374,16 @@ export function validateRuleDocument(input: unknown): RuleDocument {
         (object(item.breakpoint) && (item.breakpoint.request || item.breakpoint.response)),
       '规则至少需要一个动作',
     );
+  }
+  const initialStates = new Map<string, string>();
+  for (const item of input.rules) {
+    const scenario = (item as unknown as Rule).scenario;
+    if (!scenario) continue;
+    assert(
+      !initialStates.has(scenario.id) || initialStates.get(scenario.id) === scenario.initial,
+      '同一 scenario 的 initial 必须一致',
+    );
+    initialStates.set(scenario.id, scenario.initial);
   }
   return JSON.parse(JSON.stringify(input)) as RuleDocument;
 }

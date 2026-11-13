@@ -16,6 +16,8 @@ import './style.css';
 import { inspectJson } from './body';
 import { WebSocketPanel } from './websocket';
 import { McpPanel } from './mcp';
+import { WorkflowPanel } from './workflows';
+import { TestPanel } from './tests';
 import type { WsRule } from '../src/ws/model';
 import type { Scene } from '../src/scene-model';
 import { apiRuleTags, type ApiRuleTag } from './api-rules';
@@ -48,7 +50,8 @@ const initial: WorkbenchState = {
   logs: [],
   busy: false,
 };
-type Tab = 'apis' | 'history' | 'rules' | 'breakpoints' | 'connection' | 'websocket' | 'mcp';
+type Tab =
+  'apis' | 'history' | 'rules' | 'breakpoints' | 'connection' | 'websocket' | 'mcp' | 'workflows' | 'tests';
 type Snapshot = RequestSnapshot | ResponseSnapshot;
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
@@ -375,6 +378,13 @@ function App() {
     { id: 'history', label: '请求历史', icon: 'history', count: state.history.total },
     { id: 'websocket', label: 'WebSocket', icon: 'radar', count: state.ws?.messages.total ?? 0 },
     { id: 'rules', label: 'Mock 场景', icon: 'rules', count: state.scenes?.scenes.length ?? 0 },
+    {
+      id: 'workflows',
+      label: '业务流程',
+      icon: 'play',
+      count: state.workflows?.catalogue?.workflows.length ?? 0,
+    },
+    { id: 'tests', label: '业务测试', icon: 'play', count: state.tests?.catalogue?.tests.length ?? 0 },
     { id: 'breakpoints', label: '断点队列', icon: 'pause', count: state.pending.length },
     { id: 'mcp', label: 'MCP', icon: 'plug' },
   ];
@@ -519,6 +529,8 @@ function App() {
           </>
         )}
         {tab === 'mcp' && <McpPanel state={state} send={send} />}
+        {tab === 'workflows' && <WorkflowPanel state={state} send={send} />}
+        {tab === 'tests' && <TestPanel state={state} send={send} />}
         {(tab === 'apis' || tab === 'history') && (
           <div className="http-workspace" key={state.mode ?? 'vm'}>
             <div className="http-tab-panel" hidden={tab !== 'apis'}>

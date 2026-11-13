@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { guideTopics } from './guide';
 import { automationMcpTools } from '../automation/tools';
+import { workflowMcpTools } from '../workflows/tools';
+import { testMcpTools } from '../testing/tools';
 
 const session = { sessionId: z.string().min(1).max(256) };
 const timeout = z.number().int().min(100).max(30000).optional();
@@ -52,6 +54,8 @@ export const mcpTools = {
     schema: z.object({ ...session, timeoutMs: timeout }).strict(),
   },
   ...automationMcpTools,
+  ...workflowMcpTools,
+  ...testMcpTools,
   get_network_status: {
     description:
       '编辑Mock前获取files.scenes准确路径及开关状态；Agent读取并增量编辑文件，格式见get_usage_guide(topic=http/ws)，保存后reload_rules，再activate_scene统一开启所需Mock。',

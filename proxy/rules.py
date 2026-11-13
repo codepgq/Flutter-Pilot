@@ -71,6 +71,18 @@ def validate_rules(document):
             _string_map(mock.get("headers", {}), nullable=False)
             if not isinstance(mock.get("body"), str):
                 raise ValueError("mock.body 必须为字符串")
+        if "scenario" in rule:
+            scenario = rule["scenario"]
+            if not isinstance(scenario, dict) or set(scenario) - {"id", "initial", "when", "next"}:
+                raise ValueError("scenario 必须为对象且不能包含未知字段")
+            for key in ("id", "initial", "when", "next"):
+                if key == "next" and key not in scenario:
+                    continue
+                value = scenario.get(key)
+                if not isinstance(value, str) or not value.strip() or len(value) > 128 or any(ord(char) < 32 or ord(char) == 127 for char in value):
+                    raise ValueError("scenario.%s 必须为非空字符串，最多 128 字符且不能包含控制字符" % key)
+            if "mock" not in rule or any(key in rule for key in ("request", "redirect", "response", "breakpoint")):
+                raise ValueError("有状态规则仅支持直接 HTTP Mock")
         if "breakpoint" in rule:
             bp = rule["breakpoint"]
             if not isinstance(bp, dict) or not any(bp.get(k) is True for k in ("request", "response")):
@@ -80,6 +92,14 @@ def validate_rules(document):
                     raise ValueError("断点阶段必须为布尔值")
             if "timeout" in bp and (isinstance(bp["timeout"], bool) or not isinstance(bp["timeout"], (int, float)) or not 10 <= bp["timeout"] <= 300):
                 raise ValueError("断点等待时间必须为 10–300 秒")
+    initial_states = {}
+    for rule in rules:
+        scenario = rule.get("scenario")
+        if not scenario:
+            continue
+        if scenario["id"] in initial_states and initial_states[scenario["id"]] != scenario["initial"]:
+            raise ValueError("同一 scenario 的 initial 必须一致")
+        initial_states[scenario["id"]] = scenario["initial"]
     return copy.deepcopy(rules)
 
 
@@ -133,7 +153,10 @@ def resolve_redirect_url(value, current):
     return original.scheme + "://" + original.netloc + value + query
 
 
-def matches(rule, snapshot):
+def matches(rule, snapshot, scenario_states=None):
+    scenario = rule.get("scenario")
+    if scenario and (scenario_states or {}).get(scenario["id"], scenario["initial"]) != scenario["when"]:
+        return False
     match = rule.get("match", {})
     parsed = urlsplit(snapshot["url"])
     if match.get("method") not in (None, "", "*") and snapshot["method"].upper() != match["method"].upper():
@@ -155,9 +178,9 @@ def matches(rule, snapshot):
     return True
 
 
-def select_rule(rules, snapshot, stage):
+def select_rule(rules, snapshot, stage, scenario_states=None):
     for rule in sorted(rules, key=lambda item: -item.get("priority", 0)):
-        if not rule.get("enabled") or not matches(rule, snapshot):
+        if not rule.get("enabled") or not matches(rule, snapshot, scenario_states):
             continue
         if stage == "request" and any(key in rule for key in ("request", "redirect", "mock")):
             return rule
@@ -166,3 +189,18 @@ def select_rule(rules, snapshot, stage):
         if stage.startswith("breakpoint.") and rule.get("breakpoint", {}).get(stage.split(".")[1]):
             return rule
     return None
+
+
+def sync_scenarios(rules, scenario_states):
+    """Drop removed scopes while retaining every surviving run's current state."""
+    live = {rule["scenario"]["id"] for rule in rules if "scenario" in rule}
+    for key in list(scenario_states):
+        if key not in live:
+            del scenario_states[key]
+
+
+def advance_scenario(rule, scenario_states):
+    """Call only after constructing the mock response, before yielding delivery."""
+    scenario = rule.get("scenario")
+    if scenario and "next" in scenario:
+        scenario_states[scenario["id"]] = scenario["next"]
