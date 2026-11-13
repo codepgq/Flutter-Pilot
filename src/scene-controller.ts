@@ -10,6 +10,8 @@ export interface SceneHost {
     key: string;
     mode: 'vm' | 'proxy';
     connected: boolean;
+    /** The proxy may still serve rules, but its control connection is unavailable. */
+    proxyRulesUnreachable?: boolean;
     httpApplied: boolean;
     wsApplied: boolean;
     httpError?: string;
@@ -19,6 +21,7 @@ export interface SceneHost {
   project(http: Rule[], ws: WsRule[]): Promise<void>;
   enable(domain: Domain): Promise<void>;
   capture(domain: Domain, enabled: boolean): Promise<void>;
+  stopUnreachableProxy?(): Promise<void>;
   changed(): void;
 }
 
@@ -84,9 +87,29 @@ export class SceneController {
     this.loaded = true;
     await this.reconcile();
   }
+  private ensureSafeChange(next: SceneDocument) {
+    if (!this.host.snapshot().proxyRulesUnreachable) return;
+    const activeRules = (doc: SceneDocument) => {
+      const scene = doc.scenes.find((item) => item.id === doc.activeSceneId);
+      return [doc.activeSceneId, scene?.httpRules ?? [], scene?.wsRules ?? []];
+    };
+    if (JSON.stringify(activeRules(this.document)) !== JSON.stringify(activeRules(next)))
+      throw new Error('代理控制连接已断开，旧规则可能仍在生效。请等待重连或停止代理后再更改激活场景。');
+  }
+  private async stopIfDisconnectedDuringSave(next: SceneDocument) {
+    try {
+      this.ensureSafeChange(next);
+    } catch (error) {
+      // The connection can drop while the file save is in flight. The new
+      // selection is already persisted, so stop the still-serving process.
+      if (!this.host.stopUnreachableProxy) throw error;
+      await this.host.stopUnreachableProxy();
+    }
+  }
   reload() {
     return this.enqueue(async () => {
       const doc = await this.store.read();
+      this.ensureSafeChange(doc);
       if (doc.activeSceneId !== this.document.activeSceneId) {
         this.temporary = [];
         this.paused.clear();
@@ -104,7 +127,10 @@ export class SceneController {
       const before = this.document;
       const next = structuredClone(before);
       edit(next);
-      this.document = await this.store.save(next, before);
+      this.ensureSafeChange(next);
+      const saved = await this.store.save(next, before);
+      if (this.host.snapshot().proxyRulesUnreachable) await this.stopIfDisconnectedDuringSave(saved);
+      this.document = saved;
       if (resetPaused) {
         this.paused.clear();
         this.pendingCaptures.clear();
@@ -150,7 +176,16 @@ export class SceneController {
       const scene = doc.scenes.find((scene) => scene.id === id);
       if (!scene) throw new Error('请选择目标场景');
       scene.wsRules = rules.filter((rule) => !rule.match.connectionId);
-      this.document = await this.store.save(doc, this.document);
+      this.ensureSafeChange(doc);
+      if (
+        id === this.active?.id &&
+        this.host.snapshot().proxyRulesUnreachable &&
+        JSON.stringify(temporary) !== JSON.stringify(this.temporary)
+      )
+        throw new Error('代理控制连接已断开，旧规则可能仍在生效。请等待重连或停止代理后再更改激活场景。');
+      const saved = await this.store.save(doc, this.document);
+      if (this.host.snapshot().proxyRulesUnreachable) await this.stopIfDisconnectedDuringSave(saved);
+      this.document = saved;
       if (id === this.active?.id) this.temporary = temporary;
       await this.apply();
       this.host.changed();
@@ -166,6 +201,8 @@ export class SceneController {
   }
   setCapture(domain: Domain, enabled: boolean) {
     return this.enqueue(async () => {
+      if (domain === 'http' && this.host.snapshot().proxyRulesUnreachable)
+        throw new Error('代理控制连接已断开，旧规则可能仍在生效。请等待重连或停止代理后再调整采集。');
       this.pendingCaptures.set(domain, enabled);
       let failure: unknown;
       try {
@@ -226,13 +263,25 @@ export class SceneController {
     }, 16100);
     this.retryTimer.unref?.();
   }
+  private applicationKey(snapshot: ReturnType<SceneHost['snapshot']>) {
+    const scene = this.active;
+    return JSON.stringify([
+      snapshot.key,
+      snapshot.connected,
+      scene?.id,
+      scene?.httpRules ?? [],
+      scene ? this.wsRules(scene) : [],
+      [...this.paused],
+    ]);
+  }
   private async apply(force = false) {
     if (!this.loaded) return;
     const snapshot = this.host.snapshot();
+    if (snapshot.proxyRulesUnreachable) return;
     const scene = this.active;
     const http = scene?.httpRules ?? [];
     const ws = scene ? this.wsRules(scene) : [];
-    const key = JSON.stringify([snapshot.key, scene?.id, http, ws, [...this.paused]]);
+    const key = this.applicationKey(snapshot);
     if (!force && key === this.appliedKey) return;
     this.appliedKey = key;
     const revision = ++this.revision;
@@ -255,7 +304,7 @@ export class SceneController {
       }
       for (const domain of ['http', 'ws'] as const) {
         const needed = (domain === 'http' ? http : ws).some((rule) => rule.enabled);
-        if (revision !== this.revision || snapshot.key !== this.host.snapshot().key) return;
+        if (revision !== this.revision || key !== this.applicationKey(this.host.snapshot())) return;
         if (
           !needed ||
           !snapshot.connected ||
@@ -281,6 +330,13 @@ export class SceneController {
     const status = (domain: Domain) => {
       const rules =
         domain === 'http' ? (this.active?.httpRules ?? []) : this.active ? this.wsRules(this.active) : [];
+      if (
+        this.active &&
+        rules.some((rule) => rule.enabled) &&
+        state.connected &&
+        this.appliedKey !== this.applicationKey(state)
+      )
+        return { status: 'pending' as const, message: '等待同步场景' };
       if (this.errors[domain]) return { status: 'error' as const, message: this.errors[domain] };
       if (!this.active || !rules.some((rule) => rule.enabled)) return { status: 'unneeded' as const };
       if (this.paused.has(domain)) return { status: 'paused' as const, message: '采集已关闭' };

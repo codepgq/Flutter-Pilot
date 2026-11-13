@@ -1,7 +1,15 @@
 import { spawn } from 'node:child_process';
 import { chmod, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ApiCatalogEntry, BodySnapshot, HistoryEntry, HistoryQuery, HistoryResult } from '../model';
+import type {
+  ApiCatalogEntry,
+  ApiCatalogQuery,
+  ApiCatalogResult,
+  BodySnapshot,
+  HistoryEntry,
+  HistoryQuery,
+  HistoryResult,
+} from '../model';
 
 export interface VmHistorySettings {
   retentionDays: number;
@@ -218,13 +226,48 @@ export class VmHistoryStore {
     });
   }
 
-  async apis(): Promise<ApiCatalogEntry[]> {
+  async apis(query: ApiCatalogQuery = {}): Promise<ApiCatalogEntry[]> {
+    return (await this.apiPage(query)).items;
+  }
+
+  async apiPage(query: ApiCatalogQuery = {}): Promise<ApiCatalogResult> {
     await this.init();
-    return this.enqueue(() =>
-      this.sql<ApiCatalogEntry & Record<string, unknown>>(
-        'SELECT method,host,path,calls AS count,first_at AS firstAt,last_at AS lastAt FROM api_catalog ORDER BY last_at DESC,method,host,path;',
-      ),
-    );
+    const where: string[] = [];
+    if (query.method) where.push(`method=${sqlText(query.method.toUpperCase())}`);
+    const condition = where.length ? ` WHERE ${where.join(' AND ')}` : '';
+    const limit = Number.isFinite(query.limit) ? Math.max(1, Math.min(200, Math.trunc(query.limit!))) : 30;
+    const offset = Number.isFinite(query.offset) ? Math.max(0, Math.trunc(query.offset!)) : 0;
+    return this.enqueue(async () => {
+      if (query.search) {
+        // SQLite LIKE only folds ASCII. Scan bounded batches with JavaScript's
+        // Unicode lowercase semantics, preserving the workbench's search behavior.
+        const search = query.search.toLowerCase();
+        const items: ApiCatalogEntry[] = [];
+        let total = 0;
+        let cursor: ApiCatalogEntry | undefined;
+        while (true) {
+          const after = cursor
+            ? `${condition ? ' AND ' : ' WHERE '}(last_at < ${sqlNumber(cursor.lastAt)} OR (last_at = ${sqlNumber(cursor.lastAt)} AND (method,host,path) > (${sqlText(cursor.method)},${sqlText(cursor.host)},${sqlText(cursor.path)})))`
+            : '';
+          const batch = await this.sql<ApiCatalogEntry & Record<string, unknown>>(
+            `SELECT method,host,path,calls AS count,first_at AS firstAt,last_at AS lastAt FROM api_catalog${condition}${after} ORDER BY last_at DESC,method,host,path LIMIT 200;`,
+          );
+          for (const item of batch) {
+            if (`${item.method} ${item.host}${item.path}`.toLowerCase().includes(search)) {
+              if (total >= offset && total < offset + limit) items.push(item);
+              total++;
+            }
+          }
+          if (batch.length < 200) break;
+          cursor = batch[batch.length - 1];
+        }
+        return { items, total };
+      }
+      const rows = await this.sql<{ result: string }>(
+        `SELECT json_object('total',(SELECT count(*) FROM api_catalog${condition}),'items',json((SELECT coalesce(json_group_array(json(item)),'[]') FROM (SELECT json_object('method',method,'host',host,'path',path,'count',calls,'firstAt',first_at,'lastAt',last_at) AS item FROM api_catalog${condition} ORDER BY last_at DESC,method,host,path LIMIT ${limit} OFFSET ${offset})))) AS result;`,
+      );
+      return JSON.parse(rows[0].result) as ApiCatalogResult;
+    });
   }
 
   async delete(ids: string[]): Promise<{ deleted: number }> {

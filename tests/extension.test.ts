@@ -186,7 +186,7 @@ vi.mock('../src/engine', () => ({
       if (method === 'proxy.start') this.state.proxyActive = true;
       if (method === 'proxy.stop') this.state.proxyActive = false;
       if (method === 'history.list') return { items: [], total: 0 };
-      if (method === 'history.apis') return { items: [] };
+      if (method === 'history.apis') return { items: [], total: 0 };
       if (method === 'history.get') return { id: params.id, body: 'large detail' };
       return { ready: true, ...this.state, caCertPath: '/fake/ca.pem' };
     }
@@ -459,6 +459,27 @@ describe('后台采集与独立API目录控制', () => {
     expect(engine.calls.some((c: any) => c.method === 'history.delete' || c.method === 'history.clear')).toBe(
       false,
     );
+  });
+  it('目录查询失败时历史仍可刷新，目录查询携带独立筛选及分页', async () => {
+    await open();
+    const engine = fake.engines[0];
+    const original = engine.rpc.bind(engine);
+    vi.spyOn(engine, 'rpc').mockImplementation(async (...args: unknown[]) => {
+      const [method, params] = args as [string, any];
+      if (method === 'history.list') return { items: [{ id: 'updated' }], total: 1 };
+      if (method === 'history.apis') {
+        engine.calls.push({ method, params });
+        throw new Error('目录查询失败');
+      }
+      return original(method, params);
+    });
+    await message('api.query', { search: 'orders', method: 'GET', offset: 30 });
+    await vi.waitFor(() => expect(latest().state.history).toEqual({ items: [{ id: 'updated' }], total: 1 }));
+    expect(engine.calls).toContainEqual({
+      method: 'history.apis',
+      params: { search: 'orders', method: 'GET', offset: 30, limit: 30 },
+    });
+    expect(latest().state.lastError).toContain('目录查询失败');
   });
   it('点击 API 读取最新完整请求，不改变历史列表及其筛选和分页', async () => {
     await open();
@@ -1238,6 +1259,50 @@ describe('VM 连接模式扩展整合', () => {
 });
 
 describe('项目文件与工作区绑定整合', () => {
+  it('代理控制连接断开时拒绝切换模式，重连后才允许切换', async () => {
+    await open();
+    await message('rules.save', { rule });
+    const id = latest().state.scenes.scenes[0].id;
+    await message('scenes.activate', { id });
+    const engine = fake.engines[0];
+    engine.state = { ...engine.state, status: 'error' };
+    engine.emit('status', engine.state);
+    engine.emit('event', { event: 'control.disconnected' });
+    await message('connection.mode', { mode: 'vm' });
+    expect(latest().state.mode).toBe('proxy');
+    expect(latest().state.lastError).toContain('旧规则可能仍在生效');
+    expect((await readProject()).connection.mode).toBe('proxy');
+    engine.state = { ...engine.state, status: 'running' };
+    engine.emit('status', engine.state);
+    await message('connection.mode', { mode: 'vm' });
+    expect(latest().state.mode).toBe('vm');
+    expect(engine.calls.filter((call: any) => call.method === 'rules.sync').at(-1).params.rules).toEqual([]);
+  });
+  it('代理控制连接快速重连后重新同步场景且同步前不显示已应用', async () => {
+    await open();
+    await message('rules.save', { rule });
+    const id = latest().state.scenes.scenes[0].id;
+    await message('scenes.activate', { id });
+    const engine = fake.engines[0];
+    const previousSyncs = engine.calls.filter((call: any) => call.method === 'rules.sync').length;
+    engine.state = { ...engine.state, status: 'error' };
+    engine.emit('status', engine.state);
+    engine.emit('event', { event: 'control.disconnected' });
+    engine.state = { ...engine.state, status: 'running' };
+    engine.emit('status', engine.state);
+    expect(latest().state.sceneRuntime.http.status).toBe('pending');
+    engine.emit('event', { event: 'control.connected' });
+    await vi.waitFor(
+      () => {
+        const syncs = engine.calls.filter((call: any) => call.method === 'rules.sync');
+        expect(syncs.length).toBeGreaterThan(previousSyncs + 1);
+        expect(syncs.at(-2).params.rules).toEqual([]);
+        expect(syncs.at(-1).params.rules).toEqual([rule]);
+        expect(latest().state.sceneRuntime.http.status).toBe('applied');
+      },
+      { timeout: 3000 },
+    );
+  });
   it('代理引擎快速重启后重新应用激活场景', async () => {
     await open();
     await message('rules.save', { rule });

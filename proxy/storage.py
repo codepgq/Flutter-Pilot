@@ -89,13 +89,37 @@ class HistoryStore:
         return {"items": [json.loads(row[0]) for row in rows], "total": total}
 
     def apis(self, params):
-        condition, args = "", []
-        if params.get("search"):
-            condition = " WHERE host LIKE ? ESCAPE '\\' OR path LIKE ? ESCAPE '\\' OR method LIKE ? ESCAPE '\\'"
-            value = str(params["search"]).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            args = ["%" + value + "%"] * 3
-        rows = self.db.execute("SELECT method,host,path,calls,last_at,first_at FROM api_catalog" + condition + " ORDER BY last_at DESC,method,host,path", args).fetchall()
-        return {"items": [dict(zip(("method", "host", "path", "count", "lastAt", "firstAt"), row)) for row in rows]}
+        where, args = [], []
+        if params.get("method"):
+            where.append("method=?")
+            args.append(str(params["method"]).upper())
+        condition = " WHERE " + " AND ".join(where) if where else ""
+        limit = max(1, min(200, int(params.get("limit", 30))))
+        offset = max(0, int(params.get("offset", 0)))
+        search = str(params.get("search") or "").lower()
+        if not search:
+            total = self.db.execute("SELECT count(*) FROM api_catalog" + condition, args).fetchone()[0]
+            rows = self.db.execute("SELECT method,host,path,calls,last_at,first_at FROM api_catalog" + condition + " ORDER BY last_at DESC,method,host,path LIMIT ? OFFSET ?", args + [limit, offset]).fetchall()
+        else:
+            # SQLite LIKE only folds ASCII. Read bounded batches and use Unicode
+            # lowercasing, as the workbench's JavaScript search does.
+            total, rows, cursor = 0, [], None
+            while True:
+                cursor_sql = ""
+                cursor_args = []
+                if cursor is not None:
+                    cursor_sql = (" AND " if where else " WHERE ") + "(last_at < ? OR (last_at = ? AND (method,host,path) > (?,?,?)))"
+                    cursor_args = [cursor[4], cursor[4], cursor[0], cursor[1], cursor[2]]
+                batch = self.db.execute("SELECT method,host,path,calls,last_at,first_at FROM api_catalog" + condition + cursor_sql + " ORDER BY last_at DESC,method,host,path LIMIT 200", args + cursor_args).fetchall()
+                for row in batch:
+                    if search in (row[0] + " " + row[1] + row[2]).lower():
+                        if offset <= total < offset + limit:
+                            rows.append(row)
+                        total += 1
+                if len(batch) < 200:
+                    break
+                cursor = batch[-1]
+        return {"items": [dict(zip(("method", "host", "path", "count", "lastAt", "firstAt"), row)) for row in rows], "total": total}
 
     def delete_api(self, method, host, path):
         if not all(isinstance(value, str) and value for value in (method, host, path)):

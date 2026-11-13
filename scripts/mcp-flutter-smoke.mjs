@@ -66,6 +66,7 @@ await build({
     'src/scenes.ts',
     'src/scene-controller.ts',
     'src/mcp/bridge.ts',
+    'src/screenshot.ts',
   ],
   outdir: join(temp, 'js'),
   bundle: true,
@@ -80,6 +81,7 @@ const { McpSessionServer } = require(join(temp, 'js/mcp/server.cjs'));
 const { McpNetworkController } = require(join(temp, 'js/mcp/network.cjs'));
 const { SceneStore } = require(join(temp, 'js/scenes.cjs'));
 const { SceneController } = require(join(temp, 'js/scene-controller.cjs'));
+const { executeMcpScreenshot } = require(join(temp, 'js/screenshot.cjs'));
 const hash = async () =>
   createHash('sha256')
     .update(await readFile(source))
@@ -181,15 +183,17 @@ try {
     sessionId,
     name: 'Independent Flutter fixture',
     describe: () => ({ connected: vm.state.status === 'connected', ui: true }),
-    call: async (tool, args) =>
-      uiTools.has(tool)
-        ? ui.execute(tool, {
-            ...args,
-            ...(args.key !== undefined ? { key: key(args.key) } : {}),
-            ...(args.ancestorKey !== undefined ? { ancestor: key(args.ancestorKey) } : {}),
-            ...(args.targetKey !== undefined ? { targetKey: key(args.targetKey) } : {}),
-          })
-        : network.execute(tool, args),
+    call: async (tool, args, context) =>
+      tool === 'take_screenshot' || tool === 'list_screenshot_targets'
+        ? executeMcpScreenshot(tool, args, (name, input) => ui.execute(name, input), context.signal)
+        : uiTools.has(tool)
+          ? ui.execute(tool, {
+              ...args,
+              ...(args.key !== undefined ? { key: key(args.key) } : {}),
+              ...(args.ancestorKey !== undefined ? { ancestor: key(args.ancestorKey) } : {}),
+              ...(args.targetKey !== undefined ? { targetKey: key(args.targetKey) } : {}),
+            })
+          : network.execute(tool, args),
   });
   await ipc.start();
   mcp = new Client({ name: 'real-flutter-mcp-sdk-client', version: '1.0.0' });
@@ -213,6 +217,22 @@ try {
     'MCP tools discovery',
   );
   check((await call('list_sessions')).sessions[0].sessionId === sessionId, 'MCP stdio session discovery');
+  const screen = await mcp.callTool({ name: 'take_screenshot', arguments: { sessionId, mode: 'screen' } });
+  check(
+    !screen.isError && screen.content.some((item) => item.type === 'image' && item.mimeType === 'image/png'),
+    'MCP screen returns PNG image',
+  );
+  const targets = await call('list_screenshot_targets');
+  check(targets.ok && targets.targets.length > 0, 'MCP discovers scrollable screenshot targets');
+  const long = await mcp.callTool(
+    { name: 'take_screenshot', arguments: { sessionId, mode: 'long', targetId: targets.targets[0].id } },
+    undefined,
+    { timeout: 90000 },
+  );
+  check(
+    !long.isError && long.content.some((item) => item.type === 'image' && item.mimeType === 'image/png'),
+    'MCP long screenshot returns PNG image',
+  );
   check((await call('find_widget', { key: 'fetch' })).ok, 'MCP Key lookup');
   const state = await call('get_network_status');
   check(state.files.scenes === store.file, 'MCP exposes rule file location');

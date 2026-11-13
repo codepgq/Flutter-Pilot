@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { composeScreenshot, takeAppScreenshot, type ScreenshotHost } from '../src/screenshot';
+import {
+  composeScreenshot,
+  executeMcpScreenshot,
+  takeAppScreenshot,
+  type ScreenshotHost,
+} from '../src/screenshot';
 
 import { PNG } from 'pngjs';
 const source = new PNG({ width: 2, height: 2 });
@@ -79,6 +84,64 @@ describe('App screenshot workflow', () => {
     vi.mocked(host.save).mockRejectedValue(new Error('disk full'));
     await expect(takeAppScreenshot(host)).rejects.toThrow('disk full');
     expect(host.preview).not.toHaveBeenCalled();
+  });
+});
+
+describe('MCP screenshot workflow', () => {
+  it('returns an image for the current screen without exposing Flutter PNG strips', async () => {
+    const execute = vi.fn().mockResolvedValue(capture);
+    const result = await executeMcpScreenshot(
+      'take_screenshot',
+      { mode: 'screen' },
+      execute,
+      new AbortController().signal,
+    );
+    expect(execute).toHaveBeenCalledWith('take_screenshot', { mode: 'screen' });
+    expect(result).toEqual({
+      ok: true,
+      mode: 'screen',
+      width: 2,
+      height: 2,
+      image: { data: png.toString('base64'), mimeType: 'image/png' },
+    });
+  });
+  it('uses a unique target or requires selection when several exist', async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, targets: [{ id: '1', label: 'list' }] })
+      .mockResolvedValueOnce(capture);
+    const signal = new AbortController().signal;
+    expect((await executeMcpScreenshot('take_screenshot', { mode: 'long' }, execute, signal)).ok).toBe(true);
+    expect(execute).toHaveBeenLastCalledWith('take_screenshot', { mode: 'long', targetId: '1' });
+    execute.mockResolvedValueOnce({ ok: true, targets: [{ id: '1' }, { id: '2' }] });
+    expect(await executeMcpScreenshot('take_screenshot', { mode: 'long' }, execute, signal)).toMatchObject({
+      ok: false,
+      code: 'TARGET_REQUIRED',
+    });
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
+  it('preserves explicitly selected target IDs and reports invalid captures', async () => {
+    const execute = vi.fn().mockResolvedValue({ ...capture, parts: [{ png: 'invalid' }] });
+    const result = await executeMcpScreenshot(
+      'take_screenshot',
+      { mode: 'long', targetId: '2' },
+      execute,
+      new AbortController().signal,
+    );
+    expect(execute).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledWith('take_screenshot', { mode: 'long', targetId: '2' });
+    expect(result).toMatchObject({ ok: false, code: 'INVALID_SCREENSHOT' });
+  });
+  it('stops before capture if cancelled while enumerating targets', async () => {
+    const controller = new AbortController();
+    const execute = vi.fn().mockImplementation(async () => {
+      controller.abort();
+      return { ok: true, targets: [{ id: '1' }] };
+    });
+    expect(
+      await executeMcpScreenshot('take_screenshot', { mode: 'long' }, execute, controller.signal),
+    ).toMatchObject({ ok: false, code: 'CANCELLED' });
+    expect(execute).toHaveBeenCalledOnce();
   });
 });
 

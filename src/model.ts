@@ -90,6 +90,16 @@ export interface HistoryResult {
   items: HistoryEntry[];
   total: number;
 }
+export interface ApiCatalogQuery {
+  search?: string;
+  method?: string;
+  limit?: number;
+  offset?: number;
+}
+export interface ApiCatalogResult {
+  items: ApiCatalogEntry[];
+  total: number;
+}
 export interface PendingBreakpoint {
   id: string;
   flowId: string;
@@ -149,6 +159,7 @@ export interface WorkbenchState {
   rules: Rule[];
   history: HistoryResult;
   apis?: ApiCatalogEntry[];
+  apiTotal?: number;
   pending: PendingBreakpoint[];
   engine: { status: string; proxyPort?: number; listenHost?: string; caCertPath?: string; error?: string };
   proxyActive: boolean;

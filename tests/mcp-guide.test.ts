@@ -32,6 +32,14 @@ describe('Agent usage guide contracts', () => {
       expect(text).toContain('reload_rules');
     },
   );
+  it('describes screenshot transport and avoids requiring a scene for direct WS messages', () => {
+    const screenshot = getMcpPrompt('take_screenshot', { task: '截图' }).messages[0].content.text;
+    expect(screenshot).toContain('list_screenshot_targets');
+    expect(screenshot).toContain('32 MiB');
+    expect(screenshot).toContain('90 秒');
+    const ws = getMcpPrompt('websocket_mock', { task: '注入消息' }).messages[0].content.text;
+    expect(ws).toContain('仅注入、发送消息时无需激活场景');
+  });
   it('keeps HTTP documents and each action example valid against the production validator', () => {
     expect(validateRuleDocument(httpExample)).toEqual(httpExample);
     const variants = getUsageGuide('http').variants as Record<string, unknown>;

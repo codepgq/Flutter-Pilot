@@ -57,6 +57,22 @@ export const mcpTools = {
       '不知道UI Key时先读取当前界面快照，从key/ancestorKeys发现目标，再find_widget确认唯一。详细流程见get_usage_guide(topic=ui)。',
     schema: z.object({ ...session, maxNodes: z.number().int().min(1).max(1000).optional() }).strict(),
   },
+  list_screenshot_targets: {
+    description: '列出当前 Flutter App 可见的向下滚动区域，供长截图选择 targetId；候选仅对当前页面有效。',
+    schema: z.object(session).strict(),
+  },
+  take_screenshot: {
+    description:
+      '截取当前 Flutter App，mode=screen 为当前屏幕，mode=long 为滚动长图。长图有多个区域时先调用 list_screenshot_targets 并传 targetId；返回 PNG 图片。长图会滚动并尝试恢复位置，超时不要自动重试。',
+    schema: z
+      .object({
+        ...session,
+        mode: z.enum(['screen', 'long']),
+        targetId: z.string().min(1).max(512).optional(),
+      })
+      .strict()
+      .refine((args) => args.mode === 'long' || args.targetId === undefined),
+  },
   find_widget: {
     description: '按 ValueKey<String/int> 精确定位；可用 ancestorKey 缩小范围；不使用文本回退。',
     schema: z.object({ ...session, ...selector }).strict(),

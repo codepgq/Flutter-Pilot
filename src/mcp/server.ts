@@ -16,6 +16,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { McpToolError, parseTool, toolError } from './tools';
 
 const MAX_BYTES = 4 * 1024 * 1024;
+const MAX_SCREENSHOT_BYTES = 32 * 1024 * 1024;
 const MAX_REQUEST = 512 * 1024;
 async function canonicalWorkspace(path: string): Promise<string> {
   try {
@@ -171,8 +172,14 @@ export class McpSessionServer {
       void (async () => {
         try {
           const request = JSON.parse(buffer.subarray(0, newline).toString('utf8')) as IpcRequest;
+          if (request.kind === 'call' && request.tool === 'take_screenshot') socket.setTimeout(90000);
           const data = await this.handle(request, controller.signal);
-          if (!socket.destroyed) this.respond(socket, { ok: true, data });
+          if (!socket.destroyed)
+            this.respond(
+              socket,
+              { ok: true, data },
+              request.kind === 'call' && request.tool === 'take_screenshot',
+            );
         } catch (error) {
           if (!socket.destroyed) this.respond(socket, { ok: false, error: toolError(error) });
         }
@@ -180,9 +187,9 @@ export class McpSessionServer {
     });
   }
 
-  private respond(socket: Socket, response: unknown): void {
+  private respond(socket: Socket, response: unknown, screenshot = false): void {
     let text = JSON.stringify(response);
-    if (Buffer.byteLength(text) > MAX_BYTES)
+    if (Buffer.byteLength(text) > (screenshot ? MAX_SCREENSHOT_BYTES : MAX_BYTES))
       text = JSON.stringify({
         ok: false,
         error: { code: 'RESULT_TOO_LARGE', message: '结果过大，请缩小查询范围。' },
@@ -361,7 +368,8 @@ export function requestSession(
     }
     const socket = createConnection(descriptor.socket);
     let settled = false;
-    let buffer = Buffer.alloc(0);
+    const chunks: Buffer[] = [];
+    let receivedBytes = 0;
     const finish = (error?: Error, data?: unknown) => {
       if (settled) return;
       settled = true;
@@ -372,7 +380,8 @@ export function requestSession(
     const abort = () =>
       finish(new McpToolError('CANCELLED', '操作已取消；已执行动作不会回滚，请勿自动重试。'));
     signal?.addEventListener('abort', abort, { once: true });
-    socket.setTimeout(request.kind === 'call' ? 40000 : 2000, () =>
+    const screenshot = request.kind === 'call' && request.tool === 'take_screenshot';
+    socket.setTimeout(request.kind === 'call' ? (screenshot ? 85000 : 40000) : 2000, () =>
       finish(new McpToolError('TIMEOUT', 'MCP 调用超时，执行结果未确认；请勿自动重试。')),
     );
     socket.on('error', () =>
@@ -392,11 +401,15 @@ export function requestSession(
       ),
     );
     socket.on('data', (chunk) => {
-      buffer = Buffer.concat([buffer, chunk]);
-      if (buffer.length > MAX_BYTES) {
+      receivedBytes += chunk.length;
+      if (receivedBytes > (screenshot ? MAX_SCREENSHOT_BYTES : MAX_BYTES)) {
         finish(new McpToolError('RESULT_TOO_LARGE', 'MCP 返回结果过大。'));
         return;
       }
+      chunks.push(chunk);
+      const newlineInChunk = chunk.indexOf(10);
+      if (newlineInChunk < 0) return;
+      const buffer = Buffer.concat(chunks, receivedBytes);
       const newline = buffer.indexOf(10);
       if (newline < 0) return;
       try {

@@ -32,7 +32,7 @@ const templates = {
       '确定本次是规则 Mock、向 App 注入模拟服务端事件，还是通过 App 的真实连接发送给服务端；按已知业务协议确定 topic 和 data，例如订单状态变化或资产更新，不凭示例猜测字段。',
       '需要规则 Mock 时，使用 Agent 文件工具增量编辑 files.scenes 中目标场景的 wsRules，保留其他场景和规则；按明确 URL、inbound/outbound 和 contains 缩小匹配范围。replace 为整条文本替换，JSON 必须序列化；drop 为丢弃，二进制消息只读。仅注入或发送消息时无需创建规则或激活场景，只需 WS 采集接入。',
       '修改规则后调用 reload_rules，检查 loaded 和 status.scene.runtime.ws；显式调用 set_capture_enabled(domain=ws, enabled=true)，再次检查目标连接的 capture、status 与 URL。URL 无法关联时不能使用 URL 匹配规则，但可选择已准确识别的连接发送或注入；不猜 URL，不把 connectionId 临时规则写入持久文件。',
-      '调用 activate_scene(sessionId, sceneId) 统一启用场景涉及的 HTTP/WS Mock；只查询消息时不必激活。',
+      '需要场景规则 Mock 时调用 activate_scene(sessionId, sceneId) 统一启用该场景涉及的 HTTP/WS Mock；只查询消息或仅注入、发送消息时无需激活场景。',
       '记录消息 ID 或时间基线；使用 inject_ws_message 向 App 注入模拟服务端消息，或用 send_ws_message 经当前准确连接发往服务端。两者需要 WS 采集已接入，不新建连接；传 text 或 topic/data 二选一，topic/data 会序列化为 {topic,data}，自定义信封或 Socket.IO 等协议应按实际格式传 text。',
       'send_ws_message 走当前 outbound 规则，可能被替换或丢弃；发送工具返回成功不代表服务端业务处理成功，需要查询消息结果和任务要求的响应。规则 Mock 则通过正常业务操作触发或有界等待事件；采集前消息无法补抓。',
       '调用 get_ws_messages，按 connectionId、方向和 includeBodies=true 检查新消息的 original/effective、outcome 与 ruleId，并核对页面变化。连接重建后重新查询连接 ID；未收到事件或未命中时明确说明，不能把规则加载成功当作消息验证成功。',
@@ -43,7 +43,7 @@ const templates = {
     topics: ['ui'],
     steps: [
       '先调用 get_ui_snapshot，读取当前 widgets 的 key、ancestorKeys、type、bounds、enabled/actionable 与 source，确定当前页面和目标。保留 Key 的字符串或整数类型，不猜测 Key。',
-      '开发联调与多状态测试优先使用结构化快照和 Key 操作，避免每一步都截图识别；只有任务涉及视觉样式或布局验收时，再通过可用的截图工具补充视觉证据。',
+      '开发联调与多状态测试优先使用结构化快照和 Key 操作；视觉样式或布局验收时使用 take_screenshot 获取 PNG 图片。长图先用 list_screenshot_targets 查询滚动区域。',
       '调用 find_widget 确认目标唯一；重复 Key 用 ancestorKey 限定范围。正式选择器只支持 ValueKey<String/int>，不回退文本、裸坐标或直接执行按钮回调。',
       '按任务使用 tap、enter_text、scroll 和 wait_for_widget；滚动与等待设置有限次数和超时。enter_text 替换输入内容，操作前核对目标与预期文本，不将其描述为真实系统键盘 IME 测试。',
       'NOT_FOUND 先检查是否进入目标页面、是否懒加载，再有界等待或滚动，不能直接判为缺 Key。遇到 MISSING_KEY、UNSTABLE_KEY 或交互目标歧义时，调用 inspect_key_issues，结合 source 和业务源码定位原因。',
@@ -99,7 +99,21 @@ export const toolPromptPlans = {
   get_ui_snapshot: {
     topics: ['ui'],
     steps: [
-      '调用 get_ui_snapshot，按 maxNodes 有界读取当前挂载界面；从 widgets 的 typed key、ancestorKeys、状态与 source 发现目标，再用 find_widget 确认唯一。截图验收使用客户端实际可用的截图工具。',
+      '调用 get_ui_snapshot，按 maxNodes 有界读取当前挂载界面；从 widgets 的 typed key、ancestorKeys、状态与 source 发现目标，再用 find_widget 确认唯一。截图验收可使用 take_screenshot。',
+    ],
+  },
+  list_screenshot_targets: {
+    topics: ['ui'],
+    steps: [
+      '选择已连接 Flutter Debug VM 的 sessionId，调用 list_screenshot_targets 查询当前可见的向下滚动区域；根据返回信息选择目标，不猜测区域 ID。页面变化后重新查询。',
+    ],
+  },
+  take_screenshot: {
+    topics: ['ui'],
+    steps: [
+      '选择已连接 Flutter Debug VM 的 sessionId，调用 take_screenshot 并指定 mode=screen 获取当前屏幕，结果为 MCP PNG 图片。',
+      '需要滚动长图时先调用 list_screenshot_targets，使用准确的 targetId 调用 take_screenshot 并指定 mode=long；采集期间保持页面与窗口稳定，完成或失败后尝试恢复原滚动位置。',
+      '长图仅适用于普通向下滚动列表，最多 32 屏、30000 像素高、2400 万像素或 45 秒；MCP 图片传输最多 32 MiB（含 Base64 和 JSON），客户端工具调用超时建议至少 90 秒。超限或采集失败不返回不完整图片。截图不包含系统状态栏、原生键盘、系统弹窗和原生平台视图。',
     ],
   },
   find_widget: {
@@ -185,7 +199,7 @@ export const toolPromptPlans = {
   reload_rules: {
     topics: ['http', 'ws'],
     steps: [
-      '先 get_network_status 获取路径，使用 Agent 文件工具增量编辑规则并保存，保留其他规则；调用 reload_rules 整份重载场景文件。',
+      '如需修改规则，先通过 get_network_status 获取路径，再使用 Agent 文件工具增量编辑并保存，保留其他规则；也可直接重载现有场景文件。调用 reload_rules 整份重载场景文件。',
       '检查 loaded 和 status.scene.runtime 的分域状态；失败时修复文件，不能把旧有效规则当作新规则已生效。重载按持久激活场景同步，不代替 hot_reload/hot_restart，也不重放业务请求。',
     ],
   },
@@ -258,7 +272,7 @@ export function getMcpPrompt(name: string, args: Record<string, string> = {}) {
               ? '这是离线只读指南入口，不要求先调用 list_sessions、连接 VM 或开启 Mock。'
               : name === 'list_sessions'
                 ? '这是会话发现入口，不需要 sessionId 或已连接 VM；空列表应报告需在目标 IDE 项目开启 MCP，不猜测会话。'
-                : '调用 list_sessions，按项目路径和任务上下文选择对应会话；多个候选无法确定时询问，所有运行时调用明确传入该 sessionId。无可用会话时说明需在 IDE 开启 MCP；VM 未连接或能力不支持时报告具体阻碍。',
+                : '调用 list_sessions，按项目路径和任务上下文选择对应会话；多个候选无法确定时询问，所有运行时调用明确传入该 sessionId。无可用会话时说明需在 IDE 开启 MCP；仅对需要 VM 的操作检查连接与能力，VM 离线时场景查询等可用操作仍可执行，并区分待应用与已生效。',
             steps.map((step, index) => `${index + 1}. ${step}`).join('\n'),
             ...(Object.hasOwn(mcpTools, name)
               ? [

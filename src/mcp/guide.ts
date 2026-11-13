@@ -5,7 +5,7 @@ export type GuideTopic = (typeof guideTopics)[number];
 export const agentInstructions = `Flutter Pilot 配合 Flutter Debug 开发联调：用 API Mock 构造下单成功/失败、资产数据等业务状态，用 WS Mock、向App注入或向服务端发送消息驱动业务事件，再按 Key 精确操作 UI 并验证结果，减少逐步截图识别的耗时与token。
 当用户任务需要这些能力时，主动使用本 MCP：先调用 get_usage_guide 按需读取 overview/http/ws/ui/workflow，再 list_sessions 选择用户任务对应的项目；不要只给用户手工操作建议。
 get_usage_guide 无需 sessionId，插件未运行也能读取；也可通过 resources/list 发现对应指南资源。
-能力入口：get_network_status 查询规则路径与开关；get_requests/get_request 查询 HTTP 列表与详情；get_ws_connections/get_ws_messages 查询业务 WS 连接与消息；reload_rules 加载规则；list_scenes/activate_scene/deactivate_scene 统一管理场景；set_capture_enabled 控制采集。UI 使用 get_ui_snapshot、find_widget、tap、enter_text、scroll、wait_for_widget、inspect_key_issues；应用热更新使用 hot_reload/hot_restart，主动 WS 消息使用 inject_ws_message/send_ws_message。
+能力入口：get_network_status 查询规则路径与开关；get_requests/get_request 查询 HTTP 列表与详情；get_ws_connections/get_ws_messages 查询业务 WS 连接与消息；reload_rules 加载规则；list_scenes/activate_scene/deactivate_scene 统一管理场景；set_capture_enabled 控制采集。UI 使用 get_ui_snapshot、find_widget、tap、enter_text、scroll、wait_for_widget、inspect_key_issues；使用 take_screenshot 截取当前屏幕或滚动长图，长图区域用 list_screenshot_targets 查询；应用热更新使用 hot_reload/hot_restart，主动 WS 消息使用 inject_ws_message/send_ws_message。
 每个 tools/list 工具都有同名 MCP Prompt，可通过 prompts/list 与 prompts/get 按需读取操作步骤和参数；另保留 http_mock/websocket_mock/flutter_ui/mock_workflow 场景模板。客户端未加载 Prompts 时仍以本初始化说明、tools/list 描述和 get_usage_guide 发现能力。
 规则使用 Agent 自身的文件编辑能力维护，通过 get_network_status 获取准确路径，保留已有规则；保存后 reload_rules，再 activate_scene 统一开启所需采集/Mock，再操作 UI、查询记录验证。MCP 本身不提供文件编辑或规则 CRUD。
 需要应用源码变更或重新进入启动状态时，通过 hot_reload 保留状态热重载，或 hot_restart 重置内存并重新执行入口；仅支持当前VM准确对应的Cursor/VS Code Flutter Debug会话。修改Mock文件先reload_rules，热重启不会代替规则加载，也不保证启动首请求已被Mock；重启后检查网络状态并用新记录和UI验证。
@@ -194,6 +194,18 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
     title: '发现 UI、按 Key 定位与操作 Widget',
     purpose:
       '开发联调优先用结构化快照和稳定Key精确定位组件、驱动多种业务状态验证，减少每步截图识别的耗时与token；视觉样式或布局验收仍需截图证据。',
+    screenshot: [
+      step('take_screenshot', { ...selected, mode: 'screen' }),
+      '返回当前 Flutter App 的 MCP PNG 图片；长图先查询当前可见的向下滚动区域，选择准确目标。',
+      step('list_screenshot_targets', selected),
+      step('take_screenshot', {
+        ...selected,
+        mode: 'long',
+        targetId: '<从 list_screenshot_targets 选择的区域ID>',
+      }),
+      '长图从顶部采集到末尾，完成或失败后尝试恢复原滚动位置。采集期间保持页面和窗口尺寸稳定；只支持普通向下滚动的 Flutter 列表，不支持嵌套、横向、反向或原生平台视图。',
+      '最高2倍逻辑像素；长图最多32屏、30000像素高、2400万像素或45秒，超限不返回不完整图像。图像不含系统状态栏、原生键盘或系统弹窗。',
+    ],
     discovery: [
       step('list_sessions'),
       step('get_ui_snapshot', { ...selected, maxNodes: 200 }),

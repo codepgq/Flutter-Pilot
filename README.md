@@ -6,13 +6,13 @@
 
 配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key 精确操作页面，减少逐步截图识别的耗时与 token 消耗。
 
-当前版本为 **0.0.13**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+当前版本为 **0.0.14**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
 
-**0.0.13 更新**：Mock 场景改为全宽列表与按需展开的详情；列表开关控制场景激活，HTTP / WebSocket 规则保留独立开关。
+**0.0.14 更新**：MCP 支持 App 截图与长图；修复场景断线恢复和 JSON 编辑精度，并为 API 目录提供分页。
 
 **0.0.12 更新**：同步远端最新版并重新构建 Cursor 安装包，包含可持久保存和切换的统一 HTTP / WebSocket Mock 场景，MCP 同步提供场景查询、激活和停用；侧栏与工作台新增 App 当前屏幕和滚动长截图，保存 PNG 并自动预览。
 
-**MCP 全能力提示词**：23 个工具均有同名独立 Prompt，包括 `hot_reload` / `hot_restart`；保留四个场景模板，共 27 个。每个工具提示词提供操作步骤和生产参数定义，新增能力漏写模板会被检查发现。
+**MCP 全能力提示词**：25 个工具均有同名独立 Prompt，包括 `hot_reload` / `hot_restart` 和截图工具；保留四个场景模板，共 29 个。每个工具提示词提供操作步骤和生产参数定义，新增能力漏写模板会被检查发现。
 
 **0.0.6 修复 Cursor 设置卡死和已有 VM 会话补查恢复**：打开工作台会重新补查先前已运行的 Flutter Debug 会话；新增 MCP `hot_reload` / `hot_restart`，精确控制当前 VM 绑定的 IDE 调试会话。
 
@@ -81,6 +81,8 @@
 
 截图采用最高 2 倍逻辑像素分辨率。长图最多 32 屏、30,000 像素高、2,400 万像素或 45 秒；超过限制会报错并放弃保存，不输出不完整长图。分段 PNG 在扩展端无损拼接，避免移动设备 GPU 对超长纹理的缩放和截断。
 
+启用 MCP 后，Agent 也可调用 `take_screenshot` 获取当前 Flutter App 的 MCP PNG 图片；滚动长图可先调用 `list_screenshot_targets` 查询可见滚动区域，再指定区域截图。MCP 返回还受 32 MiB 传输上限约束，客户端调用超时建议设置为至少 90 秒，详见 [MCP 使用说明](docs/mcp.md)。
+
 ## MCP 与编码 Agent
 
 MCP 服务名称和客户端配置项名称均为 **`flutter-pilot`**；插件显示名称是 **Flutter Pilot**。服务使用标准 MCP stdio 传输，支持工具、资源和提示模板；桥接进程通过本机私有 Unix socket 访问插件会话。它复用 Flutter Debug VM，无需向应用添加 Driver 或 helper。
@@ -94,7 +96,21 @@ Agent 可按 `ValueKey<String/int>` 查找、点击、输入和滚动，诊断�
 
 WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服务端消息，`send_ws_message` 通过 App 当前真实 WS 连接发给服务端。均需开启 WS 采集并确认连接已接入，并选择准确的在线连接；不新建连接。可传原始 `text`，或传 `topic` 和 `data` 组装为 `{"topic": "...", "data": ...}`；自定义业务协议使用完整原始文本。真实发送经过当前 outbound 规则，可能被替换或丢弃；工具调用成功后仍需核对消息和业务结果。
 
-服务提供 `overview`、`http`、`ws`、`ui`、`workflow` 五个指南主题，以及 27 个 MCP 提示模板：保留 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，全部 23 个工具另有同名独立模板，包含 `hot_reload` 和 `hot_restart`。每个工具模板提供准备、操作、验证步骤及与工具共用的参数 schema；新增工具遗漏模板会使类型或测试检查失败。指南可通过工具或资源读取；支持 Prompts 的客户端可按需读取并填写任务。Agent 通过 `tools/list` 获取可调用能力，初始化说明与 Prompts 补充用法；是否主动使用仍取决于客户端和 Agent。
+服务提供 `overview`、`http`、`ws`、`ui`、`workflow` 五个指南主题，以及 29 个 MCP 提示模板：保留 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，全部 25 个工具另有同名独立模板，包含 `hot_reload` 和 `hot_restart`。每个工具模板提供准备、操作、验证步骤及与工具共用的参数 schema；新增工具遗漏模板会使类型或测试检查失败。指南可通过工具或资源读取；支持 Prompts 的客户端可按需读取并填写任务。Agent 通过 `tools/list` 获取可调用能力，初始化说明与 Prompts 补充用法；是否主动使用仍取决于客户端和 Agent。
+
+| 能力 | MCP 工具及同名 Prompt |
+| --- | --- |
+| 指南与会话 | `get_usage_guide`、`list_sessions` |
+| 热更新 | `hot_reload`、`hot_restart` |
+| 界面查询与操作 | `get_ui_snapshot`、`find_widget`、`tap`、`enter_text`、`scroll`、`wait_for_widget`、`inspect_key_issues` |
+| App 截图 | `list_screenshot_targets`、`take_screenshot` |
+| 网络状态与 HTTP 记录 | `get_network_status`、`get_requests`、`get_request` |
+| WebSocket | `get_ws_connections`、`get_ws_messages`、`inject_ws_message`、`send_ws_message` |
+| 场景与采集 | `reload_rules`、`set_capture_enabled`、`list_scenes`、`activate_scene`、`deactivate_scene` |
+
+支持标准 MCP Prompts 的客户端可通过 `prompts/list` 发现这些模板，并用 `prompts/get` 按名称读取；`task` 是可选的提示词参数，不是工具参数。截图示例：先通过 `list_sessions` 选择已连接 VM 的项目，调用 `take_screenshot` 并传入 `sessionId` 和 `mode: "screen"`；需要长图时使用 `mode: "long"`，有多个滚动区域时先通过 `list_screenshot_targets` 选择 `targetId`。结果是 MCP PNG 图片内容，由客户端显示。
+
+工具和 Prompt 以已安装并运行的插件版本为准；更新插件后，需要重新加载插件并按客户端要求重连或新建 MCP 会话，才能发现新增能力。
 
 例如可以向 Agent 提出：
 
@@ -106,7 +122,7 @@ WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服�
 
 Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `hot_restart` 重置内存并重新执行应用入口。修改 Mock 后先调用 `reload_rules`，再按场景热重启并检查新请求与 UI；启动首请求可能早于 Mock 重新注入。两个工具仅控制当前 VM 绑定的 IDE Flutter Debug 会话。
 
-运行时操作需要已开启 MCP 的插件会话和可用 VM；UI 能力取决于运行时探测。工具参数、配置范围、使用限制和验收范围见 [MCP 使用说明](docs/mcp.md) 与 [验收记录](docs/validation.md)。
+`get_usage_guide` 不需要在线插件会话；其他操作需要相应的插件会话，截图、UI 和热更新还需要可用的 Flutter Debug VM，UI 能力取决于运行时探测。工具参数、配置范围、使用限制和验收范围见 [MCP 使用说明](docs/mcp.md) 与 [验收记录](docs/validation.md)。
 
 ## 环境要求与兼容范围
 
@@ -130,7 +146,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 
 ### 从 VSIX 安装
 
-1. 获取 `flutter-pilot-0.0.13.vsix`。从源码构建见下方步骤。
+1. 获取 `flutter-pilot-0.0.14.vsix`。从源码构建见下方步骤。
 2. 在 VS Code 或 Cursor 扩展面板右上角菜单选择 **Install from VSIX… / 从 VSIX 安装…**。
 3. 选择安装包，按 IDE 提示重新加载窗口。
 4. 打开包含 `pubspec.yaml` 的 Flutter 项目根目录，并信任工作区。
@@ -140,7 +156,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 安装当前 Flutter Pilot 包，例如：
 
 ```sh
-cursor --install-extension artifacts/flutter-pilot-0.0.13.vsix --force
+cursor --install-extension artifacts/flutter-pilot-0.0.14.vsix --force
 # VS Code 使用 code --install-extension 同一文件 --force
 ```
 
@@ -163,7 +179,7 @@ npm test
 npm run package
 ```
 
-产物为 `artifacts/flutter-pilot-0.0.13.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
+产物为 `artifacts/flutter-pilot-0.0.14.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
 
 ### 使用已有引擎
 
@@ -775,7 +791,7 @@ python3 tool/device_smoke.py --mitmdump /absolute/path/to/mitmdump --ios YOUR_SI
 
 ```sh
 npm run package
-shasum -a 256 artifacts/flutter-pilot-0.0.13.vsix
+shasum -a 256 artifacts/flutter-pilot-0.0.14.vsix
 ```
 
 VSIX 包含扩展构建产物、VM 注入模板、代理 addon、引擎清单及文档，不包含 Node 开发依赖、Flutter 示例构建结果或真实证书。首次引擎下载单独发生。源码中的 README 修改后，应重新打包，安装包内的文档才会更新。

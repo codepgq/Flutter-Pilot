@@ -137,6 +137,29 @@ class StorageTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.delete_api(None, "api.test", "/users")
 
+    def test_catalog_pagination_and_filtered_total(self):
+        now = time.time() * 1000
+        for i in range(35):
+            self.store.put(self.entry(str(i), path="/item_" + str(i), method="POST" if i % 2 else "GET", startedAt=now + i))
+        first = self.store.apis({"limit": 10})
+        second = self.store.apis({"limit": 10, "offset": 10})
+        self.assertEqual(first["total"], 35)
+        self.assertEqual(len(first["items"]), 10)
+        self.assertEqual(len({item["path"] for item in first["items"] + second["items"]}), 20)
+        filtered = self.store.apis({"search": "item_1", "method": "post"})
+        self.assertEqual(filtered["total"], 6)
+        self.assertEqual([item["path"] for item in filtered["items"]], ["/item_19", "/item_17", "/item_15", "/item_13", "/item_11", "/item_1"])
+
+    def test_catalog_unicode_case_insensitive_search_across_batches(self):
+        now = time.time() * 1000
+        for i in range(205):
+            self.store.put(self.entry("unicode-" + str(i), path="/Ä%03d" % i, startedAt=now))
+        self.store.put(self.entry("kelvin", path="/Kelvin", startedAt=now))
+        page = self.store.apis({"search": "ä", "offset": 198, "limit": 10})
+        self.assertEqual(page["total"], 205)
+        self.assertEqual([item["path"] for item in page["items"]], ["/Ä%03d" % i for i in range(198, 205)])
+        self.assertEqual([item["path"] for item in self.store.apis({"search": "kelvin"})["items"]], ["/Kelvin"])
+
     def test_untrusted_strings_remain_data_in_cli_backend(self):
         entry = self.entry("quote'); DROP TABLE history;--", path="/quote'\n.shell touch /tmp/flutter-pilot-invalid\n")
         self.store.put(entry)

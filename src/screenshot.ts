@@ -57,6 +57,60 @@ export function composeScreenshot(result: UiResult): Buffer {
   return PNG.sync.write(output);
 }
 
+/** Capture for MCP without opening dialogs or writing files. */
+export async function executeMcpScreenshot(
+  tool: 'list_screenshot_targets' | 'take_screenshot',
+  args: Record<string, unknown>,
+  execute: (tool: string, args?: Record<string, unknown>) => Promise<UiResult>,
+  signal: AbortSignal,
+): Promise<UiResult> {
+  const cancelled = (): UiResult => ({ ok: false, code: 'CANCELLED', message: '截图操作已取消。' });
+  if (signal.aborted) return cancelled();
+  if (tool === 'list_screenshot_targets') {
+    const result = await execute('screenshot_targets');
+    return signal.aborted ? cancelled() : result;
+  }
+  const mode = args.mode ?? 'screen';
+  let targetId = args.targetId;
+  if (mode === 'long' && targetId === undefined) {
+    const result = await execute('screenshot_targets');
+    if (signal.aborted) return cancelled();
+    if (!result.ok) return result;
+    const targets = result.targets as ScreenshotTarget[] | undefined;
+    if (!Array.isArray(targets) || targets.length === 0)
+      return { ok: false, code: 'NO_SCROLL_TARGET', message: '当前页面没有可见的向下滚动区域。' };
+    if (targets.length > 1)
+      return {
+        ok: false,
+        code: 'TARGET_REQUIRED',
+        message: '存在多个滚动区域，请先列出区域并指定 targetId。',
+      };
+    targetId = targets[0].id;
+  }
+  const result = await execute('take_screenshot', {
+    mode,
+    ...(targetId !== undefined ? { targetId } : {}),
+  });
+  if (signal.aborted) return cancelled();
+  if (!result.ok) return result;
+  try {
+    const png = composeScreenshot(result);
+    return {
+      ok: true,
+      mode,
+      width: result.width,
+      height: result.height,
+      image: { data: png.toString('base64'), mimeType: 'image/png' },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      code: 'INVALID_SCREENSHOT',
+      message: error instanceof Error ? error.message : '无法生成截图。',
+    };
+  }
+}
+
 /** Shared workflow for the launcher command and the workbench header. */
 export async function takeAppScreenshot(host: ScreenshotHost): Promise<void> {
   const mode = await host.chooseMode();

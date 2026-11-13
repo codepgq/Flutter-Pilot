@@ -53,6 +53,7 @@ async function fixture(connected = true) {
     key: 'connection-1',
     mode: 'vm' as 'vm' | 'proxy',
     connected,
+    proxyRulesUnreachable: false,
     httpApplied: false,
     wsApplied: false,
   };
@@ -233,6 +234,84 @@ describe('scene activation lifecycle', () => {
     await reopened.initialize();
     expect(reopened.active?.id).toBe('one');
     expect(reopened.runtime.ws.status).toBe('applied');
+  });
+  it.each(['two', null])(
+    'replaces old proxy rules after offline selection %s, even with an unchanged key',
+    async (selection) => {
+      const { controller, host, state, events, projected } = await fixture();
+      state.mode = 'proxy';
+      let actual: Rule[] = [];
+      vi.mocked(host.disable).mockImplementation(async (domain) => {
+        events.push(`off:${domain}`);
+        if (domain === 'http' && state.connected) actual = [];
+      });
+      vi.mocked(host.enable).mockImplementation(async (domain) => {
+        events.push(`on:${domain}`);
+        if (domain === 'http') actual = projected().http;
+      });
+      state.httpApplied = true;
+      await controller.activate('one');
+      expect(actual.map((rule) => rule.id)).toEqual(['http-1']);
+      state.connected = false;
+      await controller.activate(selection);
+      expect(actual.map((rule) => rule.id)).toEqual(['http-1']);
+      state.connected = true;
+      if (selection) expect(controller.runtime.http.status).toBe('pending');
+      await controller.reconcile();
+      expect(actual.map((rule) => rule.id)).toEqual(selection ? ['http-2'] : []);
+      expect(controller.runtime.http.status).toBe(selection ? 'applied' : 'unneeded');
+    },
+  );
+  it('rejects active scene changes while the proxy control connection is lost', async () => {
+    const { controller, state, host } = await fixture();
+    state.mode = 'proxy';
+    await controller.activate('one');
+    const saved = await store.read();
+    state.connected = false;
+    state.proxyRulesUnreachable = true;
+    await expect(controller.activate('two')).rejects.toThrow('旧规则可能仍在生效');
+    await expect(controller.activate(null)).rejects.toThrow('旧规则可能仍在生效');
+    await expect(controller.saveHttp([{ ...http, enabled: false }], 'one')).rejects.toThrow(
+      '旧规则可能仍在生效',
+    );
+    await expect(controller.saveWs([], 'one')).rejects.toThrow('旧规则可能仍在生效');
+    await expect(controller.setCapture('http', false)).rejects.toThrow('旧规则可能仍在生效');
+    expect(controller.active?.id).toBe('one');
+    expect(await store.read()).toEqual(saved);
+    // Unrelated edits do not change the rules still serving in the proxy.
+    await controller.saveHttp([{ ...http, id: 'other' }], 'two');
+    const edited = await store.read();
+    const external = structuredClone(edited);
+    external.activeSceneId = 'two';
+    await writeFile(store.file, JSON.stringify(external));
+    await expect(controller.reload()).rejects.toThrow('旧规则可能仍在生效');
+    expect(controller.active?.id).toBe('one');
+    expect(await store.read()).toEqual(external);
+    state.connected = true;
+    state.proxyRulesUnreachable = false;
+    await controller.reconcile();
+    expect(host.enable).toHaveBeenLastCalledWith('http');
+    await controller.reload();
+    expect(controller.active?.id).toBe('two');
+  });
+  it('stops the proxy if its control connection drops while an active scene change is being saved', async () => {
+    const { controller, state, host } = await fixture();
+    state.mode = 'proxy';
+    await controller.activate('one');
+    const save = store.save.bind(store);
+    vi.spyOn(store, 'save').mockImplementationOnce(async (...args) => {
+      const result = await save(...args);
+      state.connected = false;
+      state.proxyRulesUnreachable = true;
+      return result;
+    });
+    host.stopUnreachableProxy = vi.fn(async () => {
+      state.proxyRulesUnreachable = false;
+    });
+    await controller.activate('two');
+    expect(host.stopUnreachableProxy).toHaveBeenCalledOnce();
+    expect(controller.active?.id).toBe('two');
+    expect(controller.runtime.http.status).toBe('pending');
   });
   it('pauses only the requested protocol and re-enables it from the active scene', async () => {
     const { controller, host } = await fixture();

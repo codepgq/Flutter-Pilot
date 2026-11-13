@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtemp, chmod, mkdir, symlink, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { version } from '../package.json';
 import { build } from 'esbuild';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -90,7 +91,7 @@ describe('MCP local session transport', () => {
       const registry = join(root, 'sessions');
       if (registryState === 'unsafe') await mkdir(registry, { mode: 0o755 });
       const client = await connect(registry);
-      expect(client.getServerVersion()).toMatchObject({ name: 'flutter-pilot' });
+      expect(client.getServerVersion()).toMatchObject({ name: 'flutter-pilot', version });
       expect(client.getInstructions()).toBe(agentInstructions);
       expect(client.getServerCapabilities()).toMatchObject({ tools: {}, resources: {}, prompts: {} });
       const prompts = await client.listPrompts();
@@ -185,6 +186,57 @@ describe('MCP local session transport', () => {
       expect(invalid.isError).toBe(true);
     }
     expect(calls).toHaveLength(2);
+  });
+
+  it('returns screenshots as MCP image content, including images larger than the normal IPC limit', async () => {
+    const imageData = Buffer.alloc(4 * 1024 * 1024, 42).toString('base64');
+    const calls: string[] = [];
+    const f = await fixture('screenshot', async (tool) => {
+      calls.push(tool);
+      if (tool === 'list_screenshot_targets') return { ok: true, targets: [{ id: 'one', label: 'list' }] };
+      return { ok: true, width: 1, height: 1, image: { data: imageData, mimeType: 'image/png' } };
+    });
+    const client = await connect(f.registryRoot, f.workspace);
+    const targets = await client.callTool({
+      name: 'list_screenshot_targets',
+      arguments: { sessionId: 'screenshot' },
+    });
+    expect(targets.structuredContent).toMatchObject({ targets: [{ id: 'one' }] });
+    const result = await client.callTool({
+      name: 'take_screenshot',
+      arguments: { sessionId: 'screenshot', mode: 'long', targetId: 'one' },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.content).toEqual([
+      { type: 'text', text: JSON.stringify({ ok: true, width: 1, height: 1 }) },
+      { type: 'image', data: imageData, mimeType: 'image/png' },
+    ]);
+    expect(result.structuredContent).toEqual({ ok: true, width: 1, height: 1 });
+    const invalid = await client.callTool({
+      name: 'take_screenshot',
+      arguments: { sessionId: 'screenshot', mode: 'screen', targetId: 'one' },
+    });
+    expect(invalid.isError).toBe(true);
+    expect(calls).toEqual(['list_screenshot_targets', 'take_screenshot']);
+  });
+
+  it('preserves screenshot errors and rejects malformed successful images', async () => {
+    const f = await fixture('screenshot-errors', async (_tool, args) =>
+      args.mode === 'long' ? { ok: false, code: 'NO_TARGET', message: '没有可用区域' } : { ok: true },
+    );
+    const client = await connect(f.registryRoot, f.workspace);
+    const failed = await client.callTool({
+      name: 'take_screenshot',
+      arguments: { sessionId: 'screenshot-errors', mode: 'long' },
+    });
+    expect(failed.isError).toBe(true);
+    expect(failed.structuredContent).toMatchObject({ code: 'NO_TARGET' });
+    const invalid = await client.callTool({
+      name: 'take_screenshot',
+      arguments: { sessionId: 'screenshot-errors', mode: 'screen' },
+    });
+    expect(invalid.isError).toBe(true);
+    expect(invalid.structuredContent).toMatchObject({ error: { code: 'INVALID_RESPONSE' } });
   });
 
   it('publishes private descriptors without VM credentials and removes them on stop', async () => {

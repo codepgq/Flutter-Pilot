@@ -258,6 +258,51 @@ test('规则表单校验、JSON编辑与 CRUD 消息', async ({ page }) => {
     payload: { id: 'orders', sceneId: 'scene' },
   });
 });
+test('规则及断点正文格式化保留大整数、重复键与字符串转义', async ({ page }) => {
+  const raw = '{"id":9007199254740993,"id":2,"text":"a\\\\b"}';
+  await page.goto('/');
+  const bp = {
+    id: 'bp1',
+    flowId: entry.id,
+    stage: 'response',
+    expiresAt: Date.now() + 60000,
+    original: response,
+    current: response,
+  };
+  await state(page, { pending: [bp] });
+  await page.getByRole('button', { name: 'Mock 场景' }).click();
+  await page.getByRole('button', { name: '查看场景 默认场景' }).click();
+  await page.getByRole('button', { name: '新建规则' }).click();
+  await page.getByLabel('规则名称', { exact: true }).fill('精度验证');
+  const ruleBody = page.getByLabel('Body · JSON / 文本', { exact: true });
+  await ruleBody.fill(raw);
+  await ruleBody.locator('..').getByRole('button', { name: '格式化 JSON' }).click();
+  const formatted = await ruleBody.inputValue();
+  expect(formatted).toContain('9007199254740993');
+  expect(formatted.match(/"id":/g)).toHaveLength(2);
+  expect(formatted).toContain('"text": "a\\\\b"');
+  await page.getByRole('button', { name: '保存规则' }).click();
+  let out = (await messages(page)) as { action: string; payload: { rule?: typeof rule } }[];
+  expect(out.find((m) => m.action === 'rules.save')?.payload.rule?.mock?.body).toBe(formatted);
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+
+  await page.getByRole('button', { name: '断点队列' }).click();
+  const breakpointBody = page.getByLabel('断点 Body', { exact: true });
+  await breakpointBody.fill(raw);
+  await breakpointBody.locator('..').getByRole('button', { name: '格式化 JSON' }).click();
+  expect(await breakpointBody.inputValue()).toBe(formatted);
+  await page.getByRole('button', { name: '编辑后放行', exact: true }).click();
+  out = (await messages(page)) as typeof out;
+  expect(out).toContainEqual({
+    action: 'breakpoint.resolve',
+    payload: { id: 'bp1', action: 'resume', patch: expect.objectContaining({ body: formatted }) },
+  });
+
+  await breakpointBody.fill('{invalid');
+  await breakpointBody.locator('..').getByRole('button', { name: '格式化 JSON' }).click();
+  await expect(breakpointBody).toHaveValue('{invalid');
+  await expect(page.getByText('无法解析为 JSON，已显示原文')).toBeVisible();
+});
 test('历史详情、对比、生成规则及备注', async ({ page }) => {
   await page.goto('/');
   await state(page, {}, entry);
@@ -625,6 +670,29 @@ test('API 目录和请求历史各自按最近时间倒序，乱序输入也保�
   await expect(requests.nth(2)).toContainText('/v1/older');
   await requests.nth(0).click();
   expect(await messages(page)).toContainEqual({ action: 'history.select', payload: { id: 'latest' } });
+});
+
+test('API 目录支持服务端筛选和分页，并在筛选时回到第一页', async ({ page }) => {
+  await page.goto('/');
+  await state(page, { apiTotal: 65 });
+  await page.getByRole('button', { name: 'API 请求' }).click();
+  await expect(page.getByLabel('API 目录分页')).toContainText('1–30 / 65');
+  await page.getByLabel('API 目录分页').getByRole('button', { name: '下一页' }).click();
+  await expect
+    .poll(
+      async () =>
+        ((await messages(page)) as any[]).filter((item) => item.action === 'api.query').at(-1)?.payload
+          .offset,
+    )
+    .toBe(30);
+  await page.getByLabel('搜索 API 目录').fill('orders');
+  await page.getByLabel('筛选 API 方法').selectOption('GET');
+  await expect
+    .poll(
+      async () =>
+        ((await messages(page)) as any[]).filter((item) => item.action === 'api.query').at(-1)?.payload,
+    )
+    .toEqual({ search: 'orders', method: 'GET', offset: 0 });
 });
 
 test('API 搜索和方法独立筛选，从详情进入历史时按该 API 查询', async ({ page }) => {

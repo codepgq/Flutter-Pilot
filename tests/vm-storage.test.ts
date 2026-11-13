@@ -134,6 +134,40 @@ describe('VM history using the real system SQLite CLI', () => {
     expect((await store.apis())[0].count).toBe(1);
   });
 
+  it('pages and filters the complete catalog without treating SQL wildcards as patterns', async () => {
+    for (let i = 0; i < 35; i++)
+      await store.put(
+        entry(`page-${i}`, { path: `/item_${i}`, method: i % 2 ? 'POST' : 'GET', startedAt: now + i }),
+      );
+    const first = await store.apiPage({ limit: 10 });
+    const second = await store.apiPage({ limit: 10, offset: 10 });
+    expect(first.total).toBe(35);
+    expect(first.items).toHaveLength(10);
+    expect(second.items).toHaveLength(10);
+    expect(new Set([...first.items, ...second.items].map((item) => item.path)).size).toBe(20);
+    const match = await store.apiPage({ search: 'item_1', method: 'POST' });
+    expect(match.items.map((item) => item.path)).toEqual([
+      '/item_19',
+      '/item_17',
+      '/item_15',
+      '/item_13',
+      '/item_11',
+      '/item_1',
+    ]);
+    expect(match.total).toBe(6);
+  });
+
+  it('searches Unicode without case sensitivity across batches and paginates matches', async () => {
+    for (let i = 0; i < 205; i++) {
+      await store.put(entry(`unicode-${i}`, { path: `/Ä${String(i).padStart(3, '0')}`, startedAt: now }));
+    }
+    await store.put(entry('kelvin', { path: '/Kelvin', startedAt: now }));
+    const page = await store.apiPage({ search: 'ä', limit: 10, offset: 198 });
+    expect(page.total).toBe(205);
+    expect(page.items.map((item) => item.path)).toEqual(Array.from({ length: 7 }, (_, i) => `/Ä${198 + i}`));
+    expect((await store.apiPage({ search: 'kelvin' })).items.map((item) => item.path)).toEqual(['/Kelvin']);
+  });
+
   it('treats quotes, SQL, CLI commands, shell substitutions and LIKE wildcards as data', async () => {
     const malicious =
       "a'\n.shell touch /tmp/flutter-pilot-should-never-exist\n$(touch unexpected); DROP TABLE history;--_100%\\中文";

@@ -52,7 +52,7 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 
 同一份指南还可通过 `resources/list` 发现，URI 为 `flutter-pilot://guides/<topic>`，使用 `resources/read` 读取。工具入口兼容只使用 MCP tools 的 Agent，资源入口方便支持参考资料的客户端；两者返回相同内容。
 
-支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 27 个模板：原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及下文工具列表中全部 23 个工具的同名独立模板。`hot_reload` 和 `hot_restart` 可以直接按同名 Prompt 查找，无需先打开其他场景模板。
+支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 29 个模板：原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及下文工具列表中全部 25 个工具的同名独立模板。`hot_reload` 和 `hot_restart` 可以直接按同名 Prompt 查找，无需先打开其他场景模板。
 
 例如读取热重启提示词：
 
@@ -107,6 +107,24 @@ VM 连接未断时，已有采集／Mock 开关维持，并重新发现运行时
 
 同一会话的 UI 操作串行执行，多个 Agent 的一次手势不会穿插。多个工具调用组成的业务流程不持有跨调用锁。等待和滚动均有上限；操作超时可能已经触发业务，Agent 应先查询界面或网络结果，不能自动重试点击。
 
+## App 截图
+
+选择已连接 Flutter Debug VM 的项目会话，通过 `take_screenshot` 获取当前 Flutter App 的 PNG；图片以 MCP 图片内容返回，需客户端支持显示图片。当前屏幕的参数示例：
+
+```json
+{ "sessionId": "从 list_sessions 获取", "mode": "screen" }
+```
+
+滚动长图先调用 `list_screenshot_targets` 查询当前可见的向下滚动区域，再将所选区域 ID 作为 `targetId` 传入：
+
+```json
+{ "sessionId": "从 list_sessions 获取", "mode": "long", "targetId": "从 list_screenshot_targets 获取" }
+```
+
+只有一个候选区域时，可以省略 `targetId`；存在多个区域时须指定。区域 ID 仅对当前页面有效，页面变化后应重新查询。长图从所选区域顶部采集到末尾，完成或失败后尝试恢复原滚动位置。它适用于普通向下滚动的 Flutter 列表和懒加载项；采集时保持页面与窗口稳定，动画或异步加载可能改变内容。嵌套、反向和横向滚动，以及原生平台视图暂不支持。图像仅包含 Flutter 渲染内容，不包含系统状态栏、原生键盘和系统弹窗。
+
+截图最高为 2 倍逻辑像素；长图最多 32 屏、30,000 像素高、2,400 万像素或 45 秒。MCP 图片传输上限为 32 MiB（含 Base64 和 JSON），客户端单次工具调用超时建议设置为至少 90 秒。超限或失败时不会返回不完整图片。
+
 ## WebSocket 主动消息
 
 先开启 WS 采集并确认目标连接已接入，再调用 `get_ws_connections` 选择在线且 `capture=attached` 的准确连接。两个工具均复用 App 现有连接，不新建 WebSocket：
@@ -151,6 +169,8 @@ VM 连接未断时，已有采集／Mock 开关维持，并重新发现运行时
 | `tap` / `enter_text` / `scroll`          | 点击、替换输入内容、滚动                                       |
 | `wait_for_widget`                        | 等待出现、消失或可操作                                         |
 | `inspect_key_issues`                     | 诊断当前界面交互目标的 Key                                     |
+| `list_screenshot_targets`                | 查询当前可见的长图滚动区域                                     |
+| `take_screenshot`                        | 截取当前 Flutter 屏幕或指定区域滚动长图，返回 MCP PNG 图片     |
 | `get_network_status`                     | 查询采集／Mock／规则加载状态和文件位置                         |
 | `get_requests` / `get_request`           | 分页查询 HTTP 记录与详情                                       |
 | `get_ws_connections` / `get_ws_messages` | 查询 WS 连接和消息；`includeBodies` 请求正文                   |

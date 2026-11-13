@@ -13,6 +13,7 @@ import {
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
+import { version } from '../../package.json';
 import { discoverSessions, requestSession, type SessionDescriptor } from './server';
 import { mcpTools, McpToolError, parseTool, toolError } from './tools';
 import { agentInstructions, getUsageGuide, guideResources, guideTopics, type GuideTopic } from './guide';
@@ -28,7 +29,7 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
   const connectionId = randomUUID();
   const announced = new Map<string, SessionDescriptor>();
   const server = new Server(
-    { name: 'flutter-pilot', version: '0.0.12' },
+    { name: 'flutter-pilot', version },
     {
       capabilities: { tools: {}, resources: {}, prompts: {} },
       instructions: agentInstructions,
@@ -69,6 +70,7 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
           'get_usage_guide',
           'list_sessions',
           'get_ui_snapshot',
+          'list_screenshot_targets',
           'find_widget',
           'wait_for_widget',
           'inspect_key_issues',
@@ -143,6 +145,19 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
           ? (data as Record<string, unknown>)
           : { result: data ?? null };
       const isError = result.ok === false || ('error' in result && result.error !== undefined);
+      if (request.params.name === 'take_screenshot' && !isError) {
+        const image = result.image as Record<string, unknown> | undefined;
+        if (!image || image.mimeType !== 'image/png' || typeof image.data !== 'string' || !image.data)
+          throw new McpToolError('INVALID_RESPONSE', '截图结果不包含有效的 PNG 图片。');
+        const { image: _image, ...metadata } = result;
+        return {
+          content: [
+            { type: 'text' as const, text: JSON.stringify(metadata) },
+            { type: 'image' as const, data: image.data, mimeType: 'image/png' },
+          ],
+          structuredContent: metadata,
+        };
+      }
       return {
         ...(isError ? { isError: true } : {}),
         content: [{ type: 'text' as const, text: JSON.stringify(result) }],

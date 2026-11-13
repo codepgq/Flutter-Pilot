@@ -1,5 +1,11 @@
 # 实现与验证结论
 
+## 0.0.14 发布验证与 Cursor 安装（2026-11-13）
+
+- 456 项 Vitest、68 项 Playwright、类型、格式、构建及打包通过；Python 21 项通过、21 项因未配置 MITMDUMP 跳过。场景恢复含失联模式切换保护；本轮未执行真实引擎故障注入或设备验收。
+- VSIX 为 `artifacts/flutter-pilot-0.0.14.vsix`，SHA-256 `49b5b38c7a8372241066b12eacb018d9b5482999dacdeb1754b5b5fc1117db63`。Cursor CLI 安装成功，活动登记为 0.0.14；包内 29 个分发文件与安装一致，manifest 仅排除 Cursor 元数据，四个 dist 文件与构建一致。
+- 构建与安装桥接的真实 SDK stdio 均返回 0.0.14、25 工具、29 Prompts、5 资源，离线指南读取成功。报告 `artifacts/v0.0.14-install-report.json`。用户现有窗口需方便时手动 Reload Window 加载新版。
+
 ## 0.0.12 远端同步、标签与 Cursor 安装（2026-11-12）
 
 - 拉取确认 origin/main 仍为 2fccee4。完成本地 0.0.11 安装记录与远端 Mock 场景、App 截图的合并，manifest、lockfile、MCP serverInfo、README、CHANGELOG 与 VSIX 路径统一为 0.0.12。

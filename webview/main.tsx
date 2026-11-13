@@ -211,12 +211,11 @@ function BodyEditor({
           disabled={disabled}
           type="button"
           onClick={() => {
-            try {
-              onChange(JSON.stringify(JSON.parse(value), null, 2));
+            const result = inspectJson(value);
+            if (result.formatted !== undefined) {
+              onChange(result.formatted);
               setError('');
-            } catch {
-              setError('当前内容不是有效 JSON，也可作为纯文本保存');
-            }
+            } else setError(result.hint ?? '当前内容不是有效 JSON，也可作为纯文本保存');
           }}
         >
           格式化 JSON
@@ -525,6 +524,7 @@ function App() {
             <div className="http-tab-panel" hidden={tab !== 'apis'}>
               <ApiCatalog
                 state={state}
+                active={tab === 'apis'}
                 selected={selectedApi}
                 onSelect={(api) => {
                   selectionTarget.current = 'apis';
@@ -1097,19 +1097,33 @@ function formatRequestTime(value?: number) {
 }
 function ApiCatalog({
   state,
+  active,
   selected,
   onSelect,
   onHistory,
 }: {
   state: WorkbenchState;
+  active: boolean;
   selected?: HistoryEntry;
   onSelect: (api: ApiCatalogEntry) => void;
   onHistory: (api: ApiCatalogEntry) => void;
 }) {
   const [search, setSearch] = useState('');
   const [method, setMethod] = useState('');
+  const [offset, setOffset] = useState(0);
   const [selectedKey, setSelectedKey] = useState('');
   const [detailFocused, setDetailFocused] = useState(false);
+  useEffect(() => {
+    if (!active || (state.mode === 'proxy' && state.engine.status !== 'running')) return;
+    const timer = setTimeout(() => send('api.query', { search, method, offset }), 250);
+    return () => clearTimeout(timer);
+  }, [active, search, method, offset, state.mode, state.engine.status]);
+  useEffect(() => {
+    if (state.apiTotal !== undefined && offset > 0 && offset >= state.apiTotal) {
+      setSelectedKey('');
+      setOffset(Math.floor(Math.max(0, state.apiTotal - 1) / 30) * 30);
+    }
+  }, [state.apiTotal, offset]);
   const groups = useMemo(() => [...(state.apis ?? [])].sort((a, b) => b.lastAt - a.lastAt), [state.apis]);
   const ruleTags = useMemo(
     () => new Map(groups.map((api) => [apiKey(api), apiRuleTags(api, state.rules)])),
@@ -1133,10 +1147,20 @@ function ApiCatalog({
             aria-label="搜索 API 目录"
             placeholder="搜索路径、域名或方法…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setOffset(0);
+            }}
           />
         </div>
-        <select aria-label="筛选 API 方法" value={method} onChange={(e) => setMethod(e.target.value)}>
+        <select
+          aria-label="筛选 API 方法"
+          value={method}
+          onChange={(e) => {
+            setMethod(e.target.value);
+            setOffset(0);
+          }}
+        >
           <option value="">所有方法</option>
           {['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((m) => (
             <option key={m}>{m}</option>
@@ -1145,7 +1169,7 @@ function ApiCatalog({
       </div>
       <div className="history-viewbar">
         <span className="http-list-count">
-          API 目录 <b>{visible.length}</b> / {groups.length} 个
+          API 目录 <b>{visible.length}</b> / {state.apiTotal ?? groups.length} 个
         </span>
         <span className="sort-indicator">最近调用优先</span>
       </div>
@@ -1208,6 +1232,32 @@ function ApiCatalog({
               title={groups.length ? '没有匹配的 API' : '暂无 API'}
               description="在应用中触发请求后，按方法、域名和路径自动汇总。"
             />
+          )}
+          {(offset > 0 || (state.apiTotal ?? groups.length) > 30) && (
+            <div className="pagination" aria-label="API 目录分页">
+              <Button
+                disabled={offset === 0}
+                onClick={() => {
+                  close();
+                  setOffset(Math.max(0, offset - 30));
+                }}
+              >
+                上一页
+              </Button>
+              <span>
+                {offset + 1}–{Math.min(offset + 30, state.apiTotal ?? groups.length)} /{' '}
+                {state.apiTotal ?? groups.length}
+              </span>
+              <Button
+                disabled={offset + 30 >= (state.apiTotal ?? groups.length)}
+                onClick={() => {
+                  close();
+                  setOffset(offset + 30);
+                }}
+              >
+                下一页
+              </Button>
+            </div>
           )}
           <p className="sidebar-hint">目录独立保存；清空或过期请求历史不会移除已发现的 API。</p>
         </section>

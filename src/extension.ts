@@ -10,7 +10,7 @@ import { validateSceneDocument } from './scene-model';
 import { isFlutterWorkspace } from './discovery';
 import { VmSession } from './vm/session';
 import { VmUiController } from './vm/ui';
-import { takeAppScreenshot } from './screenshot';
+import { executeMcpScreenshot, takeAppScreenshot } from './screenshot';
 import { McpSessionServer } from './mcp/server';
 import { AgentAdapterManager, detectNodeRuntime } from './mcp/adapters';
 import { McpNetworkController } from './mcp/network';
@@ -28,6 +28,8 @@ import type { WsRule, WsMessageQuery } from './ws/model';
 import { openProjectBinding, type ProjectBinding, type ProjectSettings } from './project';
 import { prepareProjectStorage } from './projectStorage';
 import {
+  ApiCatalogQuery,
+  ApiCatalogResult,
   HistoryEntry,
   HistoryQuery,
   HistoryResult,
@@ -283,9 +285,12 @@ class Workbench {
   private selectedSource: 'apis' | 'history' = 'history';
   private selectedApi?: { method: string; host: string; path: string };
   private apiDetailRevision = 0;
+  private historyReloadRevision = 0;
   private sentSelected?: HistoryEntry;
   private sentPreview?: setup.SetupPreview;
   private apis: WorkbenchState['apis'] = [];
+  private apiTotal = 0;
+  private apiQuery: ApiCatalogQuery = { limit: 30, offset: 0 };
   private query: HistoryQuery = { limit: 30, offset: 0 };
   private proxyActive = false;
   private engineEpoch = 0;
@@ -336,6 +341,7 @@ class Workbench {
           this.mode === 'vm'
             ? this.vm.state.status === 'connected'
             : this.engine.state.status === 'running' && this.proxyActive,
+        proxyRulesUnreachable: this.proxyActive && this.engine.state.status !== 'running',
         httpApplied:
           this.mode === 'vm'
             ? this.vm.state.mockEnabled && this.vm.state.instances > 0
@@ -366,7 +372,7 @@ class Workbench {
               await this.engine.stop();
               throw error;
             }
-          }
+          } else if (this.proxyActive) await this.engine.stop();
         } else await this.vm.websocket.setMockEnabled(false);
       },
       project: async (http, ws) => {
@@ -388,6 +394,7 @@ class Workbench {
       },
       capture: (domain, enabled) =>
         domain === 'http' ? this.vm.setCaptureEnabled(enabled) : this.vm.websocket.setCaptureEnabled(enabled),
+      stopUnreachableProxy: () => this.engine.stop(),
       changed: () => this.push(),
     });
     this.mcpNetwork = new McpNetworkController({
@@ -646,6 +653,7 @@ class Workbench {
       sceneRuntime: this.scenes.runtime,
       history: this.history,
       apis: this.apis,
+      apiTotal: this.apiTotal,
       pending: [...this.pending.values()],
       engine: this.engine.state,
       proxyActive: this.proxyActive,
@@ -994,7 +1002,7 @@ class Workbench {
         result = await db.list(params as HistoryQuery);
         break;
       case 'history.apis':
-        result = { items: await db.apis() };
+        result = await db.apiPage(params as ApiCatalogQuery);
         break;
       case 'history.get':
         result = await db.get(String(params.id));
@@ -1018,14 +1026,27 @@ class Workbench {
   }
   private async reloadHistory() {
     if (this.mode === 'proxy' && this.engine.state.status !== 'running') return;
-    const [history, apis] = await Promise.all([
-      this.historyCall<HistoryResult>('history.list', { ...this.query }),
-      this.historyCall<{ items: NonNullable<WorkbenchState['apis']> }>('history.apis', {}),
+    const revision = ++this.historyReloadRevision;
+    const mode = this.mode;
+    const historyQuery = this.query;
+    const apiQuery = this.apiQuery;
+    const [history, apis] = await Promise.allSettled([
+      this.historyCall<HistoryResult>('history.list', { ...historyQuery }),
+      this.historyCall<ApiCatalogResult>('history.apis', { ...apiQuery }),
     ]);
-    this.history = history;
-    this.apis = apis.items;
-    await this.refreshSelectedApi();
-    this.push();
+    if (mode !== this.mode || revision !== this.historyReloadRevision) return;
+    if (history.status === 'fulfilled' && historyQuery === this.query) this.history = history.value;
+    if (apis.status === 'fulfilled' && apiQuery === this.apiQuery) {
+      this.apis = apis.value.items;
+      this.apiTotal = apis.value.total;
+    }
+    try {
+      await this.refreshSelectedApi();
+    } finally {
+      this.push();
+    }
+    if (history.status === 'rejected') throw history.reason;
+    if (apis.status === 'rejected') throw apis.reason;
   }
   private async refreshSelectedApi() {
     const api = this.selectedApi;
@@ -1042,6 +1063,10 @@ class Workbench {
   private onEvent(event: { event: string; data: unknown }) {
     const d = event.data as Record<string, unknown> | undefined;
     if (event.event === 'control.disconnected') {
+      // The child can keep serving old rules while its control socket is down.
+      // A new generation forces the active scene to be synchronized on reconnect,
+      // even if the disconnect and reconnect occur within one debounce interval.
+      ++this.engineEpoch;
       this.pending.clear();
       this.log('控制连接中断，等待中的断点已释放；引擎将自动重连。');
     }
@@ -1213,6 +1238,25 @@ class Workbench {
                     () => !this.disposed && epoch === this.mcpGeneration && this.mcpState.enabled,
                   );
                 } finally {
+                  this.push();
+                }
+              }
+              if (tool === 'list_screenshot_targets' || tool === 'take_screenshot') {
+                if (this.mode !== 'vm' || this.vm.state.status !== 'connected')
+                  return { ok: false, code: 'VM_DISCONNECTED', message: '请先连接 Flutter Debug VM。' };
+                const cancel = () => this.ui.invalidate();
+                context.signal.addEventListener('abort', cancel, { once: true });
+                try {
+                  const result = await executeMcpScreenshot(
+                    tool,
+                    args,
+                    (name, input) => this.ui.execute(name, input),
+                    context.signal,
+                  );
+                  if (result.ok) this.mcpState.ui = { supported: true };
+                  return result;
+                } finally {
+                  context.signal.removeEventListener('abort', cancel);
                   this.push();
                 }
               }
@@ -1526,6 +1570,8 @@ class Workbench {
         case 'connection.mode': {
           const mode = payload.mode === 'vm' ? 'vm' : 'proxy';
           if (mode === this.mode) break;
+          if (this.proxyActive && this.engine.state.status !== 'running')
+            throw new Error('代理控制连接已断开，旧规则可能仍在生效。请等待重连或停止代理后再切换连接模式。');
           if (mode === 'proxy') {
             this.vmAuto.setMode('proxy');
             await this.vm.disconnect();
@@ -1537,8 +1583,10 @@ class Workbench {
           this.selectedApi = undefined;
           this.selected = undefined;
           this.query = { limit: 30, offset: 0 };
+          this.apiQuery = { limit: 30, offset: 0 };
           this.history = { items: [], total: 0 };
           this.apis = [];
+          this.apiTotal = 0;
           if (mode === 'vm') await this.vm.store.init();
           await this.saveConnection();
           await this.scenes.reconcile();
@@ -1712,6 +1760,20 @@ class Workbench {
             to: typeof q.to === 'number' ? q.to : undefined,
             limit: 30,
             offset: typeof q.offset === 'number' ? Math.max(0, Math.trunc(q.offset)) : 0,
+          };
+          await this.reloadHistory();
+          break;
+        }
+        case 'api.query': {
+          this.requireHistory();
+          this.apiQuery = {
+            search: typeof payload.search === 'string' ? payload.search.slice(0, 1000) : undefined,
+            method: typeof payload.method === 'string' ? payload.method.slice(0, 32) : undefined,
+            limit: 30,
+            offset:
+              typeof payload.offset === 'number' && Number.isFinite(payload.offset)
+                ? Math.max(0, Math.trunc(payload.offset))
+                : 0,
           };
           await this.reloadHistory();
           break;
