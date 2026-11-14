@@ -1,6 +1,8 @@
 # 移动交互与设备自动化
 
-Flutter Pilot 提供两个通道：Flutter Debug VM 负责 Widget 结构和定位；插件托管的 Appium 负责 Android、iOS 的系统输入、原生页面、键盘及权限弹窗。VM 基础功能可独立使用，完整移动交互需要连接设备通道。当前源码共有 42 个 MCP 工具，每个工具有同名 Prompt，另有四个场景模板。
+Flutter Pilot 提供两个通道：Flutter Debug VM 负责 Widget 结构和定位；插件托管的 Appium 负责 Android、iOS 的系统输入、原生页面、键盘及权限弹窗。VM 基础操作及 Flutter App 截图可独立使用，需要系统输入或原生／系统界面时才准备设备通道。当前源码共有 51 个 MCP 工具和 59 个 Prompts：每个工具有同名模板，另有四个能力入口和四个场景模板。
+
+初始化说明按用户任务介绍功能，`capabilities` 与 `get_usage_guide(topic="overview")` 提供同一份功能映射；六个指南主题为 `overview`、`screenshot`、`http`、`ws`、`ui`、`workflow`。只读查阅和状态查询不安装环境、不连接设备、不执行 UI；完整 Prompt 通过 `prompts/get` 按需读取。客户端决定如何使用说明，不能保证服务端能强制 Agent 路由。
 
 ## 准备与连接
 
@@ -85,6 +87,17 @@ Flutter 支持 `key`、`text`、`semantics`、Widget `type`、`ref` 和 `ancesto
 | 系统 | `device_action`：back、home、foreground、background、notifications、control_center、close_panels、rotate、restore_orientation |
 | 验证 | `wait_for_widget`：present、absent、visible、enabled、actionable、text_equals、text_contains、text_changed                    |
 | 截图 | `take_screenshot`：Flutter screen／long；device 仅 screen，包含系统 UI                                                        |
+
+用户要求当前 Flutter App “截图”“截屏”“screenshot”或布局对比时，优先调用 Flutter Pilot 的 `take_screenshot`。普通 App 截图用 `source=flutter,mode=screen`，无需 Key、Scene、Mock 或 Appium；无需先读 UI 树，也不重启或导航页面。截图对象是桌面、浏览器网页或其他目标时使用对应工具；上下文无法确定对象时先澄清。
+
+长图使用 `source=flutter,mode=long`，先 `list_screenshot_targets`；多个候选必须明确 `targetId`，仅一个候选可省略。长图会实际滚动，结束时尝试恢复原位置；失败、超限或恢复异常按真实结果报告，不能把局部图当作完整成功。需要系统键盘、权限弹窗或系统 UI 的整屏时，先确认目标设备绑定，再用 `source=device,mode=screen`；设备截图不支持 long。详细边界见 [MCP 截图指南](mcp.md#app-截图) 或 `app_screenshot` Prompt／`screenshot` 离线指南。
+
+```jsonl
+{"tool":"take_screenshot","arguments":{"sessionId":"project","source":"flutter","mode":"screen"}}
+{"tool":"list_screenshot_targets","arguments":{"sessionId":"project"}}
+{"tool":"take_screenshot","arguments":{"sessionId":"project","source":"flutter","mode":"long","targetId":"从 list_screenshot_targets 获取"}}
+{"tool":"take_screenshot","arguments":{"sessionId":"project","source":"device","mode":"screen"}}
+```
 
 手势通过同一有界轨迹执行器发送真实系统输入或 Flutter pointer 事件，不直接调用按钮、路由或业务回调。`swipe.direction` 为手指方向，`scroll.direction` 为内容查找方向。嵌套滚动必须明确指定子区域，查找目标限制在该区域的后代中；Flutter 区域与原生目标需属于同一界面树。设备触摸滚动后读取 Flutter 滚动状态，等待惯性停止后再检查目标。
 

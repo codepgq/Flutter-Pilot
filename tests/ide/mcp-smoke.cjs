@@ -87,7 +87,18 @@ exports.run = async () => {
       }),
     );
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 23);
+    for (const name of ['get_usage_guide', 'list_sessions', 'take_screenshot', 'start_app', 'run_test'])
+      assert.ok(
+        tools.tools.some((tool) => tool.name === name),
+        'discover ' + name,
+      );
+    assert.match(client.getInstructions(), /截图优先/);
+    const prompts = await client.listPrompts();
+    for (const name of ['capabilities', 'app_screenshot', ...tools.tools.map((tool) => tool.name)])
+      assert.ok(
+        prompts.prompts.some((prompt) => prompt.name === name),
+        'discover prompt ' + name,
+      );
     const list = await client.callTool({ name: 'list_sessions', arguments: {} });
     const sessions = list.structuredContent.sessions;
     assert.equal(sessions.length, 1);

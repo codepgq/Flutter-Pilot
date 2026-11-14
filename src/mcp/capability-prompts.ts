@@ -1,4 +1,6 @@
 import type { GuideTopic } from './guide';
+import { describeCapabilityRoutes } from './capabilities';
+import { screenshotPromptSteps } from '../automation/prompts';
 
 export interface PromptTemplate {
   description: string;
@@ -11,17 +13,25 @@ export interface PromptTemplate {
 export const capabilityPromptTemplates = {
   capabilities: {
     description:
-      '只读能力总览：查阅全部 MCP 工具及同名 Prompts，导航 App 启动、HTTP/WS Mock、Widget Key、键盘、等待诊断、Scene 操作、归档和业务测试；无需 IDE 或会话。',
+      '只读能力总览：按用户任务查阅截图/长图、App 启动、HTTP/WS Mock、Widget Key、键盘、设备、Scene 操作和业务测试，以及全部工具和同名 Prompts；无需 IDE 或会话。',
     topics: ['overview'],
     referenceOnly: true,
     steps: [
       '本 Prompt 用于查阅能力，不执行 UI、不启动 App、不修改 Mock，无需 list_sessions、sessionId 或在线 IDE。下方工具清单由实际注册表生成，每个工具均可通过同名 prompts/get 查阅步骤与生产参数 schema。',
+      `用户任务 → 功能 → 工具与前提：\n${describeCapabilityRoutes()}`,
+      '截图、截屏、screenshot、长截图或布局验收的目标是当前 Flutter App 时，优先读取 app_screenshot 并使用 take_screenshot；普通截图不需要 Key、Scene、Mock 或 Appium。',
       '已有登录、填表或导航操作：读取 scene_action_quick_run。它覆盖复用或 start_app 启动已有 Debug 配置、发现 actions、准备 Mock、后台执行、查询/取消及最终 UI 和本轮网络验证。工作台 Scene 详情的「UI 操作（Workflow）」也支持参数、通道、步骤 Key 预览、手动运行和取消。',
       '新增或整理操作：读取 scene_action_authoring。它覆盖 scenes.json v1、targets 别名到真实 Widget Key、hide_keyboard、跨 Scene call、秘密参数、公共操作归档和 Test Case v2 引用。操作来源与当前 Mock 独立，激活、重载、重连和重开 IDE 不自动执行 UI。',
       'HTTP 与 WS 分别查阅 http_mock / websocket_mock；界面探索和 Key 修复查阅 flutter_ui；需要组合 Mock、UI 和断言的完整任务查阅 mock_workflow。hot_reload 保留页面状态，hot_restart 重跑入口；原生或系统 UI 按需准备设备通道。',
       '等待或流程失败时查阅 wait_for_widget / get_scene_action_run / get_test_run：诊断包含实际 selector、condition、timeoutMs、attempts 和 lastObservation，区分当前未找到目标与目标已找到但状态不满足。先按失败证据排查，不盲目加长等待或重放提交。',
-      '需要详细示例时读取 get_usage_guide 的 overview/http/ws/ui/workflow 主题，或 resources/read 对应 flutter-pilot://guides/<topic>。仅查阅指南不需要运行时会话；具体能力是否可用在执行时检查，不把能力目录当作设备验收结果。',
+      '需要详细示例时读取 get_usage_guide 的 overview/screenshot/http/ws/ui/workflow 主题，或 resources/read 对应 flutter-pilot://guides/<topic>。仅查阅指南不需要运行时会话；具体能力是否可用在执行时检查，不把能力目录当作设备验收结果。',
     ],
+  },
+  app_screenshot: {
+    description:
+      '截图、截屏、screenshot、长截图或布局对比：优先用 Flutter Pilot 截取当前 Flutter App；区分 App PNG、滚动长图和含键盘/系统 UI 的设备整屏。',
+    topics: ['screenshot'],
+    steps: screenshotPromptSteps,
   },
   scene_action_quick_run: {
     description:

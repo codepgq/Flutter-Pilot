@@ -1,5 +1,21 @@
 # 验收记录
 
+## 0.0.20 发布验证（2026-11-14）
+
+- 正式发布 MCP 十类任务映射、截图优先入口 / 离线指南与插件 / MCP 图标。源码、lockfile、安装说明和 VSIX 路径同步为 0.0.20；本地 `.flutter-pilot/` 状态保留且不进入提交或安装包。
+- 本轮 763 项 Vitest / 46 文件、89 项 Playwright、类型、全仓格式、构建与 diff 检查通过；Python 代理 28 项通过、23 项真实代理集成因缺少 `MITMDUMP` 跳过。修改后的设备 / IDE smoke 脚本仅做 Node 语法检查。日志为 `artifacts/v0.0.20-{unit,ui,typecheck,format,build,proxy}.log`。
+- `artifacts/flutter-pilot-0.0.20.vsix` 经 Cursor CLI `--force` 安装成功，47 个分发文件与源码 / 构建及安装目录一致；离线 SDK stdio 验证构建、安装及固定 bridge 的版本、初始化截图说明和 PNG 图标，全部 51 个工具、59 个 Prompts 和 6 份指南均可发现 / 读取，指南工具与资源内容一致。核验报告为 `artifacts/v0.0.20-install-report.json`。
+- main 提交及 v0.0.20 附注标签按约定常规推送，远端引用核验另见 `artifacts/v0.0.20-release-report.json`。未重载活动 Cursor 窗口或重启已有 MCP 客户端；用户方便时重载窗口并重连客户端生效。
+- 本轮不操作真实设备 / 业务 App，也不调用实际 Agent 模型，不将离线发现与界面回归作为业务通过或客户端必然遵循任务引导的证明；启动首请求、完整地址恢复、资金及真机边界沿用下方记录。
+
+## MCP 功能介绍与截图优先引导（2026-11-14）
+
+- 现有 51 个工具按 10 类任务提供用户措辞、功能入口和实际前提；初始化 `instructions`、`overview.capabilityRoutes` 与 `capabilities` 共用类型化映射。新增 `app_screenshot` Prompt 和 `screenshot` 指南，现为 59 Prompts / 6 指南；全部同名工具 Prompt 保留生产参数 schema。
+- 修正启动后无条件推进 Mock/Scene、只读与截图共用交互准备、Flutter Key 诊断误导原生参数，以及设备/IDE smoke 固定旧数量。普通截图只需会话和 VM，长图明确滚动目标，设备整屏显式 source；桌面/网页等目标不误导至 Flutter Pilot。
+- 763 项 Vitest / 46 文件、5 项 MCP 工作台 Playwright、TypeScript/Webview 类型、全仓格式、构建和 diff 检查通过。日志为 `artifacts/mcp-task-routing-{unit,ui,typecheck,format,build}.log`。设备和 IDE smoke 修改仅通过 Node 语法检查，未启动设备或 IDE。
+- 构建桥接真实 SDK stdio 在无 IDE 注册目录通过：初始化即收到截图优先说明、全部工具被映射、59 个 Prompts 与6个资源均可读取、无运行会话；报告 `artifacts/mcp-task-routing-dist-smoke.json`。协议夹具另证实会话发现后可仅派发一次 Flutter screen 截图并返回 MCP image 内容，离线查阅不转发运行时操作。
+- 本轮验证能力发现与协议，不操作真实 App/设备、不调用实际 Agent 模型；客户端是否遵循路由仍需实际加载后观察。版本保持 0.0.19，当前 IDE/Agent 要加载包含本次改动的插件并刷新或重连后生效，未安装或发布。
+
 ## 0.0.19 发布验证（2026-11-14）
 
 - 正式交付此前 0.0.18 本地安装版及后续公共操作归档、离线能力导航和等待失败诊断；发布版本、安装说明、lockfile 与 VSIX 路径统一为 0.0.19。

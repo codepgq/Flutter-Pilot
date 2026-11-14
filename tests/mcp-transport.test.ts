@@ -16,6 +16,7 @@ import {
 } from '../src/mcp/server';
 import { mcpTools, parseTool } from '../src/mcp/tools';
 import { agentInstructions, getUsageGuide, guideResources, guideTopics } from '../src/mcp/guide';
+import { capabilityRoutes } from '../src/mcp/capabilities';
 
 const roots: string[] = [];
 const servers: McpSessionServer[] = [];
@@ -176,12 +177,37 @@ describe('MCP local session transport', () => {
       const registry = join(root, 'sessions');
       if (registryState === 'unsafe') await mkdir(registry, { mode: 0o755 });
       const client = await connect(registry);
-      expect(client.getServerVersion()).toMatchObject({ name: 'flutter-pilot', version });
+      const serverInfo = client.getServerVersion();
+      expect(serverInfo).toMatchObject({
+        name: 'flutter-pilot',
+        title: 'Flutter Pilot',
+        version,
+        icons: [
+          {
+            mimeType: 'image/png',
+            sizes: ['256x256'],
+            src: expect.stringMatching(/^data:image\/png;base64,/),
+          },
+        ],
+      });
+      const icon = serverInfo!.icons![0];
+      expect(Buffer.from(icon.src.split(',')[1], 'base64')).toEqual(
+        await readFile('resources/icons/mcp.png'),
+      );
       expect(client.getInstructions()).toBe(agentInstructions);
+      // These routes arrive in initialize, before prompts/list or prompts/get is requested.
+      for (const route of capabilityRoutes) {
+        expect(client.getInstructions()).toContain(route.title);
+        for (const name of route.tools) expect(client.getInstructions()).toContain(name);
+      }
+      expect(client.getInstructions()).toContain('截图');
+      expect(client.getInstructions()).toContain('优先');
+      expect(client.getInstructions()).toContain('take_screenshot');
       expect(client.getServerCapabilities()).toMatchObject({ tools: {}, resources: {}, prompts: {} });
       const prompts = await client.listPrompts();
       expect(prompts.prompts.map((prompt) => prompt.name)).toEqual([
         'capabilities',
+        'app_screenshot',
         'scene_action_quick_run',
         'scene_action_authoring',
         'http_mock',
@@ -247,17 +273,60 @@ describe('MCP local session transport', () => {
       return {};
     });
     const client = await connect(f.registryRoot, f.workspace);
+    expect(calls).toBe(0);
+    expect(client.getInstructions()).toContain('take_screenshot');
     await client.callTool({ name: 'get_usage_guide', arguments: { topic: 'http' } });
+    const screenshotGuide = await client.callTool({
+      name: 'get_usage_guide',
+      arguments: { topic: 'screenshot' },
+    });
+    expect(screenshotGuide.structuredContent).toEqual(getUsageGuide('screenshot'));
     await client.readResource({ uri: 'flutter-pilot://guides/ui' });
+    const screenshotResource = await client.readResource({ uri: 'flutter-pilot://guides/screenshot' });
+    const screenshotContent = screenshotResource.contents[0];
+    if (!('text' in screenshotContent)) throw new Error('截图指南必须以文本返回');
+    expect(JSON.parse(screenshotContent.text)).toEqual(screenshotGuide.structuredContent);
     await client.listPrompts();
     await client.getPrompt({ name: 'flutter_ui' });
-    for (const name of ['capabilities', 'scene_action_quick_run', 'scene_action_authoring'])
+    for (const name of ['capabilities', 'app_screenshot', 'scene_action_quick_run', 'scene_action_authoring'])
       await client.getPrompt({ name });
     expect(calls).toBe(0);
     const list = await client.callTool({ name: 'list_sessions', arguments: {} });
     expect(list.structuredContent).toMatchObject({
       usageGuide: { tool: 'get_usage_guide', topics: [...guideTopics] },
     });
+  });
+
+  it('captures the current Flutter screen directly after session discovery without interaction or Mock setup', async () => {
+    const calls: { tool: string; args: Record<string, unknown> }[] = [];
+    const f = await fixture('current-screen', async (tool, args) => {
+      calls.push({ tool, args });
+      return {
+        ok: true,
+        width: 400,
+        height: 800,
+        image: { mimeType: 'image/png', data: 'aW1hZ2U=' },
+      };
+    });
+    const client = await connect(f.registryRoot, f.workspace);
+    expect(client.getInstructions()).toContain('take_screenshot');
+    expect(calls).toEqual([]);
+    const list = await client.callTool({ name: 'list_sessions', arguments: {} });
+    const sessions = (list.structuredContent as { sessions: { sessionId: string }[] }).sessions;
+    expect(sessions).toHaveLength(1);
+    const result = await client.callTool({
+      name: 'take_screenshot',
+      arguments: { sessionId: sessions[0].sessionId, mode: 'screen', source: 'flutter' },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.content).toContainEqual({ type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' });
+    expect(result.structuredContent).toMatchObject({ ok: true, width: 400, height: 800 });
+    expect(calls).toEqual([
+      {
+        tool: 'take_screenshot',
+        args: { sessionId: 'current-screen', mode: 'screen', source: 'flutter' },
+      },
+    ]);
   });
 
   it('discovers and dispatches both WS message directions over real SDK stdio', async () => {

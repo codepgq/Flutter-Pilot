@@ -2,7 +2,9 @@
 
 先找已有动作，再补缺失能力。运行定义统一保存在业务项目的 `.flutter-pilot/scenes.json`；[动作目录](scene-actions-catalogue.md) 提供示例入口，[格式指南](workflows.md) 解释配置，[MCP 指南](mcp.md) 解释工具。本文将 Wali 登录联调中验证过的做法整理成可重复流程。
 
-Agent 可先通过 `prompts/get` 读取 `capabilities` 查阅能力，再按任务读取 `scene_action_quick_run` 运行已有操作，或 `scene_action_authoring` 编写和归档。`overview` 指南提供相同导航，具体工具还有同名 Prompt 和生产参数 schema。Prompt 可离线读取，读取本身不执行操作；实际运行时才选择项目、设备和操作。
+Agent 在 MCP 初始化时收到功能及任务路由说明，也可通过 `prompts/get` 读取 `capabilities` 查阅能力。已有业务操作读取 `scene_action_quick_run`，编写归档读取 `scene_action_authoring`；当前 App 截图读取 `app_screenshot` 或 `screenshot` 指南。`overview.capabilityRoutes` 提供相同的用户任务到工具映射，具体工具还有同名 Prompt 和生产参数 schema。Prompt 可离线按需读取，初始化不会全量读取模板，读取本身不执行操作；实际运行时才选择项目、设备和操作。
+
+仅截图或查阅能力不进入下方 Scene 流程。目标是当前 Flutter App 的“截图／截屏／screenshot／长截图／布局对比”时，优先使用 Flutter Pilot：普通图直接 `take_screenshot({sessionId,source:"flutter",mode:"screen"})`，无需 Key、Scene、Mock 或 Appium；长图才先 `list_screenshot_targets` 明确区域，会实际滚动并尝试恢复。包含键盘或系统 UI 时需已绑定设备，使用 `source=device,mode=screen`。桌面和网页等其他对象使用对应工具；目标不明时先确认。只截图不重启、不导航、不切换 Mock，只启动任务确认启动结果即可。
 
 ## 优先走已有操作
 

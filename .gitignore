@@ -12,3 +12,6 @@ __pycache__/
 .flutter-plugins-dependencies
 build/
 examples/flutter/android/local.properties
+
+# Local extension workspace state.
+.flutter-pilot/

@@ -18,6 +18,7 @@ import { discoverSessions, requestSession, type SessionDescriptor } from './serv
 import { mcpTools, McpToolError, parseTool, toolError } from './tools';
 import { agentInstructions, getUsageGuide, guideResources, guideTopics, type GuideTopic } from './guide';
 import { getMcpPrompt, mcpPrompts } from './prompts';
+import { mcpIcon } from './icon-data';
 
 export interface BridgeOptions {
   registryRoot: string;
@@ -29,7 +30,7 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
   const connectionId = randomUUID();
   const announced = new Map<string, SessionDescriptor>();
   const server = new Server(
-    { name: 'flutter-pilot', version },
+    { name: 'flutter-pilot', title: 'Flutter Pilot', version, icons: [mcpIcon] },
     {
       capabilities: { tools: {}, resources: {}, prompts: {} },
       instructions: agentInstructions,

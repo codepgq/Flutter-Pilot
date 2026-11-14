@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 256 256" fill="none">
+  <title>Flutter Pilot — navigation</title>
+  <defs>
+    <linearGradient id="tile" x1="32" y1="8" x2="226" y2="256" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#162C4D"/>
+      <stop offset="1" stop-color="#091323"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(185 65) rotate(135) scale(198)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#167FBC" stop-opacity=".38"/>
+      <stop offset="1" stop-color="#167FBC" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="orbit" x1="50" y1="65" x2="197" y2="205" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#54D9F4"/>
+      <stop offset="1" stop-color="#2575B7"/>
+    </linearGradient>
+    <linearGradient id="wing" x1="98" y1="107" x2="183" y2="84" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C8F4FF"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="181" y1="82" x2="128" y2="186" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4EE5F4"/>
+      <stop offset="1" stop-color="#3294F4"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="254" height="254" rx="57" fill="url(#tile)"/>
+  <rect x="1" y="1" width="254" height="254" rx="57" fill="url(#glow)"/>
+  <rect x="1.5" y="1.5" width="253" height="253" rx="56.5" stroke="#83DFFF" stroke-opacity=".12"/>
+  <path d="M207 133a79 79 0 1 1-84-84" stroke="url(#orbit)" stroke-width="11" stroke-linecap="round"/>
+  <path d="m76 119 118-57-57 118-15-43Z" fill="url(#fold)"/>
+  <path d="m76 119 118-57-72 75Z" fill="url(#wing)"/>
+  <path d="m122 137 72-75-57 118Z" fill="url(#fold)"/>
+  <path d="m122 137 72-75-66 81 9 37Z" fill="#0870B6" fill-opacity=".35"/>
+</svg>

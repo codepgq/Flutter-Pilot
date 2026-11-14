@@ -42,8 +42,8 @@ const templates = {
       '优先复用 Scene 操作；缺少操作时探索真实 Widget Key、修复定位、输入后稳定收键盘，支持精确交互和截图验证。',
     topics: ['ui'],
     steps: [
-      '先 list_scenes / list_scene_actions 检查已有操作；满足需求时直接按说明运行。首次探索、选择器失效或结果异常时才 get_ui_snapshot，读取 key、ancestorKeys、type、bounds、enabled/actionable 与 source，保留 Key 类型且不猜测。',
-      '开发联调与多状态测试优先使用结构化快照和 Key 操作；视觉样式或布局验收时使用 take_screenshot 获取 PNG 图片。长图先用 list_screenshot_targets 查询滚动区域。',
+      '先按任务分流：仅截图直接读取 app_screenshot / screenshot 指南并使用 take_screenshot；需要重复交互时先 list_scenes / list_scene_actions 检查已有操作，满足需求时直接按说明运行。首次探索、选择器失效或结果异常时才 get_ui_snapshot，读取 key、ancestorKeys、type、bounds、enabled/actionable 与 source，保留 Key 类型且不猜测。',
+      '开发联调与多状态测试优先使用结构化快照和 Key 操作；用户要求当前 App 截图、截屏或视觉样式/布局验收时优先 take_screenshot 获取 PNG。普通截图无需 Key/Scene/Mock/Appium，只有长图先 list_screenshot_targets；系统 UI 截图显式 source=device。',
       '手动探索时用 find_widget 确认唯一，重复 Key 用祖先范围限定。已保存操作的 target 自动解析为 targets 中的真实 Key 并逐步匹配，无需每步额外查找。Key 优先，也可显式用文字、语义或类型；失败不静默回退，不直接执行按钮回调。',
       '按任务使用 tap、enter_text、scroll 和 wait_for_widget；滚动与等待设置限额。enter_text 替换输入内容，按实际需要在点击按钮前 hide_keyboard，确认键盘稳定收起；不将输入描述为真实系统键盘 IME 测试。',
       'NOT_FOUND 先检查是否进入目标页面、是否懒加载，再有界等待或滚动，不能直接判为缺 Key。遇到 MISSING_KEY、UNSTABLE_KEY 或交互目标歧义时，调用 inspect_key_issues，结合 source 和业务源码定位原因。',
@@ -76,7 +76,7 @@ export const toolPromptPlans = {
   get_usage_guide: {
     topics: ['overview'],
     steps: [
-      '按任务选择 overview/http/ws/ui/workflow 主题调用 get_usage_guide；无需 sessionId 或在线 IDE。读取指南后再决定是否执行运行时操作。',
+      '按任务选择 overview/screenshot/http/ws/ui/workflow 主题调用 get_usage_guide；无需 sessionId 或在线 IDE。读取指南后再决定是否执行运行时操作。',
     ],
   },
   list_sessions: {
@@ -89,7 +89,7 @@ export const toolPromptPlans = {
     topics: ['workflow'],
     steps: [
       '先 list_sessions 选择项目，检查 capabilities.appLaunch.configurations。App 尚未运行时，从列出的名称选择 configurationName 调用 start_app；多设备时可传原生 deviceId，避免 IDE 选择框。不传命令、路径、启动参数或其他项目的名称。已有同名会话会复用；传 deviceId 时必须确认同一设备，不重启或清数据。',
-      '检查 completed、debugSessionId 与 network。TIMEOUT 可能仍在编译或运行，先查询 list_sessions 和 IDE，不自动重试启动。启动失败或调试会话结束会释放等待；pendingConfiguration 表示启动结果尚未确认，只拦截重复启动。若 IDE 从未产生会话，检查控制台后可重新加载当前 IDE 窗口恢复。连接就绪后 reload_rules 并激活所需 Mock，按 list_scene_actions 的参数显式 run_scene_action，再查询进度和主页结果。激活 Scene 不会自动启动 App 或操作 UI。',
+      '检查 completed、debugSessionId 与 network。TIMEOUT 可能仍在编译或运行，先查询 list_sessions 和 IDE，不自动重试启动。启动失败或调试会话结束会释放等待；pendingConfiguration 表示启动结果尚未确认，只拦截重复启动。只启动任务确认启动结果即可；后续需要截图时直接 take_screenshot，需要 Mock 时才 reload_rules/activate_scene，需要业务操作时才按 list_scene_actions 的参数显式 run_scene_action。激活 Scene 不会自动启动 App 或操作 UI。',
     ],
   },
   hot_reload: {
@@ -266,7 +266,7 @@ export function getMcpPrompt(name: string, args: Record<string, string> = {}) {
                 ]
               : [
                   '仅执行用户任务和授权范围内的操作。超时、取消或断线可能发生在动作执行之后，先检查界面和新网络记录，不自动重试有副作用的动作；重连后重新获取会话和状态；插件会自动恢复持久激活场景。',
-                  '完成后报告修改的规则/源码、关键操作、规则命中与页面证据、当前采集/Mock 开关及未验证项；按用户要求恢复临时规则和开关，保留其他改动。不得仅凭配置成功、工具返回成功或规则已加载就声称业务验证通过。',
+                  '完成后按本次任务报告实际调用、结果与证据；截图展示返回的图片，查阅任务只回答问题。涉及规则/源码修改、业务操作或测试时再报告相应改动、规则命中、页面证据、开关与未验证项，按用户要求恢复临时环境。不得仅凭配置成功或规则已加载声称业务验证通过。',
                 ]),
           ].join('\n\n'),
         },

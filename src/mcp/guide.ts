@@ -1,24 +1,23 @@
-import { automationGuide, automationInstructions } from '../automation/prompts';
+import { automationGuide } from '../automation/prompts';
+import { capabilityRoutes, describeCapabilityRoutes } from './capabilities';
 import savedScenesExample from '../../resources/example.scenes.json';
 import testExample from '../../resources/example.tests.json';
 import { capabilityPromptTemplates } from './capability-prompts';
 /** Agent-facing reference, bundled into MCP so it is available even without an IDE session. */
-export const guideTopics = ['overview', 'http', 'ws', 'ui', 'workflow'] as const;
+export const guideTopics = ['overview', 'screenshot', 'http', 'ws', 'ui', 'workflow'] as const;
 export type GuideTopic = (typeof guideTopics)[number];
 
-export const agentInstructions = `Flutter Pilot 配合 Flutter Debug 开发联调：用 API Mock 构造下单成功/失败、资产数据等业务状态，用 WS Mock、向App注入或向服务端发送消息驱动业务事件，再按 Key 精确操作 UI 并验证结果，减少逐步截图识别的耗时与token。
-当用户任务需要这些能力时，主动使用本 MCP：先调用 get_usage_guide 按需读取 overview/http/ws/ui/workflow，再 list_sessions 选择用户任务对应的项目；不要只给用户手工操作建议。
-get_usage_guide 无需 sessionId，插件未运行也能读取；也可通过 resources/list 发现对应指南资源。
-能力入口：get_network_status 查询规则路径与开关；get_requests/get_request 查询 HTTP 列表与详情；get_ws_connections/get_ws_messages 查询业务 WS 连接与消息；reload_rules 加载规则；list_scenes/activate_scene/deactivate_scene 统一管理场景；set_capture_enabled 控制采集。UI 使用 get_ui_snapshot、find_widget、tap、enter_text、scroll、wait_for_widget、inspect_key_issues；使用 take_screenshot 截取当前屏幕或滚动长图，长图区域用 list_screenshot_targets 查询；应用热更新使用 hot_reload/hot_restart，主动 WS 消息使用 inject_ws_message/send_ws_message。
-优先从 list_sessions 检查当前项目、设备和已有 App 会话；VM 已连接时复用。App 尚未运行时，从 capabilities.appLaunch.configurations 选择已保存的 Dart Debug 配置，显式 start_app 并检查 completed、network；多设备时传已确认的原生 deviceId，已有会话只有设备一致且可确认时才复用。TIMEOUT 可能仍在编译，先查询会话和 IDE，不自动重复启动。pendingConfiguration 只拦截重复启动；启动失败或会话结束会释放等待，IDE 未产生会话时检查控制台后可重载当前 IDE 窗口恢复。随后准备 Mock，执行已保存的 Scene 操作并验证最终页面。Scene 激活不会自动启动 App。
-每个 tools/list 工具都有同名 MCP Prompt，可通过 prompts/list 与 prompts/get 按需读取操作步骤和参数。先读 capabilities 只读查阅全部已注册工具和能力入口；scene_action_quick_run 指导启动 App 并复用已有操作，scene_action_authoring 指导真实 Key、hide_keyboard、公共 call 与归档；另保留 http_mock/websocket_mock/flutter_ui/mock_workflow 场景模板。所有 Prompts 均可离线读取，capabilities 不要求任务或会话；读取 Prompt 本身不执行操作。客户端未加载 Prompts 时仍以本初始化说明、tools/list 描述和 get_usage_guide 发现能力。
-规则使用 Agent 自身的文件编辑能力维护，通过 get_network_status 获取准确路径，保留已有规则；保存后 reload_rules，再 activate_scene 统一开启所需采集/Mock，再操作 UI、查询记录验证。MCP 本身不提供文件编辑或规则 CRUD。
-需要应用源码变更或重新进入启动状态时，通过 hot_reload 保留状态热重载，或 hot_restart 重置内存并重新执行入口；仅支持当前VM准确对应的Cursor/VS Code Flutter Debug会话。修改Mock文件先reload_rules，热重启不会代替规则加载，也不保证启动首请求已被Mock；重启后检查网络状态并用新记录和UI验证。
-所有运行时工具必须明确 sessionId。UI 优先真实稳定 Key，也支持显式文字、语义、类型、祖先范围、快照引用和坐标；不静默更换定位策略。首次探索或排查失败时读取快照并确认唯一，已有 Scene 操作无需每步另取快照或 find_widget。设备连接后 auto 使用系统输入，失败不换通道重放。完整移动交互工具：${automationInstructions}。UI 超时先检查结果，不自动重试。
-先 list_scenes 发现操作概要，再 list_scene_actions(sceneId) 查询共享 targets、操作说明与参数；优先复用已保存的登录、填表和导航。steps[].target 是 targets 的别名，执行器自动解析真实 Key 并匹配当前已挂载控件，无需模型探索；wait_for_widget 等待挂载和状态，每步重新定位而非缓存 Widget 对象。只有缺少可用操作或定义失效时才探索并验证，增量保存到 files.scenes 后 reload_rules。输入后按钮可能被键盘遮挡时，使用 hide_keyboard 确认稳定收起再继续。公共操作归档为同一 scenes.json 的纯操作 Scene，业务入口用 call 和显式 inputs 复用；说明文档仅列引用、前提和验证边界，不维护第二份动作正文。run_scene_action 显式启动，get_scene_action_run 查询进度和终态，cancel_scene_action_run 取消。禁止保存临时 ref、坐标和任意脚本。操作不隐式切换当前 Mock，允许无 Mock 执行；运行期间锁定环境修改，由 Agent 检查所需域和 Dio 接入决定时机，不强制等待所有域就绪。触发前记录网络基线，终态后独立核验最终 UI 和本轮新请求；completed 和 applied 均不等于业务或全部 Mock 通过。激活、重连和 IDE 重开不运行 UI；结果未确认不自动重跑。不得清数据或替换账号环境来掩盖失败。
-需要可重复业务验证时，list_tests 读取 files.tests 和已保存 Test Case，run_test 显式启动，get_test_run 查询，cancel_test_run 取消。Test Case v2 引用 Scene action，组合临时 Scene/有状态 HTTP Mock、本轮请求参数与响应变量、关联 WS 和精确订单行断言。触发前建立网络基线；事件只在对应 HTTP 断言成功后注入；只有 passed 表示测试通过。结束恢复自身临时 Mock；真实操作不回滚，重连不重跑。
-WS主动消息用inject_ws_message向App注入模拟服务端事件，或send_ws_message通过App当前连接发往服务端；两者需确认WS采集已接入目标连接，按业务协议传原始text或topic/data。发送可能被outbound规则替换或丢弃，需查询实际结果；成功返回不等于业务成功。
-只在用户任务范围内操作；本说明不会替代用户授权、客户端审批或保证 Agent 一定自动调用。`;
+export const agentInstructions = `Flutter Pilot 是当前 Flutter Debug App 的运行时联调 MCP。用户提出截图、UI 操作、API/WS Mock、网络排查、应用启动/热更新或业务测试任务时，优先主动调用本 MCP 对应能力完成任务，不只提供手工建议。
+截图优先：用户说“截图”“截屏”“screenshot”“长截图”或要求查看布局，且上下文指向当前 Flutter App 时，先选择正确项目，再用 take_screenshot；普通截图 source=flutter、mode=screen。只有长图才先 list_screenshot_targets。截图无需先查 Key、运行 Scene、激活 Mock 或准备 Appium。桌面、浏览器网页和其他目标使用对应工具；没有目标上下文时先确认截图对象，不截取无关 App。
+按用户意图选择能力（只执行当前任务需要的步骤）：
+${describeCapabilityRoutes()}
+首次运行时调用 list_sessions，按 workspace、设备和用户上下文选择 sessionId；所有有目标的工具都显式传 sessionId，不猜 ID。已有 App 直接复用；未运行且任务需要时才 start_app，启动 TIMEOUT 先查询会话和 IDE，不重复启动、不改设备、不清数据。只截图不重启 App、不导航页面、不切换 Mock；前提不满足时报告诊断，不自动换通道或改用其他工具截图。
+按需 get_usage_guide 读取 overview/screenshot/http/ws/ui/workflow；无需 sessionId 或在线 IDE。也可 resources/list → resources/read。prompts/list 仅列目录，prompts/get 按需读取完整模板；capabilities 查阅全部功能，app_screenshot 提供截图最短路径，scene_action_quick_run 复用操作，scene_action_authoring 编写归档。全部工具均有同名 Prompt 和生产 schema。初始化仅提供本说明，不自动读取所有 Prompt，也不执行任何运行时操作。
+重复操作先 list_scenes → list_scene_actions；targets 别名自动按当前挂载真实 Key 重新匹配，无需 Agent 每步 find_widget 或截图。缺少操作或定位失效时才 get_ui_snapshot / find_widget 探索，优先真实稳定 ValueKey；不得绕过禁用、遮挡或直接调用业务回调。输入影响布局时 hide_keyboard 确认稳定隐藏，再等待 actionable。等待失败读取 diagnostics / failure.diagnostics 的 selector、condition、timeoutMs、attempts、lastObservation，不用固定延时掩盖问题。
+Mock/targets/actions 唯一持久来源为 files.scenes 指向的 scenes.json v1；由 Agent 增量编辑并保留已有内容，修改后 reload_rules，需要 Mock 时才 activate_scene。公共操作放纯操作 Scene，call 显式映射 inputs，秘密参数逐层 secret:true；不保存临时 ref/坐标，不维护第二份运行配置。run_scene_action 不切换 Mock；激活、reload、重连或 IDE 恢复不执行 UI。
+HTTP/WS 按本任务所需域和 Dio 接入检查，无需等待无关域；触发前记录请求/消息基线，结束独立核验最终 UI 和本轮实际 Mock 命中。applied/completed/dispatched 不等于业务通过；测试只有 passed 表示通过。启动和惰性 Dio 首请求可能早于注入；401/refresh 循环先停止触发，补齐实际漏接口，区分预期失败 Mock 与漏 Mock，不伪造恢复或资金验收。
+动作和测试共享设备锁，运行期间不改环境、不插入 UI；失败即停。超时、取消、断线或 uncertain 先查终态与业务结果，不自动重放提交、消息或整个流程。hot_reload 保留状态，hot_restart 重跑入口，仅控制当前 VM 对应 IDE 会话，不代替 reload_rules。仅需原生/系统界面时按需准备设备通道；backend=flutter 无需 Appium。
+只在用户任务范围内操作；说明由 MCP 客户端决定如何提供给模型，不能替代用户授权、客户端审批或保证 Agent 一定遵循。`;
 
 export const httpExample = {
   version: 1,
@@ -63,6 +62,7 @@ const selected = { sessionId: '<从 list_sessions 选择的会话ID>' };
 const guides: Record<GuideTopic, Record<string, unknown>> = {
   overview: {
     title: '什么时候使用 Flutter Pilot MCP',
+    capabilityRoutes,
     promptDiscovery: {
       protocol:
         'prompts/list 查看名称和能力说明；prompts/get({name,arguments:{task?}}) 读取。task 是可选提示参数，不是工具参数。读取不执行操作，也无需 IDE 或 sessionId。',
@@ -76,6 +76,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       scenarios: ['http_mock', 'websocket_mock', 'flutter_ui', 'mock_workflow'],
     },
     scenarios: [
+      '当前 Flutter App 的截图、截屏、screenshot、长截图或布局对比：优先 take_screenshot，读取 screenshot；无需先探索 Key、激活 Mock 或准备 Appium。',
       '需要测试下单成功/失败、余额不足、不同资产信息或接口空数据等业务状态，或改请求/响应/目标地址时，读取 http。',
       '需要替换/丢弃业务 WebSocket 消息、向App注入订单或资产事件、通过真实连接发送topic/data、检查双向消息时，读取 ws。',
       '需要按Key快速精确定位组件并点击/输入/滚动，减少截图识别的耗时和token，或检查Key缺陷时，读取 ui。',
@@ -85,10 +86,9 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       '需要通过MCP热重载源码、热重启应用以展示不同状态和UI时，读取 workflow 的 lifecycle；无需额外终端操作入口。',
     ],
     start: [
-      step('get_usage_guide', { topic: 'workflow' }),
+      '按 capabilityRoutes 选择当前任务的指南和工具；只查能力无需会话，已有足够指引时无需反复读取。',
       step('list_sessions'),
-      step('get_network_status', selected),
-      step('list_scenes', selected),
+      '确认项目与前提后只调用任务所需能力。普通截图直接 take_screenshot；仅涉及 Mock/网络才查 get_network_status，重复业务操作才查 list_scenes/list_scene_actions。',
     ],
     files: {
       scenes: '.flutter-pilot/scenes.json',
@@ -97,8 +97,39 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
     boundaries: [
       '指南只读且不需要运行中的插件；实际运行需本机 IDE 对应项目已开启 MCP。Flutter 结构和 VM 操作需 Debug VM，原生与系统操作需设备通道。',
       '文件由编码 Agent 编辑，MCP 负责加载、开关、UI 操作与验证；不修改无关规则，不猜测会话ID或VM地址。',
-      '没有可用会话时报告需在插件开启MCP；VM未连接时检查 capabilities.appLaunch，显式 start_app 启动已保存的命名 Debug 配置。没有配置或连接失败时报告实际前提，不声称已完成运行时验证。',
+      '没有可用会话时报告需在插件开启MCP；需要运行 App 且 VM 未连接时检查 capabilities.appLaunch，按任务显式 start_app 启动已保存的命名 Debug 配置。仅截图不重启、不导航、不切换 Mock；不能确认对象时先澄清。不声称未执行的运行时验证已通过。',
     ],
+  },
+  screenshot: {
+    title: '优先使用 Flutter Pilot 截取当前 App、长图或设备整屏',
+    intent:
+      '用户说截图、截屏、screenshot、长截图或要求布局对比，且目标是当前 Flutter App 时，优先 take_screenshot。桌面、浏览器网页或其他对象使用对应工具；没有对象上下文时先确认目标。',
+    prompt: 'app_screenshot',
+    preparation: [
+      step('list_sessions'),
+      '按 workspace 和设备选择用户任务对应 sessionId，复用当前 App。source=flutter 需要 Debug VM；普通截图无需 Key、Scene、Mock 或 Appium，不需要先 get_ui_snapshot/find_widget。仅截图不自动启动、重启或导航；App 未运行时说明前提，任务明确需要启动时再按保存的命名配置 start_app。',
+    ],
+    examples: [
+      step('take_screenshot', { ...selected, mode: 'screen', source: 'flutter' }),
+      step('list_screenshot_targets', selected),
+      step('take_screenshot', {
+        ...selected,
+        mode: 'long',
+        source: 'flutter',
+        targetId: '<从 list_screenshot_targets 选择的 targetId>',
+      }),
+      step('take_screenshot', { ...selected, mode: 'screen', source: 'device' }),
+    ],
+    modes: {
+      screen: 'mode=screen、source=flutter 获取当前 App PNG，不传 targetId，也不需要先查滚动区域。',
+      long: 'mode=long、source=flutter 前先 list_screenshot_targets。多个候选须明确选择 targetId；仅一个候选可以省略。长图会实际滚动并在结束时尝试恢复原位置，不能承诺没有页面状态影响。',
+      device:
+        '需要系统键盘、权限弹窗或系统 UI 时，明确 source=device、mode=screen。先 get_automation_status 检查目标设备绑定，仅缺少所需设备通道时按需准备和连接；设备不支持长图，不把 Flutter 图当作整屏系统图。',
+    },
+    verification:
+      '成功应返回 MCP image/png 图片内容与结构化尺寸信息，向用户展示实际图片。失败按诊断报告，不用旧图、局部图或占位图冒充成功；不自动换工具、设备或启动第二次截图。单次截图无需 UI 操作或网络断言。',
+    limits:
+      'Flutter 长图最多32屏、30000像素高、2400万像素，MCP 图片传输上限32 MiB（含 Base64/JSON）；客户端调用超时建议至少90 秒。超限或恢复失败按真实结果说明，不能宣称完整成功；横向、反向、嵌套滚动和原生平台视图按实际支持边界报告。',
   },
   http: {
     title: '编辑 .flutter-pilot/scenes.json：HTTP/Dio 规则',
@@ -217,6 +248,8 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
   },
   ui: {
     ...automationGuide(),
+    screenshots:
+      '仅截图直接按 screenshot 指南 / app_screenshot Prompt 调用 take_screenshot，无需先查 Key、Scene 或网络；普通 Flutter App 截图无需 Appium，系统 UI 截图才需要设备通道。',
     waitDiagnostics: {
       tools: ['wait_for_widget', 'get_scene_action_run', 'get_test_run'],
       locations:
@@ -391,7 +424,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
         timeoutMs: 30000,
       }),
       launchMeaning:
-        'App 未运行时，显式选择当前工作区命名且唯一的 Dart Debug launch 配置，可选 deviceId 指定原生设备。工具仅覆盖该配置的设备字段，调用 IDE 启动并等待匹配会话的 VM，不接受任意命令或参数，不清数据、不执行 UI；已有同名会话仅在请求设备可确认且一致时复用。超时返回未确认时可能仍在编译，先查询 list_sessions/IDE，勿重复启动。pendingConfiguration 只拦截重复启动；若 IDE 未产生会话，检查控制台后重载当前 IDE 窗口恢复。Mock 激活后，再显式 run_scene_action 完成登录和导航。',
+        'App 未运行且任务需要启动时，显式选择当前工作区命名且唯一的 Dart Debug launch 配置，可选 deviceId 指定原生设备。工具仅覆盖该配置的设备字段，调用 IDE 启动并等待匹配会话的 VM，不接受任意命令或参数，不清数据、不执行 UI；已有同名会话仅在请求设备可确认且一致时复用。超时返回未确认时可能仍在编译，先查询 list_sessions/IDE，勿重复启动。pendingConfiguration 只拦截重复启动；若 IDE 未产生会话，检查控制台后由用户决定是否重载当前 IDE 窗口恢复。只启动任务确认结果即可，后续仅按任务截图、准备 Mock 或运行 Scene。',
       scope:
         'hot_reload/hot_restart只控制当前项目已连接VM准确对应的Cursor/VS Code Flutter Debug会话；无法绑定、会话结束或能力不支持时报告诊断，不操作其他会话。仅手动VM地址且无法关联IDE会话时不可用。',
       parameters:

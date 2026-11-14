@@ -52,6 +52,13 @@ type Tab = 'apis' | 'rules' | 'breakpoints' | 'connection' | 'websocket' | 'mcp'
 type Snapshot = RequestSnapshot | ResponseSnapshot;
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
+    pilot: (
+      <>
+        <path d="M20.5 12.5a8.5 8.5 0 1 1-9-9" />
+        <path d="m7.5 11 11-5.5-5.5 11-1.5-4Z" />
+        <path d="m11.5 12.5 7-7-5.5 11Z" fill="currentColor" />
+      </>
+    ),
     camera: (
       <>
         <path d="M3 7h4l2-3h6l2 3h4v13H3z" />
@@ -82,6 +89,12 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
     pause: (
       <>
         <path d="M8 5v14M16 5v14" />
+      </>
+    ),
+    mcp: (
+      <>
+        <path d="m10.9 9.2 2-2a2.8 2.8 0 0 1 4 4l-2.5 2.4a2.8 2.8 0 0 1-4 0" />
+        <path d="m13.1 14.8-2 2a2.8 2.8 0 0 1-4-4l2.5-2.4a2.8 2.8 0 0 1 4 0" />
       </>
     ),
     plug: (
@@ -368,7 +381,7 @@ function App() {
     { id: 'rules', label: 'Mock 场景', icon: 'rules', count: state.scenes?.scenes.length ?? 0 },
     { id: 'tests', label: '业务测试', icon: 'play', count: state.tests?.catalogue?.tests.length ?? 0 },
     { id: 'breakpoints', label: '断点队列', icon: 'pause', count: state.pending.length },
-    { id: 'mcp', label: 'MCP', icon: 'plug' },
+    { id: 'mcp', label: 'MCP', icon: 'mcp' },
   ];
   const environmentBusy = state.busy || !!state.sceneActions?.locked || !!state.tests?.locked;
   const enabled = state.rules.filter((r) => r.enabled).length;
@@ -378,7 +391,7 @@ function App() {
     <div className="app">
       <header className="app-header">
         <div className="brand">
-          <Icon name="radar" size={18} />
+          <Icon name="pilot" size={18} />
           <div>
             <h1>Flutter Pilot</h1>
           </div>

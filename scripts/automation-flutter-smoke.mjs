@@ -455,8 +455,24 @@ try {
       stderr: 'pipe',
     }),
   );
-  check((await mcp.listTools()).tools.length === 42, 'real stdio mobile capability discovery');
-  check((await mcp.listPrompts()).prompts.length === 46, 'real stdio mobile prompt discovery');
+  const { tools } = await mcp.listTools();
+  const { prompts } = await mcp.listPrompts();
+  check(
+    ['get_automation_status', 'get_ui_snapshot', 'take_screenshot', 'list_screenshot_targets', 'tap'].every(
+      (name) => tools.some((tool) => tool.name === name),
+    ),
+    'real stdio mobile capability discovery',
+  );
+  check(
+    [...tools.map((tool) => tool.name), 'capabilities', 'app_screenshot'].every((name) =>
+      prompts.some((prompt) => prompt.name === name),
+    ),
+    'real stdio mobile prompt discovery',
+  );
+  check(
+    mcp.getInstructions().includes('截图优先') && mcp.getInstructions().includes('take_screenshot'),
+    'initialization advertises screenshot routing before prompt retrieval',
+  );
   check((await ui.probe()).supported, 'VM runtime probe');
   check(
     (await invoke('find_widget', { selector: { text: 'No Key action', type: 'Text' } })).ok,

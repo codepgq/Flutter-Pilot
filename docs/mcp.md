@@ -2,13 +2,15 @@
 
 Flutter Pilot 的 MCP 服务名和客户端配置键均为 `flutter-pilot`，指南资源 URI 使用 `flutter-pilot://`。本次更名直接切换，已有旧服务配置不会自动转换；请在工作台重新适配，并在客户端移除旧条目后重连。
 
+MCP 初始化会随服务信息返回专用的连接图标，PNG 以内嵌 data URI 提供，桥接离线时也可读取，无需访问网络或查找安装目录。客户端决定是否展示该图标；图标源文件位于 `resources/icons/mcp.svg`，发布图片位于 `resources/icons/mcp.png`。
+
 MCP 让 Claude Code CLI、Codex CLI 和 Codex App 复用插件已经连接的 Dart VM，在 Flutter Debug 应用中按 Key 定位、点击、输入和滚动，并读取 HTTP／WebSocket 记录验证结果。接入无需在应用中添加 Driver、测试入口或 helper。插件仍需在受信任的 macOS 本地 Cursor／VS Code 工作区中运行。
 
 主要用于开发联调和多业务状态验证：API Mock 构造下单成功、失败、余额不足或不同资产数据，WS Mock 与主动消息驱动订单/资产事件，再通过 Key 精确操作目标组件。结构化快照和 Key 避免日常交互反复截图识别，减少耗时与 token；视觉样式与布局验收仍应补充截图。多状态任务按场景逐个切换并分别验证，防止规则和页面状态互相干扰。
 
 ## 开启与适配
 
-1. 用项目原来的入口启动 Flutter Debug 应用，在 **连接与诊断** 确认 VM 已连接。
+1. 需要 Flutter 运行时操作时，用项目原来的入口启动 Debug 应用，在 **连接与诊断** 确认 VM 已连接；能力和指南可离线查阅。
 2. 打开工作台 **MCP** Tab，开启 MCP。服务默认关闭，开关按当前工作区保存在 IDE 私有存储中。
 3. 在目标 Agent 卡片中选择 **当前项目** 或 **全局**，默认当前项目，点击 **一键适配**。未开启服务时适配会同时开启当前工作区 MCP。
 4. 按卡片提示在客户端加载配置。Claude Code 可能需要批准项目 MCP；Codex 可能需要信任项目、重新加载 MCP 或新建会话。插件不会跳过这些客户端步骤。
@@ -34,7 +36,24 @@ VM 认证地址不写入 Agent 配置。桥接进程通过私有 Unix socket 访
 
 ## Agent 能力发现与使用指南
 
-MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉及 HTTP／WS Mock、网络排查、Flutter Widget 查找与交互、Key 缺陷时，说明会引导 Agent 主动读取指南并使用工具。`tools/list` 中也有简短说明，无需把整份手册始终塞进上下文。
+MCP 在连接初始化的 `instructions` 中发送功能介绍和“用户任务 → 工具 → 使用前提”指引，引导 Agent 收到适用任务时优先主动使用 Flutter Pilot。初始化说明、`overview.capabilityRoutes` 和 `capabilities` Prompt 共用 [功能映射](../src/mcp/capabilities.ts)，覆盖当前全部 51 个工具；`tools/list` 提供工具描述及实际参数 schema。
+
+| 用户任务示例                               | 功能与主要入口                                                                    |
+| ------------------------------------------ | --------------------------------------------------------------------------------- |
+| “截图”“截屏”“screenshot”“长截图”“对比布局” | 当前 Flutter App 优先 `take_screenshot`；长图先 `list_screenshot_targets`         |
+| “启动 App”“热重载”“热重启”                 | `list_sessions` 确认已有会话，按需 `start_app`／`hot_reload`／`hot_restart`       |
+| “查接口报错”“模拟空数据、失败或资产数据”   | `get_network_status`、`get_requests`／`get_request`，需要 Mock 时重载并激活 Scene |
+| “查 WS 消息”“模拟推送”“发送消息”           | `get_ws_connections`／`get_ws_messages`、`inject_ws_message`／`send_ws_message`   |
+| “找控件”“点击”“滚动”“拖拽”“检查 Key”       | `get_ui_snapshot`／`find_widget`、交互工具及 `inspect_key_issues`                 |
+| “输入”“清空”“复制粘贴”“收起键盘”           | `enter_text`／`edit_text`、`get_keyboard_state`／`hide_keyboard` 等键盘工具       |
+| “权限弹窗”“通知栏”“返回”“旋转设备”         | 按需检查设备通道，使用原生快照、交互或 `device_action`                            |
+| “登录到主页”“执行已有操作”“保存复用流程”   | `list_scenes` → `list_scene_actions` → `run_scene_action`，查询或取消运行         |
+| “回归测试”“验证 HTTP/WS/UI 关联结果”       | `list_tests` → `run_test` → `get_test_run`，需要时 `cancel_test_run`              |
+| “支持什么功能”“查看参数”                   | 离线 `get_usage_guide`、`capabilities` 及工具同名 Prompt                          |
+
+例如用户在当前 Flutter App 上说“截图”，Agent 应选择对应项目并直接调用 `take_screenshot({sessionId,source:"flutter",mode:"screen"})`。普通截图无需先找 Key、读 Scene、激活 Mock 或安装 Appium。桌面、浏览器网页和其他目标使用对应工具；缺少目标上下文时先确认对象。仅截图不重启 App、不导航或切换 Mock；仅启动任务确认启动结果即可，后续按任务继续。
+
+完整 Prompt 正文仍需 `prompts/get` 按需读取；`prompts/list` 只返回目录，启动时不会全量加载模板或执行运行时工具。客户端决定如何将初始化说明和工具提供给模型，服务端的指引不能保证 Agent 必然遵循，也不替代用户任务范围和客户端审批。
 
 新增只读工具 `get_usage_guide`，无需 `sessionId`，插件未运行时也能读取：
 
@@ -45,6 +64,7 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 | topic              | 内容                                                                            |
 | ------------------ | ------------------------------------------------------------------------------- |
 | `overview`（默认） | 能力场景、Prompt 导航、首次调用、规则文件和运行前提                             |
+| `screenshot`       | App 普通截图、长图目标选择、设备整屏、图片返回与范围限制                        |
 | `http`             | `scenes.json` 中 HTTP 规则的字段、完整合法示例、请求／响应修改、转发及验证流程  |
 | `ws`               | `scenes.json` 中 WS 规则的 URL、方向、文本匹配、替换／丢弃及双向消息验证        |
 | `ui`               | 快照发现真实 Key、父范围查找、点击／输入／滚动／等待、Key 诊断与修复            |
@@ -52,12 +72,13 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 
 同一份指南还可通过 `resources/list` 发现，URI 为 `flutter-pilot://guides/<topic>`，使用 `resources/read` 读取。工具入口兼容只使用 MCP tools 的 Agent，资源入口方便支持参考资料的客户端；两者返回相同内容。
 
-支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 58 个模板：三个能力入口、原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及全部 51 个工具的同名独立模板。`start_app`、`hide_keyboard`、`hot_reload`、`hot_restart`、Scene 操作和测试工具可以直接按同名 Prompt 查找，无需先打开其他场景模板。
+支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 59 个模板：四个能力入口、原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及全部 51 个工具的同名独立模板。`take_screenshot`、`start_app`、`hide_keyboard`、`hot_reload`、`hot_restart`、Scene 操作和测试工具可以直接按同名 Prompt 查找，无需先打开其他场景模板。
 
-| Prompt | 查阅内容 |
-| --- | --- |
-| `capabilities` | 由当前注册表生成的全部工具及同名 Prompt 目录，导航 App、Mock、Key、键盘、等待诊断、Scene 和测试；只读查阅，无需任务或会话 |
-| `scene_action_quick_run` | 复用或启动 App、发现已有 actions、选择所需 Mock、传参运行、查询／取消、最终 UI 与本轮网络验证；包含工作台手动入口 |
+| Prompt                   | 查阅内容                                                                                                                |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `capabilities`           | 用户任务到工具的功能映射，以及由当前注册表生成的全部工具和同名 Prompt 目录；只读查阅，无需任务或会话                    |
+| `app_screenshot`         | 当前 Flutter App 优先截图的最短路径；普通截图、滚动长图与包含键盘／系统 UI 的设备整屏及各自前提                         |
+| `scene_action_quick_run` | 复用或启动 App、发现已有 actions、选择所需 Mock、传参运行、查询／取消、最终 UI 与本轮网络验证；包含工作台手动入口       |
 | `scene_action_authoring` | `scenes.json` 唯一来源、真实 Widget Key、无 target 的 `hide_keyboard`、公共 `call`、秘密参数、预检、归档及 Test Case v2 |
 
 先只查阅能力：
@@ -69,7 +90,10 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 再按任务读取快速运行流程：
 
 ```json
-{ "name": "scene_action_quick_run", "arguments": { "task": "复用当前项目的邮箱登录操作并验证主页与本轮 Mock 命中" } }
+{
+  "name": "scene_action_quick_run",
+  "arguments": { "task": "复用当前项目的邮箱登录操作并验证主页与本轮 Mock 命中" }
+}
 ```
 
 例如读取热重启提示词：
@@ -82,7 +106,7 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 
 等待失败可分别查阅 `wait_for_widget`、`get_scene_action_run` 和 `get_test_run` 的同名 Prompt。直接等待的 `diagnostics`、Scene 运行的 `failure.diagnostics` 及测试步骤的 `steps[].failure.diagnostics` 包含 `selector`、`condition`、`timeoutMs`、`attempts` 和 `lastObservation`；先区分当前未找到目标与已找到但状态不满足，再检查页面、Key、键盘或网络，不盲目增加超时或重放操作。
 
-工具和 Prompt 以客户端实际加载的 MCP 桥接版本为准。更新插件后，需让 IDE 加载新版插件，再按客户端要求重连或新建 MCP 会话，重新调用 `prompts/list`；安装文件更新不代表已经运行的桥接进程或客户端缓存同步更新。
+工具和 Prompt 以客户端实际加载的 MCP 桥接版本为准。更新插件后，需让 IDE 加载新版插件，再按客户端要求刷新、重连或新建 MCP 会话，以重新获取初始化说明、工具与 `prompts/list`；安装文件更新不代表已经运行的桥接进程或客户端缓存同步更新。加载与重连本身不启动 App 或执行 UI。
 
 Agent 的可调用能力由 `tools/list` 提供，Prompts 是可选的使用指导；未读取 Prompts 不等于工具不存在。初始化说明已明确列出所有工具及同名 Prompt 入口。不支持 Prompts 的客户端仍可通过工具描述和 `get_usage_guide` 发现用法。新增工具必须补齐同名提示词；重要使用流程也需进入场景 Prompt 与 `overview` 导航，类型检查及真实 MCP stdio 测试校验完整覆盖、离线发现和可读性。
 
@@ -178,16 +202,23 @@ auto 在设备连接后使用设备输入；失败不会换通道重放。device
 
 ## App 截图
 
-选择已连接 Flutter Debug VM 的项目会话，通过 `take_screenshot` 获取当前 Flutter App 的 PNG；图片以 MCP 图片内容返回，需客户端支持显示图片。当前屏幕的参数示例：
+当前 Flutter App 的“截图／截屏／screenshot／长截图／布局对比”任务优先使用本 MCP。读取 `app_screenshot` Prompt 或 `get_usage_guide({topic:"screenshot"})` 可查看最短流程，无需先运行 Scene、配置 Mock 或探索 Key。
+
+选择已连接 Flutter Debug VM 的项目会话，通过 `take_screenshot` 获取当前 Flutter App 的 PNG；无需 Appium，图片以 MCP 图片内容返回，需客户端支持显示图片。当前屏幕的参数示例：
 
 ```json
-{ "sessionId": "从 list_sessions 获取", "mode": "screen" }
+{ "sessionId": "从 list_sessions 获取", "source": "flutter", "mode": "screen" }
 ```
 
 滚动长图先调用 `list_screenshot_targets` 查询当前可见的向下滚动区域，再将所选区域 ID 作为 `targetId` 传入：
 
 ```json
-{ "sessionId": "从 list_sessions 获取", "mode": "long", "targetId": "从 list_screenshot_targets 获取" }
+{
+  "sessionId": "从 list_sessions 获取",
+  "source": "flutter",
+  "mode": "long",
+  "targetId": "从 list_screenshot_targets 获取"
+}
 ```
 
 只有一个候选区域时，可以省略 `targetId`；存在多个区域时须指定。区域 ID 仅对当前页面有效，页面变化后应重新查询。长图从所选区域顶部采集到末尾，完成或失败后尝试恢复原滚动位置。它适用于普通向下滚动的 Flutter 列表和懒加载项；采集时保持页面与窗口稳定，动画或异步加载可能改变内容。嵌套、反向和横向滚动，以及原生平台视图暂不支持。`source=flutter` 图像仅包含 Flutter 渲染内容。设备连接后使用 `source=device, mode=screen` 获得包含系统栏、原生键盘和弹窗的整屏 PNG，并返回图片尺寸、方向与窗口坐标信息。
@@ -241,7 +272,7 @@ auto 在设备连接后使用设备输入；失败不会换通道重放。device
 | `get_ui_snapshot`                                  | 获取有界的已挂载 UI 结构                                                          |
 | `find_widget`                                      | 按 Key 查询目标                                                                   |
 | `tap` / `enter_text` / `scroll`                    | 点击、替换输入内容、滚动                                                          |
-| `get_keyboard_state` / `hide_keyboard`             | 查询键盘状态或收起并确认稳定隐藏；之后再等待和点击目标                             |
+| `get_keyboard_state` / `hide_keyboard`             | 查询键盘状态或收起并确认稳定隐藏；之后再等待和点击目标                            |
 | `wait_for_widget`                                  | 等待出现、消失或可操作                                                            |
 | `inspect_key_issues`                               | 诊断当前界面交互目标的 Key                                                        |
 | `list_screenshot_targets`                          | 查询当前可见的长图滚动区域                                                        |

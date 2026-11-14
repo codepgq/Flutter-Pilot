@@ -35,7 +35,7 @@ export function encodeWsMessage(args: Record<string, unknown>): string {
 export const mcpTools = {
   get_usage_guide: {
     description:
-      '查阅 App 启动/热更新、API/WS Mock、Widget Key、键盘、Scene actions 和测试。topic 为 overview/http/ws/ui/workflow；overview 提供 capabilities、scene_action_quick_run、scene_action_authoring 等 Prompt 导航，已有操作按 workflow.quickRun 复用。无需 sessionId 或在线 IDE；工具另有同名 Prompt。',
+      '离线查阅功能与“用户任务→工具”路由。topic 为 overview/screenshot/http/ws/ui/workflow；截图看 screenshot/app_screenshot，已有操作看 workflow.quickRun，capabilities 查全部能力。涵盖 App 启动/热更新、API/WS Mock、Key、键盘、设备、Scene 和测试，无需 sessionId 或在线 IDE。',
     schema: z.object({ topic: z.enum(guideTopics).optional() }).strict(),
   },
   list_sessions: {

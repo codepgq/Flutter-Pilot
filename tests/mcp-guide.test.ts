@@ -6,6 +6,7 @@ import { agentInstructions } from '../src/mcp/guide';
 import { z } from 'zod';
 import { validateRuleDocument } from '../src/model';
 import { validateWsRuleDocument } from '../src/ws/model';
+import { capabilityRoutes } from '../src/mcp/capabilities';
 
 describe('Agent usage guide contracts', () => {
   it('exposes a read-only capability prompt backed by every registered tool and scenario', () => {
@@ -19,6 +20,7 @@ describe('Agent usage guide contracts', () => {
     for (const [name, tool] of Object.entries(mcpTools))
       expect(text).toContain(`- ${name}：${tool.description}`);
     for (const name of [
+      'app_screenshot',
       'scene_action_quick_run',
       'scene_action_authoring',
       'http_mock',
@@ -39,6 +41,7 @@ describe('Agent usage guide contracts', () => {
     expect(discovery.protocol).toContain('读取不执行操作');
     expect(discovery.entrypoints.map((entry) => entry.name)).toEqual([
       'capabilities',
+      'app_screenshot',
       'scene_action_quick_run',
       'scene_action_authoring',
     ]);
@@ -48,6 +51,96 @@ describe('Agent usage guide contracts', () => {
       expect(entry.topics.every((topic) => guideTopics.includes(topic as (typeof guideTopics)[number]))).toBe(
         true,
       );
+    }
+  });
+
+  it('routes user requests to registered capabilities consistently across startup and offline discovery', () => {
+    expect(getUsageGuide('overview').capabilityRoutes).toEqual(capabilityRoutes);
+    expect(new Set(capabilityRoutes.map((route) => route.id)).size).toBe(capabilityRoutes.length);
+    const advertisedTools = new Set<string>();
+    const capabilityText = getMcpPrompt('capabilities').messages[0].content.text;
+    for (const route of capabilityRoutes) {
+      expect(route.requests.length).toBeGreaterThan(0);
+      expect(route.tools.length).toBeGreaterThan(0);
+      expect(route.workflow.length).toBeGreaterThan(0);
+      expect(mcpPrompts.some((prompt) => prompt.name === route.prompt)).toBe(true);
+      expect(route.topics.every((topic) => guideTopics.includes(topic))).toBe(true);
+      expect(agentInstructions).toContain(route.title);
+      expect(capabilityText).toContain(route.title);
+      for (const name of route.tools) {
+        expect(Object.hasOwn(mcpTools, name)).toBe(true);
+        expect(agentInstructions).toContain(name);
+        advertisedTools.add(name);
+      }
+    }
+    expect([...advertisedTools].sort()).toEqual(Object.keys(mcpTools).sort());
+    const screenshot = capabilityRoutes.find((route) =>
+      route.tools.some((name) => name === 'take_screenshot'),
+    )!;
+    expect(screenshot).toBeDefined();
+    expect(screenshot.prompt).toBe('app_screenshot');
+    expect(screenshot.topics).toContain('screenshot');
+    expect(screenshot.requests.join(' ')).toMatch(/截图|截屏/);
+    expect(agentInstructions).toContain('Flutter Pilot');
+    expect(agentInstructions).toContain('优先');
+    expect(agentInstructions).toContain('app_screenshot');
+  });
+
+  it('provides focused screenshot guidance and executable screen, long and device examples', () => {
+    expect(guideTopics).toContain('screenshot');
+    const guide = getUsageGuide('screenshot');
+    const examples = guide.examples as { tool: string; arguments: Record<string, unknown> }[];
+    for (const args of [
+      { mode: 'screen', source: 'flutter' },
+      { mode: 'long', source: 'flutter' },
+      { mode: 'screen', source: 'device' },
+    ])
+      expect(examples).toContainEqual({
+        tool: 'take_screenshot',
+        arguments: expect.objectContaining(args),
+      });
+    expect(examples.some((example) => example.tool === 'list_screenshot_targets')).toBe(true);
+    for (const example of examples) expect(() => parseTool(example.tool, example.arguments)).not.toThrow();
+    for (const name of ['app_screenshot', 'take_screenshot']) {
+      const text = getMcpPrompt(name, { task: '截取当前 Flutter App 页面' }).messages[0].content.text;
+      expect(text).toMatch(/source(?:=|:")flutter/);
+      expect(text).toMatch(/source(?:=|:")device/);
+      expect(text).toContain('list_screenshot_targets');
+      expect(text).not.toContain('根据工具 JSON Schema 传参。backend=auto');
+      expect(text).not.toContain('操作后通过 wait_for_widget');
+    }
+    expect(() =>
+      parseTool('take_screenshot', { sessionId: 'app', source: 'device', mode: 'long' }),
+    ).toThrow();
+    expect(() =>
+      parseTool('take_screenshot', { sessionId: 'app', mode: 'screen', targetId: 'list' }),
+    ).toThrow();
+  });
+
+  it('keeps lookup, device management and launch prompts within the requested task', () => {
+    for (const name of [
+      'get_automation_status',
+      'get_ui_snapshot',
+      'find_widget',
+      'inspect_key_issues',
+      'get_keyboard_state',
+      'list_screenshot_targets',
+      'disconnect_device',
+    ]) {
+      const text = getMcpPrompt(name, { task: '只查询或管理当前连接' }).messages[0].content.text;
+      expect(text).not.toContain('优先使用实际 Key');
+      expect(text).not.toContain('操作后通过 wait_for_widget');
+    }
+    expect(getMcpPrompt('get_automation_status').messages[0].content.text).toContain('不安装、不连接设备');
+    expect(getMcpPrompt('list_screenshot_targets').messages[0].content.text).toContain('不自动滚动或截图');
+    const keyDiagnosis = getMcpPrompt('inspect_key_issues').messages[0].content.text;
+    expect(keyDiagnosis).toContain('当前挂载的 Flutter Widget Key');
+    expect(keyDiagnosis).not.toContain('source=device');
+    expect(getMcpPrompt('start_app').messages[0].content.text).toContain('只启动任务确认启动结果即可');
+    for (const text of [agentInstructions, getMcpPrompt('app_screenshot').messages[0].content.text]) {
+      expect(text).toContain('桌面、浏览器网页');
+      expect(text).toContain('不切换 Mock');
+      expect(text).toContain('先确认');
     }
   });
 
@@ -157,7 +250,7 @@ describe('Agent usage guide contracts', () => {
     expect(guide.interpretation).toContain('present:false');
     expect(guide.interpretation).toContain('present:true');
     const capabilities = getMcpPrompt('capabilities').messages[0].content.text;
-    expect(capabilities).toContain('等待诊断');
+    expect(capabilities).toContain('wait_for_widget / get_scene_action_run / get_test_run');
     expect(capabilities).toContain('lastObservation');
   });
   it('keeps HTTP documents and each action example valid against the production validator', () => {

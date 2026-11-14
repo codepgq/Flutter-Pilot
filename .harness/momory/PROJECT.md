@@ -8,6 +8,11 @@
 - 沿用本地 VSIX 发布方式；扩展商店发布不属于此默认约定。活动 Cursor 窗口由用户在调试方便时 Reload Window，不自动重载。将当次版本、验证、安装和推送结果记录到 `IMPLEMENTATION.md` 与验收文档；失败时明确未完成步骤，不将历史验收作为本轮结果。
 - 本约定覆盖下方历史章节对未来发布授权的限制；历史“仅本地安装”“未提交 / 未推送”仍只描述当时状态。
 
+## 当前发布版本（2026-11-14）
+
+- 最新发布为 0.0.20，包含 MCP 十类任务引导、截图专用 Prompt / 指南及插件 / MCP 图标；51 个工具、59 个 Prompts、6 份离线指南。发布、安装、验证与远端引用证据见 `IMPLEMENTATION.md` 同版本条目。
+- 当前仓库自动生成的 `.flutter-pilot/` 是本地项目状态，保留但不提交、不进入 VSIX；可复用分发示例仍位于 `resources/`。
+
 ## 当前 Scene 与操作约束（2026-11-14）
 
 - 最新规范入口为根 `AGENTS.md`；快速联调见 [scene-authoring](../../docs/scene-authoring.md)，可复用操作见 [动作目录](../../docs/scene-actions-catalogue.md)。本节覆盖历史独立 Workflow 配置的描述；发布任务授权按上方“默认发布流程”，普通实现任务不自动发布。
@@ -17,6 +22,14 @@
 - 用户要求将 Wali 本轮登录经验同步到项目约束、MCP 及其 Scene，归档可复用动作。Wali 保留原 40 条 HTTP Mock 与三个入口，公共核心放 `wali_common_operations`，具体目录保存在其 `.flutter-pilot/README.md`。
 - 0.0.18 曾仅在本地安装，未创建发布标签；本轮已升为 0.0.19 并通过 Cursor 安装与包一致性检查，交付范围及远端核验路径见 `IMPLEMENTATION.md` 的 0.0.19 条目。下方历史记录保留当时状态。
 - MCP 查阅入口为 `capabilities`（只读、无任务和会话前提），已有操作执行与新增归档分别为 `scene_action_quick_run`、`scene_action_authoring`。全部工具保留同名 Prompt；新增重要用法同时进入 `overview` 导航及 stdio 发现测试。Flutter VM 操作无需强制准备 Appium，设备通道按任务需要启用。
+
+## MCP 功能介绍与任务引导（2026-11-14）
+
+- 用户要求按支持功能和启动介绍两方面完善 MCP；收到适用任务时应主动优先使用 Flutter Pilot，当前 Flutter App 的“截图/截屏/screenshot/长截图/布局对比”优先 `take_screenshot`。
+- 当前源码将全部 51 个工具组织为 10 类用户意图映射，初始化 `instructions`、`overview.capabilityRoutes` 和 `capabilities` Prompt 共用 `src/mcp/capabilities.ts`；新增工具必须有映射、同名 Prompt 和生产 schema 覆盖。
+- 新增 `app_screenshot` Prompt 与 `screenshot` 指南，现共 59 Prompts / 6 指南。普通 Flutter screen 无需 Key、Scene、Mock 或 Appium；长图先明确滚动区域，系统整屏使用已绑定设备的 `source=device,mode=screen`。桌面/网页等其他截图目标使用对应能力，无目标上下文时先确认对象。
+- 单次截图、只读查询和仅启动任务不扩大为 Mock、Scene 或其他 UI 操作。初始化发送功能说明，完整 Prompt 按需读取；是否遵循由客户端/Agent 决定，协议验证不等于真实模型路由保证。
+- 本轮为源码改进与验证，版本保持 0.0.19；实际 IDE 与 Agent 需加载包含本改动的插件并刷新/重连后生效，未把离线 SDK 结果当作设备业务验收。
 
 ## 0.0.16 API 请求合并与发布授权（2026-11-13）
 

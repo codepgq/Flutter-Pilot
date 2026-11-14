@@ -353,12 +353,13 @@ export const automationMcpTools = {
     schema: z.object({ ...session, maxNodes: z.number().int().min(1).max(1000).optional() }).strict(),
   },
   list_screenshot_targets: {
-    description: '列出 Flutter 可见滚动区域，供长截图明确选择 targetId。',
+    description:
+      '长截图前列出 Flutter 可见滚动区域；多区域须明确 targetId，普通截屏无需调用。只读取、不滚动，无需 Key、Scene、Mock 或 Appium。',
     schema: z.object(session).strict(),
   },
   take_screenshot: {
     description:
-      'source=flutter 获取 App 屏幕/长图；source=device 获取包含键盘和系统 UI 的整屏 PNG，附尺寸和方向。',
+      '用户要求当前 Flutter App 截图/截屏/screenshot/布局对比时优先调用。source=flutter、mode=screen 获取 App PNG，无需 Key、Scene、Mock 或 Appium；长图 mode=long 前 list_screenshot_targets。source=device、mode=screen 包含键盘/系统 UI，需绑定设备；不截桌面或浏览器网页。',
     schema: z
       .object({
         ...session,

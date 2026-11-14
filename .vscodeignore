@@ -26,3 +26,6 @@ docs/exio-cursor-guide/**
 
 # Internal review report stays in the repository.
 docs/code-review-2026-11-13.md
+
+# Local extension workspace state.
+.flutter-pilot/**

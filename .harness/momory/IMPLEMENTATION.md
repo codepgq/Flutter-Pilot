@@ -1,5 +1,28 @@
 # 实现与验证结论
 
+## 0.0.20 发布、Cursor 安装与推送（2026-11-14）
+
+- 根据默认发布约定交付当前 MCP 功能引导与品牌图标改动。远端 main、本地 HEAD / 最新标签和 Cursor 活动安装版均为 0.0.19，补丁递增至 0.0.20；manifest、lockfile、README、CHANGELOG 和 VSIX 输出路径同步。
+- 本轮 763 项 Vitest / 46 文件、89 项 Playwright、TypeScript / Webview 类型、全仓格式、构建和 diff 检查通过。Python 代理 28 项通过、23 项因缺少 `MITMDUMP` 跳过；两个修改后的 smoke 脚本通过 Node 语法检查，未运行真实设备或 IDE GUI。
+- 发布审查发现本仓库自动生成的 `.flutter-pilot/` 会进入 VSIX，已在 Git 与打包忽略中排除，保留本地配置；新图标、能力映射与内嵌 MCP 图标源码纳入交付。
+- `artifacts/flutter-pilot-0.0.20.vsix` 已由 Cursor CLI `--force` 安装成功。47 个分发文件与当前源码 / 构建、安装目录一致；构建与安装桥接离线 SDK stdio 均通过，核验 0.0.20、51 工具、59 Prompts、6 份指南、初始化截图说明和内嵌 PNG 图标。现有固定 bridge 随安装同步并另作离线核验；证据为 `artifacts/v0.0.20-install-report.json`。
+- 发布使用 main 提交与附注标签 v0.0.20，并常规推送；远端引用核验与提交信息记录于 `artifacts/v0.0.20-release-report.json`。活动 Cursor 窗口及已有 MCP 客户端未自动重载 / 重启，用户在调试方便时重载窗口并重连客户端加载新版；真实设备、模型路由与业务验收边界保持。
+
+## 插件与 MCP 图标（2026-11-14）
+
+- 新增 `resources/icons/`：插件使用折纸导航箭头与开放圆环，MCP 使用连接链环，共用深蓝底与蓝青配色。SVG 为可编辑源，PNG 分别为 512 × 512、256 × 256，另有 24px 活动栏及 MCP 单色版；原有图标保留。
+- 插件清单、README、活动栏、工作台头部与 MCP 导航接入新轮廓。MCP 初始化通过 `src/mcp/icon-data.ts` 返回 PNG data URI，桥接独立复制后仍可离线提供；客户端是否展示仍由客户端决定。
+- 类型检查、构建、3 个协议测试文件共 28 项、MCP 工作台 5 项 Playwright、相关格式与 diff 检查通过；`vsce ls --tree` 确认新资源可随包分发。4 个 SVG XML 校验、PNG 尺寸/透明度与源图逐像素一致性通过，检查 16/24/32/64px 和深浅主题单色预览；独立只读审核无待修复项。
+- 预览与验证记录位于 `artifacts/icons/flutter-pilot-icons-preview.png`、`artifacts/icons/mono-preview.png` 和 `artifacts/icons/validation.json`。本轮为矢量绘制与源码接入，版本保持 0.0.19，未提交、发布或安装；未把离线协议测试当作真实客户端展示验收。
+
+## MCP 功能介绍与主动任务引导（2026-11-14）
+
+- 新增类型化 `capabilityRoutes`，将全部 51 个真实工具按截图、App、HTTP、WS、UI、文本/键盘、设备、Scene、业务测试、离线帮助分为 10 类；启动说明、`overview` 和 `capabilities` 共用映射，测试检查完整覆盖与引用合法。
+- 截图优先引导置于初始化说明前部；新增 `app_screenshot` Prompt / `screenshot` 指南，普通 Flutter 截图无需 Key/Scene/Mock/Appium，区分长图目标与设备系统整屏，并保留其他截图目标的正确路由。
+- 审核后修正启动 Prompt 无条件推进 Mock/Scene、所有自动化工具共用交互步骤、Key 诊断误导原生参数，以及 smoke 脚本过期固定工具/模板数。只读、设备管理、截图与交互使用各自步骤；`inspect_key_issues` 明确仅当前挂载 Flutter 树。
+- 最终 763 项 Vitest / 46 文件、5 项 MCP 工作台 Playwright、TypeScript/Webview 类型、构建、格式及 diff 检查通过。日志 `artifacts/mcp-task-routing-{unit,ui,typecheck,build,format}.log`；构建桥接真实 SDK stdio 离线报告为 `artifacts/mcp-task-routing-dist-smoke.json`，核验 51 工具、59 Prompts、6 指南、10 类映射。
+- 协议夹具验证 initialize 无需读取 Prompt 即携带截图说明，选定会话后仅派发一次 screenshot 并返回 MCP 图片；指南/Prompt 查阅不转发运行时调用。没有操作真实设备、业务 App、活动 IDE 或调用实际 Agent 模型；设备 smoke 脚本仅静态检查，版本保持 0.0.19，未安装或发布。
+
 ## 0.0.19 发布与默认发布约定（2026-11-14）
 
 - 用户明确要求本次完成 commit、插件版本更新、新 tag、远端 push 和 Cursor 安装，并将其固定为以后“发布一个新版本”的完整含义。规则保存在 `PROJECT.md` 顶部，根 `AGENTS.md` 提供入口；普通实现任务仍需有发布指令才进入发布流程。

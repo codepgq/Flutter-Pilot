@@ -106,8 +106,8 @@ describe('Test Case MCP contracts', () => {
     expect(() => parseTool('list_tests', { sessionId: 'project', activate: true })).toThrow();
   });
 
-  it('discovers all four test tools through the existing five guides and same-name prompts', () => {
-    expect(guideTopics).toEqual(['overview', 'http', 'ws', 'ui', 'workflow']);
+  it('discovers all four test tools alongside screenshot guides and same-name prompts', () => {
+    expect(guideTopics).toEqual(['overview', 'screenshot', 'http', 'ws', 'ui', 'workflow']);
     const guide = JSON.stringify(getUsageGuide('workflow'));
     for (const name of testToolNames) {
       expect(mcpTools).toHaveProperty(name);

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none">
+  <title>Flutter Pilot MCP — connected links</title>
+  <defs>
+    <linearGradient id="tile" x1="32" y1="8" x2="226" y2="256" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#162C4D"/>
+      <stop offset="1" stop-color="#091323"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(185 65) rotate(135) scale(198)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#167FBC" stop-opacity=".38"/>
+      <stop offset="1" stop-color="#167FBC" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="upper" x1="117" y1="145" x2="177" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#82EAF7"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <linearGradient id="lower" x1="82" y1="182" x2="149" y2="111" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3294F4"/>
+      <stop offset="1" stop-color="#4EE5F4"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="254" height="254" rx="57" fill="url(#tile)"/>
+  <rect x="1" y="1" width="254" height="254" rx="57" fill="url(#glow)"/>
+  <rect x="1.5" y="1.5" width="253" height="253" rx="56.5" stroke="#83DFFF" stroke-opacity=".12"/>
+  <path d="m116 98 22-22a30 30 0 0 1 42 42l-27 27a30 30 0 0 1-42 0" stroke="url(#upper)" stroke-width="19" stroke-linecap="round"/>
+  <path d="m140 158-22 22a30 30 0 0 1-42-42l27-27a30 30 0 0 1 42 0" stroke="url(#lower)" stroke-width="19" stroke-linecap="round"/>
+</svg>
