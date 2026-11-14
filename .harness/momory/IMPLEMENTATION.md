@@ -1,5 +1,34 @@
 # 实现与验证结论
 
+## 0.0.19 发布与默认发布约定（2026-11-14）
+
+- 用户明确要求本次完成 commit、插件版本更新、新 tag、远端 push 和 Cursor 安装，并将其固定为以后“发布一个新版本”的完整含义。规则保存在 `PROJECT.md` 顶部，根 `AGENTS.md` 提供入口；普通实现任务仍需有发布指令才进入发布流程。
+- 远端 `origin/main` 与本地 HEAD 同为 `77a78e4` / v0.0.17，本地已有 0.0.18 安装；本次补丁递增为 0.0.19，包含所有当前待交付 Scene、Key / 键盘、App 启动、离线 Prompts 和等待诊断改动。manifest、lockfile、README、CHANGELOG 与 VSIX 路径同步，MCP 版本复用 manifest。
+- 758 项 Vitest / 46 文件、89 项 Playwright、TypeScript / Webview 类型、全仓格式和构建通过。Python 代理 28 项通过、23 项缺 `MITMDUMP` 跳过；不将跳过计为通过。本轮未重复真实业务 App、Android 或 iOS 真机验收，保留历史设备与冷启动覆盖边界。
+- 本地包为 `artifacts/flutter-pilot-0.0.19.vsix`；Cursor CLI 安装成功，40 个分发文件与源码 / 构建、安装目录一致。构建 / 安装桥接离线 MCP SDK stdio 均通过，51 工具、58 Prompts、5 指南资源与工具内容一致；现有固定 bridge 已原子更新并单独验证 0.0.19。结果见 `artifacts/v0.0.19-install-report.json`。
+- 交付使用 main 与附注标签 v0.0.19 的常规推送，远端引用核验另记 `artifacts/v0.0.19-release-report.json`；不自动重载活动 Cursor 窗口或重启已有客户端。
+
+## 手动 Scene 失败诊断与当前会话恢复（2026-11-14）
+
+- `wait_for_widget` 失败保留执行时的实际选择器、条件、期限、检查次数及最后观测；仅 `NOT_FOUND` 表示不存在，其他定位错误保留原码且立即失败。原生抛错同样附带诊断，取消和未知异常保持原路径；不收集完整控件、候选、边界或实际 / 期望文字。
+- Workflow 按白名单传递诊断并脱敏，嵌套 Test Case 继续按外层秘密参数递归脱敏。工作台显示可读失败步骤、真实 Key、状态和排查提示；旧记录不从现配置推断历史目标。等待耗时包含定位耗时，不能相加。
+- 本次现场失败前资料 / refresh 均未 Mock 且返回 401；App 已停在最近账号登录页，`open_home` 的已登录前提不满足。重载已有规则后显式运行现有登录入口 15/15，原操作再验 4/4，独立确认主页及本轮新请求全部 Mock。漏拦截的具体触发原因仍未确定，不扩展为冷启动全覆盖结论。
+- 全量 754 项 Vitest 已通过；最终原生诊断补修后相关 5 文件 135 项、14 项工作台 UI、类型、格式、构建与 diff 检查通过。工作台使用合成数据验证 390 / 1280px 布局；现场恢复沿用已安装扩展，新诊断源码未安装到活动 IDE。证据与边界见 `docs/validation.md` 的同日记录。
+
+## MCP 能力查阅与 Prompt 路由（2026-11-14）
+
+- `capabilities` 的完整工具清单由注册表动态生成；`scene_action_quick_run` 和 `scene_action_authoring` 提供复用执行与编写归档路径。新增模板元数据与 `overview.promptDiscovery` 共用定义，避免目录描述漂移；51 工具 / 58 Prompts。
+- 同名工具 Prompt 保留生产 schema，新增键盘隐藏确认、按需设备准备及直接 / Scene / Test Case 等待失败诊断指引。只读能力查阅没有任务和会话前置要求；读取 Prompt 不执行工具。
+- 全量 753 项 Vitest、类型、格式及构建通过，SDK stdio 在无 IDE 注册目录验证发现 / 读取。最近的设备业务证据沿用独立验收记录，不因 Prompt 更新重放 App 操作。
+
+## Scene 登录联调与可复用归档（2026-11-14）
+
+- 0.0.17 已将 Workflow 合并进 Scene；旧章节的独立 `workflows.json` 为历史格式，当前配置、工具和测试均以 `scenes.json` / Scene actions / Test Case v2 为准。
+- 0.0.18 修复 Scene 嵌套滚动、手动操作入口、Widget Key 预览、启动配置身份、键盘确认及真实 VM 注入兼容。此前基线 734 项 Vitest、86 项工作台测试通过；iPhone 17 登录 15/15 步约 4.4 秒完成，工作台返回主页 4/4 步完成。
+- Wali 最终 40 条规则、6 个 Dio 接入后，本轮新请求全部 Mock，无真实 401 / refresh 循环；地址 probe 有意 Mock 503 退避，完整地址恢复和资金操作未验收。证据和边界见 [validation](../../docs/validation.md)。
+- 根 `AGENTS.md` 与 [联调流程](../../docs/scene-authoring.md) 固化先复用、最少发现、真实 Key、运行前网络基线及运行后 UI / 请求确认。MCP 初始化、同名 Prompt 和离线指南同步；随包示例归档公共邮箱登录核心和不同入口，动作目录仅索引，不增加配置来源。
+- 业务 Scene 重构前后比较展开步骤、选择器、参数和秘密值传播；Wali 原三个入口保持 15/15/4，40 条 Mock 与激活状态逐项保留。归档后全量 740 项 Vitest、类型、格式、构建通过，直接公共操作与业务入口跨 Scene 调用各 4/4 完成且保持当前 Mock；具体边界见最新验收章节。
+
 ## 0.0.16 API 请求合并与发布验证（2026-11-13）
 
 - 合并 API 请求与请求历史，仅保留 API 请求 Tab；使用 history.items / total，每次调用单独显示，时间倒序，沿用紧凑 API 列表及历史筛选、分页与详情功能。

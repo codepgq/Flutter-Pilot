@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { VmUiController } from '../src/vm/ui';
 
 class UiRpc extends EventEmitter {
@@ -111,15 +111,13 @@ describe('Flutter VM UI controller', () => {
     const ui = new VmUiController(rpc);
     const first = ui.execute('tap', { key });
     const second = ui.execute('tap', { key });
-    await flush();
-    expect(rpc.events).toHaveLength(1);
+    await vi.waitFor(() => expect(rpc.events).toHaveLength(1));
     rpc.complete({ session: 'wrong', operationId: rpc.events[0].operationId });
     await flush();
     expect(rpc.events).toHaveLength(1);
     rpc.complete(rpc.events[0]);
     expect((await first).ok).toBe(true);
-    await flush();
-    expect(rpc.events).toHaveLength(2);
+    await vi.waitFor(() => expect(rpc.events).toHaveLength(2));
     rpc.complete(rpc.events[1]);
     expect((await second).ok).toBe(true);
     await ui.dispose();
@@ -130,7 +128,7 @@ describe('Flutter VM UI controller', () => {
     const ui = new VmUiController(rpc);
     const active = ui.execute('wait_for_widget', { key });
     const queued = ui.execute('tap', { key });
-    await flush();
+    await vi.waitFor(() => expect(rpc.events).toHaveLength(1));
     const old = rpc.events[0];
     ui.invalidate();
     expect((await active).code).toBe('SESSION_INVALIDATED');

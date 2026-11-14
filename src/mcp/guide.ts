@@ -1,6 +1,7 @@
 import { automationGuide, automationInstructions } from '../automation/prompts';
 import savedScenesExample from '../../resources/example.scenes.json';
 import testExample from '../../resources/example.tests.json';
+import { capabilityPromptTemplates } from './capability-prompts';
 /** Agent-facing reference, bundled into MCP so it is available even without an IDE session. */
 export const guideTopics = ['overview', 'http', 'ws', 'ui', 'workflow'] as const;
 export type GuideTopic = (typeof guideTopics)[number];
@@ -9,11 +10,12 @@ export const agentInstructions = `Flutter Pilot 配合 Flutter Debug 开发联�
 当用户任务需要这些能力时，主动使用本 MCP：先调用 get_usage_guide 按需读取 overview/http/ws/ui/workflow，再 list_sessions 选择用户任务对应的项目；不要只给用户手工操作建议。
 get_usage_guide 无需 sessionId，插件未运行也能读取；也可通过 resources/list 发现对应指南资源。
 能力入口：get_network_status 查询规则路径与开关；get_requests/get_request 查询 HTTP 列表与详情；get_ws_connections/get_ws_messages 查询业务 WS 连接与消息；reload_rules 加载规则；list_scenes/activate_scene/deactivate_scene 统一管理场景；set_capture_enabled 控制采集。UI 使用 get_ui_snapshot、find_widget、tap、enter_text、scroll、wait_for_widget、inspect_key_issues；使用 take_screenshot 截取当前屏幕或滚动长图，长图区域用 list_screenshot_targets 查询；应用热更新使用 hot_reload/hot_restart，主动 WS 消息使用 inject_ws_message/send_ws_message。
-每个 tools/list 工具都有同名 MCP Prompt，可通过 prompts/list 与 prompts/get 按需读取操作步骤和参数；另保留 http_mock/websocket_mock/flutter_ui/mock_workflow 场景模板。客户端未加载 Prompts 时仍以本初始化说明、tools/list 描述和 get_usage_guide 发现能力。
+优先从 list_sessions 检查当前项目、设备和已有 App 会话；VM 已连接时复用。App 尚未运行时，从 capabilities.appLaunch.configurations 选择已保存的 Dart Debug 配置，显式 start_app 并检查 completed、network；多设备时传已确认的原生 deviceId，已有会话只有设备一致且可确认时才复用。TIMEOUT 可能仍在编译，先查询会话和 IDE，不自动重复启动。pendingConfiguration 只拦截重复启动；启动失败或会话结束会释放等待，IDE 未产生会话时检查控制台后可重载当前 IDE 窗口恢复。随后准备 Mock，执行已保存的 Scene 操作并验证最终页面。Scene 激活不会自动启动 App。
+每个 tools/list 工具都有同名 MCP Prompt，可通过 prompts/list 与 prompts/get 按需读取操作步骤和参数。先读 capabilities 只读查阅全部已注册工具和能力入口；scene_action_quick_run 指导启动 App 并复用已有操作，scene_action_authoring 指导真实 Key、hide_keyboard、公共 call 与归档；另保留 http_mock/websocket_mock/flutter_ui/mock_workflow 场景模板。所有 Prompts 均可离线读取，capabilities 不要求任务或会话；读取 Prompt 本身不执行操作。客户端未加载 Prompts 时仍以本初始化说明、tools/list 描述和 get_usage_guide 发现能力。
 规则使用 Agent 自身的文件编辑能力维护，通过 get_network_status 获取准确路径，保留已有规则；保存后 reload_rules，再 activate_scene 统一开启所需采集/Mock，再操作 UI、查询记录验证。MCP 本身不提供文件编辑或规则 CRUD。
 需要应用源码变更或重新进入启动状态时，通过 hot_reload 保留状态热重载，或 hot_restart 重置内存并重新执行入口；仅支持当前VM准确对应的Cursor/VS Code Flutter Debug会话。修改Mock文件先reload_rules，热重启不会代替规则加载，也不保证启动首请求已被Mock；重启后检查网络状态并用新记录和UI验证。
-所有运行时工具必须明确 sessionId。UI 优先 Key，也支持显式文字、语义、类型、祖先范围、快照引用和坐标；不静默更换定位策略。先读取快照并确认唯一。设备连接后 auto 使用系统输入，失败不换通道重放。完整移动交互工具：${automationInstructions}。UI 超时先检查结果，不自动重试。
-重复操作先 list_scenes 发现操作概要，再 list_scene_actions(sceneId) 查询共享 targets、操作说明与参数；首次由 Agent 探索并验证一次，在 files.scenes 增量保存稳定选择器和 actions，reload_rules 更新加载快照。run_scene_action 显式启动后台串行运行，get_scene_action_run 查询进度和耗时，cancel_scene_action_run 取消。保存流程只允许稳定选择器，禁止临时 ref、坐标和任意脚本。Scene 同时保存可选 Mock、targets 和命名操作；操作不隐式切换当前 Mock，允许无 Mock 执行。运行期间锁定环境修改；由 Agent 根据网络状态决定执行时机，不强制等待所有域就绪。激活、重连或 IDE 重开不会运行 UI 流程。completed 只表示操作完成，不表示测试通过；结果未确认不自动重跑。
+所有运行时工具必须明确 sessionId。UI 优先真实稳定 Key，也支持显式文字、语义、类型、祖先范围、快照引用和坐标；不静默更换定位策略。首次探索或排查失败时读取快照并确认唯一，已有 Scene 操作无需每步另取快照或 find_widget。设备连接后 auto 使用系统输入，失败不换通道重放。完整移动交互工具：${automationInstructions}。UI 超时先检查结果，不自动重试。
+先 list_scenes 发现操作概要，再 list_scene_actions(sceneId) 查询共享 targets、操作说明与参数；优先复用已保存的登录、填表和导航。steps[].target 是 targets 的别名，执行器自动解析真实 Key 并匹配当前已挂载控件，无需模型探索；wait_for_widget 等待挂载和状态，每步重新定位而非缓存 Widget 对象。只有缺少可用操作或定义失效时才探索并验证，增量保存到 files.scenes 后 reload_rules。输入后按钮可能被键盘遮挡时，使用 hide_keyboard 确认稳定收起再继续。公共操作归档为同一 scenes.json 的纯操作 Scene，业务入口用 call 和显式 inputs 复用；说明文档仅列引用、前提和验证边界，不维护第二份动作正文。run_scene_action 显式启动，get_scene_action_run 查询进度和终态，cancel_scene_action_run 取消。禁止保存临时 ref、坐标和任意脚本。操作不隐式切换当前 Mock，允许无 Mock 执行；运行期间锁定环境修改，由 Agent 检查所需域和 Dio 接入决定时机，不强制等待所有域就绪。触发前记录网络基线，终态后独立核验最终 UI 和本轮新请求；completed 和 applied 均不等于业务或全部 Mock 通过。激活、重连和 IDE 重开不运行 UI；结果未确认不自动重跑。不得清数据或替换账号环境来掩盖失败。
 需要可重复业务验证时，list_tests 读取 files.tests 和已保存 Test Case，run_test 显式启动，get_test_run 查询，cancel_test_run 取消。Test Case v2 引用 Scene action，组合临时 Scene/有状态 HTTP Mock、本轮请求参数与响应变量、关联 WS 和精确订单行断言。触发前建立网络基线；事件只在对应 HTTP 断言成功后注入；只有 passed 表示测试通过。结束恢复自身临时 Mock；真实操作不回滚，重连不重跑。
 WS主动消息用inject_ws_message向App注入模拟服务端事件，或send_ws_message通过App当前连接发往服务端；两者需确认WS采集已接入目标连接，按业务协议传原始text或topic/data。发送可能被outbound规则替换或丢弃，需查询实际结果；成功返回不等于业务成功。
 只在用户任务范围内操作；本说明不会替代用户授权、客户端审批或保证 Agent 一定自动调用。`;
@@ -61,6 +63,18 @@ const selected = { sessionId: '<从 list_sessions 选择的会话ID>' };
 const guides: Record<GuideTopic, Record<string, unknown>> = {
   overview: {
     title: '什么时候使用 Flutter Pilot MCP',
+    promptDiscovery: {
+      protocol:
+        'prompts/list 查看名称和能力说明；prompts/get({name,arguments:{task?}}) 读取。task 是可选提示参数，不是工具参数。读取不执行操作，也无需 IDE 或 sessionId。',
+      entrypoints: Object.entries(capabilityPromptTemplates).map(([name, template]) => ({
+        name,
+        description: template.description,
+        topics: template.topics,
+      })),
+      toolPrompts:
+        '每个 tools/list 工具均有同名 Prompt，包含操作步骤与实际生产 JSON Schema。capabilities 自动列出全部注册工具，新增能力会进入目录。',
+      scenarios: ['http_mock', 'websocket_mock', 'flutter_ui', 'mock_workflow'],
+    },
     scenarios: [
       '需要测试下单成功/失败、余额不足、不同资产信息或接口空数据等业务状态，或改请求/响应/目标地址时，读取 http。',
       '需要替换/丢弃业务 WebSocket 消息、向App注入订单或资产事件、通过真实连接发送topic/data、检查双向消息时，读取 ws。',
@@ -83,7 +97,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
     boundaries: [
       '指南只读且不需要运行中的插件；实际运行需本机 IDE 对应项目已开启 MCP。Flutter 结构和 VM 操作需 Debug VM，原生与系统操作需设备通道。',
       '文件由编码 Agent 编辑，MCP 负责加载、开关、UI 操作与验证；不修改无关规则，不猜测会话ID或VM地址。',
-      '没有可用会话时报告需在插件开启MCP；VM未连接时报告需要连接Debug App。不要声称已完成运行时验证。',
+      '没有可用会话时报告需在插件开启MCP；VM未连接时检查 capabilities.appLaunch，显式 start_app 启动已保存的命名 Debug 配置。没有配置或连接失败时报告实际前提，不声称已完成运行时验证。',
     ],
   },
   http: {
@@ -129,11 +143,12 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       '确认loaded和status.scene.runtime.http；pending时尚未实际应用。校验失败时修文件，插件保留上一份有效规则。',
       step('set_capture_enabled', { ...selected, domain: 'http', enabled: true }),
       step('activate_scene', { ...selected, sceneId: '<从 list_scenes 选择的场景ID>' }),
-      'get_network_status确认Dio已接入；按UI Key触发请求，不重放未知业务请求。',
+      'get_network_status检查 attachedDioInstances、coverageMessage 和 warnings；runtimeApplied 只证明已接入现有客户端，不保证惰性创建客户端的首请求。需要无人介入的 Mock 流程时，在 App 启动阶段创建流程所需 Dio，再 reload_rules 同步；按 UI Key 触发请求并验证本轮记录，不重放未知业务请求。',
       '需要从应用入口重新构造场景时，按workflow.lifecycle调用hot_restart；它不会读取规则文件。检查返回的network和本次新请求，启动首请求可能早于重新注入，必要时待接入后按Key再次触发请求。',
       step('get_requests', { ...selected, path: '/v1/orders', limit: 10 }),
       step('get_request', { ...selected, id: '<新产生记录ID>' }),
       '核对新记录的mocked、requestRuleId/responseRuleId、response.status/body和页面结果。避免把历史旧记录当本次结果。',
+      '登录还会触发目录、资产账号、地址和后台初始化读取；检查这些新记录，漏 Mock 的无效测试 token 可能引发真实 401、刷新循环和 429。补齐已确认的读取契约；有意模拟 503 退避须记录范围，不能算作该业务成功。',
     ],
     limitations:
       'Debug/JIT、兼容Dio实例；新实例扫描前首请求可能未拦截，上传/流/二进制正文有编辑限制。规则需启用且所属场景激活；实际应用仍需运行时接入。',
@@ -202,11 +217,51 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
   },
   ui: {
     ...automationGuide(),
+    waitDiagnostics: {
+      tools: ['wait_for_widget', 'get_scene_action_run', 'get_test_run'],
+      locations:
+        '直接等待失败读取 diagnostics；Scene 操作读取 failure.diagnostics 或 steps[].failure.diagnostics；Test Case 的前置和主操作读取 steps[].failure.diagnostics。',
+      fields: ['selector', 'condition', 'timeoutMs', 'attempts', 'lastObservation'],
+      interpretation:
+        'lastObservation.present:false 表示当前已挂载界面未找到目标，先检查起始页、懒加载与 Key；present:true 时核对 visible/enabled/actionable/textMatches。等待 absent 时目标仍存在也会超时；歧义等定位错误会直接返回，不统一重试。',
+      next: '优先按失败步骤与最后观测查必要的页面、键盘或源码；不要盲目加长等待，不绕过禁用或遮挡，不自动重放登录、提交或整个操作。',
+    },
     reusableActions:
-      '首次探索定位目标后，使用稳定选择器编写 Scene 操作；后续 run_scene_action 由插件完成每步定位、动作和等待，不需要 Agent 额外 find_widget 或整页快照。保存临时 ref、坐标或跨界面缓存控件对象均不支持。格式与执行见 workflow 指南。',
+      '先 list_scenes / list_scene_actions 复用已有操作。仅缺少操作、定位失效或结果异常时探索当前界面，再用真实稳定 Key 编写 Scene 操作；后续 run_scene_action 由插件完成每步定位、动作和等待，无需 Agent 每步 find_widget 或整页快照。保存临时 ref、坐标或跨界面缓存控件对象均不支持。格式与执行见 workflow 指南。',
   },
   workflow: {
     title: '按需主动调用：规则文件 → UI 操作 → 网络与页面验证',
+    quickRun: {
+      title: '已有场景的最短执行路径',
+      discover: [
+        step('list_sessions'),
+        '确认项目与设备，复用已连接的 App；未运行时按 lifecycle.launch 启动已保存配置。TIMEOUT 先查询会话，不重复启动。',
+        step('list_scenes', selected),
+        step('list_scene_actions', { ...selected, sceneId: '<操作来源 Scene ID>' }),
+        '按操作说明确认起始页、账号和参数；已有操作不逐步重新探索。缺少定义或定位失效时才进入 reusable.authoring。',
+      ],
+      prepare: [
+        step('get_network_status', selected),
+        '需要修改定义时仅增量编辑 files.scenes，然后 reload_rules；需要 Mock 时激活目标业务 Scene。确认本次所需域及 HTTP attachedDioInstances，不强制等待无关 WS；纯操作可无 Mock。',
+        step('get_requests', { ...selected, limit: 10 }),
+        '保存请求 ID 或时间基线；涉及 WS 时另存对应连接和消息基线。公共操作的来源与当前 Mock 分别记录。',
+      ],
+      execute: [
+        step('run_scene_action', {
+          ...selected,
+          sceneId: '<操作来源 Scene ID>',
+          actionId: '<已确认的操作 ID>',
+          inputs: {},
+          backend: 'flutter',
+        }),
+        step('get_scene_action_run', { ...selected, runId: '<run_scene_action返回的runId>' }),
+        '保存 runId 并查询到终态；运行中不插入点击或修改环境。需要停止时 cancel_scene_action_run，再确认终态与资源释放。',
+      ],
+      verify: [
+        step('get_requests', { ...selected, limit: 20 }),
+        '按基线筛选新记录并按需 get_request；用 wait_for_widget 或 find_widget 独立确认最终页面和业务结果。检查初始化漏 Mock、401/刷新循环和有意退避，报告未覆盖范围。',
+      ],
+    },
     reusable: {
       title: 'Agent 探索一次，保存 Scene 操作，插件确定性执行',
       files: { scenes: '.flutter-pilot/scenes.json' },
@@ -217,9 +272,9 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
         inputs:
           '输入定义为 {参数名:{required?:boolean,default?:string,secret?:boolean}}；运行 inputs 为字符串字典。模板仅支持 ${inputs.name}，可用于 text、选择器字符串及子流程参数，不执行表达式。',
         targets:
-          '目标名称到稳定组合 Selector 的字典，如 {priceInput:{key:"order.price"},confirm:{key:"confirm",ancestor:{key:"dialog"}}}；每个操作只绑定其使用的 targets，互不要求对方的输入。原生目标可显式 source=device。禁用 ref 与 point。示例 Key 必须替换成实际验证过的选择器。',
+          '目标名称到稳定组合 Selector 的字典，如 {priceInput:{source:"flutter",key:"order.price"},confirm:{key:"confirm",ancestor:{key:"dialog"}}}；steps[].target 引用字典名称，编译后自动按真实 Key 精确匹配当前挂载控件，无需额外 find_widget。每步重新定位，重复、禁用或遮挡不绕过。每个操作只绑定实际使用的 targets，互不要求对方输入。原生目标可显式 source=device。禁用 ref 与 point。示例 Key 必须替换为源码中已验证的真实 Key。',
         steps:
-          '每步必须有唯一 id 和 type。type 仅允许 tap、enter_text、wait_for_widget、scroll、call；目标字段 target 引用 targets 中的名称。',
+          '每步必须有唯一 id 和 type。type 仅允许 tap、enter_text、hide_keyboard、wait_for_widget、scroll、call；需要控件的步骤通过 target 引用 targets 中的名称。hide_keyboard 不需要 target，沿用运行输入通道，用于输入后显式收起键盘再等待并点击按钮。',
         tap: '{id,type:"tap",target,timeoutMs?}；点击一次，不自动重试。',
         enter_text:
           '{id,type:"enter_text",target,text,timeoutMs?}；text 可为 ${inputs.price}，替换输入内容。',
@@ -234,19 +289,20 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       concepts: {
         scene: '统一保存可选 HTTP/WS Mock、共享 targets 和多个命名 actions。激活只应用 Mock，绝不执行操作。',
         action:
-          '参数化的输入、点击、等待、滚动和子操作。显式启动，失败停止；来源 Scene 与当前 Mock 可以不同，运行记录保存实际 mockSceneId。',
+          '参数化的输入、收起键盘、点击、等待、滚动和子操作。显式启动，失败停止；来源 Scene 与当前 Mock 可以不同，运行记录保存实际 mockSceneId。',
         testCase:
           '独立组合 Mock Scene、Scene action、网络关联和业务断言；操作的 completed 只说明操作完成，不是测试 passed。使用 run_test 与本轮关联断言判断业务结果。',
       },
       authoring: [
         '先 get_network_status 获取 files.scenes；list_scenes 读取概要，list_scene_actions(sceneId) 查询操作和参数。用 Agent 文件工具增量维护 scenes.json。停止读取或创建 workflows.json，不迁移或删除用户旧文件。',
-        '首次在目标 App 按实际页面探索并验证操作，提取稳定 Key 或明确文字/语义及祖先范围，命名 targets；不要直接使用示例中未验证的 Key。',
+        '已有操作满足需求时直接复用；仅缺少操作或定义失效时在目标 App 探索并验证。优先真实稳定 Widget Key，缺 Key 时在任务授权范围补源码并 hot_reload 复验；无源码可改时再显式选择稳定语义或祖先，不使用未验证的示例 Key。',
         '按 fields 和 exampleDocument 保存 version:1、scenes 数组；共享 targets 在 Scene 上，actions 含 id/name、可选 description/inputs 和 steps。输入值均为字符串，price/quantity 不转换为浮点数；可复用子流程。示例名称和 Key 仅为格式演示，需先确认实际控件。',
+        '把跨业务状态通用的登录、填表和导航保存为同一 scenes.json 的纯操作 Scene；业务入口用 call 和显式 inputs 复用，避免复制步骤。description 写明起始页面、账号要求和预期终点，秘密输入标记 secret。输入后需点按钮时，按实际遮挡加入 hide_keyboard；它确认稳定收起后继续。归档说明只索引 sceneId/actionId、参数和验证范围，不增加第二份动作配置。',
         '保存后 reload_rules 校验并更新已加载 Scene 快照。run_scene_action 使用该快照完整预检引用、输入及展开步骤；文件中途编辑不会改变本轮。激活、reload、重连和 IDE 恢复都不执行操作。',
       ],
       execution: [
         step('list_scene_actions', { ...selected, sceneId: 'common_operations' }),
-        '选择流程并核对起始页面与登录账号；需要 Mock 时先独立准备 Scene 并确认运行时接入。运行器不会自动登录或切换场景。',
+        '选择流程并核对起始页面与登录账号，记录触发前的网络基线；需要 Mock 时独立准备业务 Scene，检查相关域及所需 Dio 接入，不等待无关域。运行器只执行所选步骤，不隐式切换场景或添加登录。',
         step('run_scene_action', {
           ...selected,
           sceneId: 'common_operations',
@@ -255,7 +311,8 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
         }),
         '保存返回的 runId；后台执行不会因该 MCP 调用结束而取消。运行中独占 UI 操作并锁定环境修改，使用查询和取消工具管理，不能插入点击或重启。',
         step('get_scene_action_run', { ...selected, runId: '<run_scene_action返回的runId>' }),
-        '查询到终态后报告实际步骤与耗时。completed 不替代订单参数、HTTP/WS 命中及当前订单行的业务断言。',
+        '查询到终态后独立检查最终 UI 和基线后的新请求，报告实际步骤、耗时及当前 Mock。completed 不替代订单参数、HTTP/WS 命中及业务断言；检查登录后初始化请求，按需补齐漏 Mock，明确有意 503 退避及启动首请求窗口。',
+        '等待失败时读取 failure.diagnostics：selector 是本轮实际目标，condition/timeoutMs 是等待要求，attempts/lastObservation 是观测结果。NOT_FOUND 表示未找到，FOUND 表示已找到但状态未满足。先核对当前页面和登录前提；401 时检查实际 Mock 命中，不自动重跑。旧记录无诊断时不根据后来修改的配置补造运行证据。',
       ],
       cancellation: {
         call: step('cancel_scene_action_run', { ...selected, runId: '<run_scene_action返回的runId>' }),
@@ -318,16 +375,23 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       '按用户项目选择会话；多个候选无法确定时询问用户，不选择无关项目。',
       step('get_network_status', selected),
       step('list_scenes', selected),
-      '用Agent文件工具读取返回的rules文件，增量编辑目标规则；按http/ws指南核对格式，每条规则enabled控制其参与，场景统一控制运行时Mock。',
+      step('list_scene_actions', { ...selected, sceneId: '<操作来源 Scene ID>' }),
+      '优先按 quickRun 复用已保存操作；只在缺少操作、选择器失效或结果异常时读取 UI 快照探索。只有需要修改配置时才用 Agent 文件工具增量编辑 files.scenes，保留其他规则；格式按 http/ws 指南核对。',
       step('reload_rules', selected),
       '检查loaded和status.scene.runtime，修复错误；使用activate_scene激活目标场景。',
       '场景需要重新执行应用入口时，按lifecycle调用hot_restart；仅修改源码且需保留页面状态时选择hot_reload。两者都通过MCP调用，无需另开终端。',
-      step('get_ui_snapshot', { ...selected, maxNodes: 200 }),
-      '从快照选择真实 Key 或明确的文字、语义、类型和祖先条件，find_widget 确认唯一后操作及等待。',
-      '查询新产生的HTTP记录或WS消息详情，并重新取UI快照/查找目标验证结果；单纯loaded或runtimeApplied不等于已命中规则。',
+      '执行前保存请求/消息基线；已有操作显式 run_scene_action 后查询终态，无需每步 find_widget 或整页快照。首次探索时从当前快照选择真实 Key 或显式选择器，确认唯一后操作及等待。',
+      '独立查询最终目标及基线后新 HTTP/WS 详情，核对规则 ID 和响应，检查后台初始化漏 Mock 或刷新循环；单纯 loaded、runtimeApplied 或 completed 不等于业务通过。',
       '需要稳定业务 Key 时可修改源码并复验；无 Key 页面可使用显式选择器。完成后报告改动、命中证据、当前开关和未验证项；按用户要求恢复临时开关或规则。',
     ],
     lifecycle: {
+      launch: step('start_app', {
+        ...selected,
+        configurationName: '<capabilities.appLaunch.configurations 中的名称>',
+        timeoutMs: 30000,
+      }),
+      launchMeaning:
+        'App 未运行时，显式选择当前工作区命名且唯一的 Dart Debug launch 配置，可选 deviceId 指定原生设备。工具仅覆盖该配置的设备字段，调用 IDE 启动并等待匹配会话的 VM，不接受任意命令或参数，不清数据、不执行 UI；已有同名会话仅在请求设备可确认且一致时复用。超时返回未确认时可能仍在编译，先查询 list_sessions/IDE，勿重复启动。pendingConfiguration 只拦截重复启动；若 IDE 未产生会话，检查控制台后重载当前 IDE 窗口恢复。Mock 激活后，再显式 run_scene_action 完成登录和导航。',
       scope:
         'hot_reload/hot_restart只控制当前项目已连接VM准确对应的Cursor/VS Code Flutter Debug会话；无法绑定、会话结束或能力不支持时报告诊断，不操作其他会话。仅手动VM地址且无法关联IDE会话时不可用。',
       parameters:

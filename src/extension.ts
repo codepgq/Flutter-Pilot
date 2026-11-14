@@ -28,6 +28,7 @@ import { McpSessionServer } from './mcp/server';
 import { AgentAdapterManager, detectNodeRuntime } from './mcp/adapters';
 import { McpNetworkController } from './mcp/network';
 import { McpLifecycleController } from './mcp/lifecycle';
+import { appLaunchConfiguration, McpAppLaunchController } from './mcp/app-launch';
 import type { McpAgentId, McpScope, McpWorkbenchState } from './mcp/model';
 import { homedir } from 'node:os';
 import { copyFile, chmod } from 'node:fs/promises';
@@ -276,6 +277,7 @@ class Workbench {
   private readonly testCleanup = new Map<string, Promise<void>>();
   private readonly mcpNetwork: McpNetworkController;
   private readonly mcpLifecycle: McpLifecycleController;
+  private readonly mcpAppLaunch: McpAppLaunchController;
   private mcpServer?: McpSessionServer;
   private readonly mcpSessionId = randomUUID();
   private readonly bridgeRoot =
@@ -556,6 +558,15 @@ class Workbench {
           runtimeApplied: this.scenes.runtime.http.status === 'applied',
           rules: this.rules.length,
           syncError: this.ruleSyncError,
+          ...(this.mode === 'vm'
+            ? {
+                attachedDioInstances: this.vm.state.instances,
+                coverage: 'existing_dio_instances',
+                coverageMessage:
+                  '仅覆盖已接入的 Dio 实例。惰性创建客户端的首请求可能早于扫描；自动操作前应在 App 启动阶段创建所需客户端，再 reload_rules 同步，并以本轮请求验证命中。',
+                warnings: this.vm.state.warnings,
+              }
+            : {}),
         },
         ws: {
           captureEnabled: this.vm.websocket.state.captureEnabled,
@@ -623,6 +634,38 @@ class Workbench {
         this.mcpState.ui = { supported: false, reason: '热更新后请重新探测并读取界面' };
       },
       refresh: (signal) => this.vm.refreshAfterLifecycle(signal),
+      networkStatus: () => this.mcpNetwork.status(),
+    });
+    this.mcpAppLaunch = new McpAppLaunchController({
+      workspace: this.folder.uri.fsPath,
+      configurations: () =>
+        vscode.workspace.getConfiguration('launch', this.folder.uri).get('configurations', []),
+      state: () => ({
+        mode: this.mode,
+        connected: this.vm.state.status === 'connected',
+        connectedSessionId: this.vmAuto.snapshot.connectedSessionId,
+        sessions: vmDiscovery?.debugSessions(this.folder.uri.toString()) ?? [],
+        candidates: this.vmAuto.snapshot.candidates,
+      }),
+      assertMutable: () => this.ensureEnvironmentMutable(),
+      lifecycleBusy: () => this.mcpLifecycle.status().busy,
+      changed: () => this.push(),
+      start: async (name, deviceId) => {
+        const configuration = appLaunchConfiguration(
+          vscode.workspace.getConfiguration('launch', this.folder.uri).get('configurations', []),
+          this.folder.uri.fsPath,
+          name,
+          deviceId,
+        );
+        return vscode.debug.startDebugging(this.folder, configuration as vscode.DebugConfiguration);
+      },
+      subscribeSessions: (listener) =>
+        vmDiscovery?.subscribeDebugSessions((event) => {
+          if (event.workspaceId === this.folder.uri.toString()) listener(event);
+        }) ?? { dispose() {} },
+      connect: async (id) => {
+        if (this.vm.state.status === 'disconnected') await this.vmAuto.select(id);
+      },
       networkStatus: () => this.mcpNetwork.status(),
     });
     this.vmAuto.on('change', () => this.push());
@@ -869,7 +912,7 @@ class Workbench {
         notice: this.projectNotice,
       },
       logs: this.logs,
-      busy: this.busy > 0,
+      busy: this.busy > 0 || this.mcpAppLaunch.status().busy,
       lastError: this.lastError,
       setup: this.inspection,
       ruleSyncError: this.ruleSyncError,
@@ -1141,9 +1184,14 @@ class Workbench {
     return `${this.mcpGeneration}:${this.vmEpoch}:${this.executionEpoch}`;
   }
   private ensureEnvironmentMutable() {
+    this.ensureAppLaunchIdle();
     if (this.workflowOwner || this.workflows.snapshot.activeRunId || this.tests.snapshot.activeRunId)
       throw new McpToolError('WORKFLOW_BUSY', '操作或测试运行期间不能修改网络环境，请先取消或等待完成。');
     this.ensureTestCleanupComplete();
+  }
+  private ensureAppLaunchIdle() {
+    if (this.mcpAppLaunch?.status().busy)
+      throw new McpToolError('BUSY', 'App 启动结果尚未确认，请先检查调试会话与 list_sessions。');
   }
   private ensureTestCleanupComplete() {
     if (this.testEnvironments.size && !this.tests.snapshot.activeRunId)
@@ -1311,6 +1359,7 @@ class Workbench {
         return result;
       }
       if (tool === 'run_test') {
+        this.ensureAppLaunchIdle();
         if (!this.tests.snapshot.activeRunId)
           for (const id of this.testEnvironments.keys()) await this.cleanupTest(id);
         this.testLaunch = { key: this.executionKey(), signal };
@@ -1345,6 +1394,7 @@ class Workbench {
     try {
       if (tool === 'list_scene_actions') return this.workflows.list(args.sceneId as string);
       if (tool === 'run_scene_action') {
+        this.ensureAppLaunchIdle();
         this.workflowError = undefined;
         this.workflowLaunch = { key: this.executionKey(), signal };
         let result;
@@ -1682,6 +1732,7 @@ class Workbench {
               automation: this.automation.snapshot,
               network: true,
               lifecycle: this.mcpLifecycle.status(),
+              appLaunch: this.mcpAppLaunch.status(),
               sceneActions: { supported: true, file: this.store.file, running: !!this.workflowOwner },
               tests: {
                 supported: true,
@@ -1711,6 +1762,7 @@ class Workbench {
               )
                 return { ok: false, code: 'SESSION_INVALIDATED', message: 'MCP 会话已关闭，操作未执行。' };
               if (tool === 'hot_reload' || tool === 'hot_restart') {
+                this.ensureAppLaunchIdle();
                 this.ensureTestCleanupComplete();
                 if (this.workflowOwner)
                   return {
@@ -1729,10 +1781,24 @@ class Workbench {
                   this.push();
                 }
               }
+              if (tool === 'start_app') {
+                try {
+                  return await this.mcpAppLaunch.execute(
+                    args.configurationName as string,
+                    args.timeoutMs as number | undefined,
+                    context.signal,
+                    () => !this.disposed && epoch === this.mcpGeneration && this.mcpState.enabled,
+                    args.deviceId as string | undefined,
+                  );
+                } finally {
+                  this.push();
+                }
+              }
               if (Object.hasOwn(sceneActionMcpTools, tool))
                 return this.executeSceneActionTool(tool, args, context.signal);
               if (Object.hasOwn(testMcpTools, tool)) return this.executeTestTool(tool, args, context.signal);
               if (automationTools.has(tool)) {
+                this.ensureAppLaunchIdle();
                 this.ensureTestCleanupComplete();
                 return this.automation.execute(tool, args, context.signal);
               }
@@ -1769,6 +1835,17 @@ class Workbench {
                   message: '测试环境尚未释放，请先取消、等待完成或恢复测试环境。',
                 };
               try {
+                if (
+                  [
+                    'reload_rules',
+                    'activate_scene',
+                    'deactivate_scene',
+                    'set_capture_enabled',
+                    'inject_ws_message',
+                    'send_ws_message',
+                  ].includes(tool)
+                )
+                  this.ensureAppLaunchIdle();
                 return await this.mcpNetwork.execute(tool, args, context.signal);
               } finally {
                 this.push();
@@ -1881,6 +1958,13 @@ class Workbench {
       ['vm.disconnect', 'vm.connect', 'vm.discovery.connect', 'connection.mode', 'mcp.probe'].includes(action)
     )
       throw new Error('流程正在运行，请先取消流程再更改连接或探测 UI。');
+    if (
+      this.mcpAppLaunch.status().busy &&
+      /^(scenes\.(?!select|open)|rules\.(?!open|export)|ws\.|vm\.|connection\.|automation\.|project.reload|install$|start$|stop$|proxy.stop|setLan$|selectHost$|connectAndroid$|setup\.)/.test(
+        action,
+      )
+    )
+      this.ensureAppLaunchIdle();
     if (
       this.workflows.snapshot.activeRunId &&
       /^(scenes\.(?!select|open)|rules\.(?!open|export)|ws\.(rules\.(?!open)|capture|mock|push|send|clear|rescan)|vm\.(capture|rescan)|project.reload|install$|start$|stop$|proxy.stop|setLan$|selectHost$|connectAndroid$|setup\.(apply|revert))/.test(
@@ -2502,6 +2586,7 @@ class Workbench {
     if (this.disposed) return;
     this.disposed = true;
     ++this.mcpGeneration;
+    this.mcpAppLaunch.dispose();
     await this.workflows.dispose();
     await this.tests.dispose();
     this.testObserver.close();

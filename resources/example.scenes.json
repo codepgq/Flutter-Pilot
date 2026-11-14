@@ -247,6 +247,299 @@
           "description": "仅执行操作，不切换当前 Mock；执行前确认起始页面。"
         }
       ]
+    },
+    {
+      "id": "email_operations",
+      "name": "邮箱登录公共操作（示例 Key 需核验）",
+      "httpRules": [],
+      "wsRules": [],
+      "targets": {
+        "emailInput": {
+          "source": "flutter",
+          "key": "emailEntry.input"
+        },
+        "sendCode": {
+          "source": "flutter",
+          "key": "emailEntry.continue"
+        },
+        "codePage": {
+          "source": "flutter",
+          "key": "emailVerification.page.root"
+        },
+        "codeInput": {
+          "source": "flutter",
+          "key": "verificationCode.input"
+        },
+        "appShell": {
+          "source": "flutter",
+          "key": "app.shell.root"
+        },
+        "homeTab": {
+          "source": "flutter",
+          "key": "app.bottomNavigation.home"
+        },
+        "homePage": {
+          "source": "flutter",
+          "key": "home.page.root"
+        }
+      },
+      "actions": [
+        {
+          "id": "complete_email_login_to_home",
+          "name": "填写邮箱验证码并进入主页",
+          "description": "起点为邮箱输入页；传入本轮允许使用的邮箱和验证码。按真实 Key 输入、确认键盘收起、请求验证码并等待主页。须另行准备认证和主页初始化 Mock；本操作不切换当前 Mock。示例 Key 来自已验证模式，接入其他 App 前核验源码。",
+          "inputs": {
+            "email": {
+              "required": true
+            },
+            "code": {
+              "required": true,
+              "secret": true
+            }
+          },
+          "steps": [
+            {
+              "id": "wait_email_input",
+              "type": "wait_for_widget",
+              "target": "emailInput",
+              "timeoutMs": 30000,
+              "state": "actionable"
+            },
+            {
+              "id": "fill_email",
+              "type": "enter_text",
+              "target": "emailInput",
+              "text": "${inputs.email}",
+              "timeoutMs": 10000
+            },
+            {
+              "id": "dismiss_email_keyboard",
+              "type": "hide_keyboard",
+              "timeoutMs": 5000
+            },
+            {
+              "id": "ready_sendCode",
+              "type": "wait_for_widget",
+              "target": "sendCode",
+              "timeoutMs": 30000,
+              "state": "actionable"
+            },
+            {
+              "id": "request_code",
+              "type": "tap",
+              "target": "sendCode"
+            },
+            {
+              "id": "wait_verification_page",
+              "type": "wait_for_widget",
+              "target": "codePage",
+              "timeoutMs": 30000,
+              "state": "visible"
+            },
+            {
+              "id": "wait_code_input",
+              "type": "wait_for_widget",
+              "target": "codeInput",
+              "timeoutMs": 30000,
+              "state": "present"
+            },
+            {
+              "id": "fill_code",
+              "type": "enter_text",
+              "target": "codeInput",
+              "text": "${inputs.code}",
+              "timeoutMs": 10000
+            },
+            {
+              "id": "wait_app_shell",
+              "type": "wait_for_widget",
+              "target": "appShell",
+              "timeoutMs": 30000,
+              "state": "visible"
+            },
+            {
+              "id": "wait_home",
+              "type": "wait_for_widget",
+              "target": "homePage",
+              "timeoutMs": 30000,
+              "state": "visible"
+            }
+          ]
+        },
+        {
+          "id": "open_home",
+          "name": "从已登录 App 返回主页",
+          "description": "起点为已登录的 App 主界面，底栏可用；按 Home Key 返回主页。不会替代登录，不切换当前 Mock。示例 Key 在目标 App 中核验后使用。",
+          "steps": [
+            {
+              "id": "wait_app_shell",
+              "type": "wait_for_widget",
+              "target": "appShell",
+              "timeoutMs": 30000,
+              "state": "visible"
+            },
+            {
+              "id": "ready_homeTab",
+              "type": "wait_for_widget",
+              "target": "homeTab",
+              "timeoutMs": 30000,
+              "state": "actionable"
+            },
+            {
+              "id": "open_home",
+              "type": "tap",
+              "target": "homeTab"
+            },
+            {
+              "id": "wait_home",
+              "type": "wait_for_widget",
+              "target": "homePage",
+              "timeoutMs": 30000,
+              "state": "visible"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "email_entrypoints",
+      "name": "邮箱登录入口（示例 Key 需核验）",
+      "httpRules": [],
+      "wsRules": [],
+      "targets": {
+        "loginPage": {
+          "source": "flutter",
+          "key": "registrationLogin.page.root"
+        },
+        "otherOptions": {
+          "source": "flutter",
+          "key": "registrationLogin.otherOptions"
+        },
+        "switchAccount": {
+          "source": "flutter",
+          "key": "registrationLogin.switchAccount"
+        },
+        "emailMethod": {
+          "source": "flutter",
+          "key": "loginMethod.email"
+        }
+      },
+      "actions": [
+        {
+          "id": "email_login_to_home",
+          "name": "首次入口：邮箱登录并进入主页",
+          "description": "起点为显示 Other options 的首次登录页。仅选择符合当前页的入口；未知起点先检查界面，不失败后盲试另一个入口。邮箱、验证码显式传入，公共登录步骤跨 Scene 复用，不切换当前 Mock。示例 Key 需在目标 App 核验。",
+          "inputs": {
+            "email": {
+              "required": true
+            },
+            "code": {
+              "required": true,
+              "secret": true
+            }
+          },
+          "steps": [
+            {
+              "id": "wait_login_page",
+              "type": "wait_for_widget",
+              "target": "loginPage",
+              "timeoutMs": 30000,
+              "state": "visible"
+            },
+            {
+              "id": "ready_otherOptions",
+              "type": "wait_for_widget",
+              "target": "otherOptions",
+              "timeoutMs": 30000,
+              "state": "actionable"
+            },
+            {
+              "id": "expand_other_options",
+              "type": "tap",
+              "target": "otherOptions"
+            },
+            {
+              "id": "ready_emailMethod",
+              "type": "wait_for_widget",
+              "target": "emailMethod",
+              "timeoutMs": 30000,
+              "state": "actionable"
+            },
+            {
+              "id": "choose_email",
+              "type": "tap",
+              "target": "emailMethod"
+            },
+            {
+              "id": "complete_email_login_to_home",
+              "type": "call",
+              "sceneId": "email_operations",
+              "actionId": "complete_email_login_to_home",
+              "inputs": {
+                "email": "${inputs.email}",
+                "code": "${inputs.code}"
+              }
+            }
+          ]
+        },
+        {
+          "id": "switch_account_login_to_home",
+          "name": "最近账号入口：切换账号后邮箱登录并进入主页",
+          "description": "起点为显示 Switch account 的最近账号登录页。仅选择符合当前页的入口；未知起点先检查界面，不失败后盲试另一个入口。邮箱、验证码显式传入，公共登录步骤跨 Scene 复用，不切换当前 Mock。示例 Key 需在目标 App 核验。",
+          "inputs": {
+            "email": {
+              "required": true
+            },
+            "code": {
+              "required": true,
+              "secret": true
+            }
+          },
+          "steps": [
+            {
+              "id": "wait_login_page",
+              "type": "wait_for_widget",
+              "target": "loginPage",
+              "timeoutMs": 30000,
+              "state": "visible"
+            },
+            {
+              "id": "ready_switchAccount",
+              "type": "wait_for_widget",
+              "target": "switchAccount",
+              "timeoutMs": 30000,
+              "state": "actionable"
+            },
+            {
+              "id": "switch_account",
+              "type": "tap",
+              "target": "switchAccount"
+            },
+            {
+              "id": "ready_emailMethod",
+              "type": "wait_for_widget",
+              "target": "emailMethod",
+              "timeoutMs": 30000,
+              "state": "actionable"
+            },
+            {
+              "id": "choose_email",
+              "type": "tap",
+              "target": "emailMethod"
+            },
+            {
+              "id": "complete_email_login_to_home",
+              "type": "call",
+              "sceneId": "email_operations",
+              "actionId": "complete_email_login_to_home",
+              "inputs": {
+                "email": "${inputs.email}",
+                "code": "${inputs.code}"
+              }
+            }
+          ]
+        }
+      ]
     }
   ]
 }

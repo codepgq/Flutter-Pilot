@@ -295,6 +295,203 @@ test('Scene operation controls and results fit a narrow screen', async ({ page }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test('failed action shows the actual Key, expected state and final observation with readable timings', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const failure = {
+    code: 'WAIT_TIMEOUT',
+    message: '等待目标状态超时。',
+    uncertain: false,
+    diagnostics: {
+      selector: {
+        key: 'app.shell.root',
+        source: 'flutter',
+        text: 'never-render-observed-selector-text',
+        ancestor: { semantics: 'never-render-observed-ancestor' },
+      },
+      condition: 'visible',
+      timeoutMs: 30000,
+      attempts: 74,
+      lastObservation: {
+        code: 'FOUND',
+        message: '目标存在，但等待条件尚未满足。',
+        present: true,
+        visible: false,
+        enabled: true,
+        actionable: false,
+      },
+    },
+  };
+  const path = 'entry/open_home/open_home/common/open_home/wait_app_shell';
+  await openActions(page, {
+    sceneActions: {
+      ...base.sceneActions,
+      run: {
+        runId: 'failed-1',
+        sceneId: 'common',
+        actionId: 'open_home',
+        mockSceneId: 'insufficient',
+        name: '进入主页',
+        status: 'failed',
+        message: '场景操作已在失败步骤停止。',
+        metrics: {
+          totalMs: 30173.1,
+          resolveMs: 10995.851160984486,
+          inputMs: 0,
+          waitMs: 30158.2,
+          stepsCompleted: 0,
+        },
+        failure,
+        steps: [
+          {
+            id: 'wait_app_shell',
+            path,
+            sceneId: 'common',
+            actionId: 'open_home',
+            target: 'appShell',
+            tool: 'wait_for_widget',
+            status: 'failed',
+            durationMs: 30158.2,
+            failure,
+          },
+          {
+            id: 'open_home',
+            path: 'entry/open_home/common/open_home/tap_home',
+            sceneId: 'common',
+            actionId: 'open_home',
+            target: 'homeTab',
+            tool: 'tap',
+            status: 'skipped',
+          },
+        ],
+      },
+    },
+  });
+  const result = page.getByRole('region', { name: '场景操作运行结果' });
+  const diagnostic = result.getByRole('alert');
+  await expect(diagnostic).toContainText('第 1 步失败：等待控件 · appShell');
+  await expect(diagnostic).toContainText('Widget Key：app.shell.root · 来源：Flutter VM');
+  await expect(diagnostic).toContainText('期望状态：可见 · 超时：30000 ms');
+  await expect(diagnostic).toContainText(
+    '最后观测：已找到目标 · 不可见 · 已启用 · 不可操作（已检查 74 次）。',
+  );
+  await expect(diagnostic).toContainText('定位结果：FOUND · 目标存在，但等待条件尚未满足。');
+  await expect(result).toContainText('定位 10996 ms');
+  await expect(result).toContainText('等待（含定位） 30158 ms');
+  await expect(result).not.toContainText('10995.851');
+  await expect(result).not.toContainText('never-render-observed-selector-text');
+  await expect(result).not.toContainText('never-render-observed-ancestor');
+  await expect(result.getByText(`调用路径：${path}`, { exact: true })).not.toBeVisible();
+  await result.getByText('步骤：wait_app_shell', { exact: true }).click();
+  await expect(result.getByText(`调用路径：${path}`, { exact: true })).toBeVisible();
+  await diagnostic.getByRole('button', { name: '打开场景配置', exact: true }).click();
+  expect((await messages(page)).at(-1)).toEqual({ action: 'scenes.open', payload: {} });
+  expect((await messages(page)).some((message: any) => message.action === 'scenes.actions.run')).toBe(false);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await result.getByText('步骤：wait_app_shell', { exact: true }).click();
+  await result.screenshot({ path: 'artifacts/scene-action-failure-390.png' });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await result.screenshot({ path: 'artifacts/scene-action-failure-1280.png' });
+});
+
+test('failed locator observations distinguish absence from an unconfirmed error and always show its code', async ({
+  page,
+}) => {
+  const failure = (code: string) => ({
+    code: 'WAIT_TIMEOUT',
+    message: '等待目标状态超时。',
+    uncertain: false,
+    diagnostics: {
+      selector: { key: 'app.shell.root', source: 'flutter' },
+      condition: 'visible',
+      timeoutMs: 5000,
+      attempts: 8,
+      lastObservation: { code },
+    },
+  });
+  const patch = (code: string) => ({
+    sceneActions: {
+      ...base.sceneActions,
+      run: {
+        runId: 'locator-failed',
+        sceneId: 'common',
+        actionId: 'open_home',
+        mockSceneId: null,
+        name: '进入主页',
+        status: 'failed',
+        message: '场景操作已在失败步骤停止。',
+        failure: failure(code),
+        metrics: { totalMs: 5000, resolveMs: 20, inputMs: 0, waitMs: 5000, stepsCompleted: 0 },
+        steps: [
+          {
+            id: 'wait',
+            path: 'common/open_home/wait',
+            sceneId: 'common',
+            actionId: 'open_home',
+            target: 'appShell',
+            tool: 'wait_for_widget',
+            status: 'failed',
+            durationMs: 5000,
+            failure: failure(code),
+          },
+        ],
+      },
+    },
+  });
+  await openActions(page, patch('AMBIGUOUS_SELECTOR'));
+  const diagnostic = page.getByRole('region', { name: '场景操作运行结果' }).getByRole('alert');
+  for (const code of ['AMBIGUOUS_SELECTOR', 'UI_UNAVAILABLE']) {
+    await update(page, patch(code));
+    await expect(diagnostic).toContainText('最后观测：定位未确认');
+    await expect(diagnostic).toContainText(`定位结果：${code}`);
+    await expect(diagnostic).not.toContainText('未找到目标');
+  }
+  await update(page, patch('NOT_FOUND'));
+  await expect(diagnostic).toContainText('最后观测：未找到目标');
+  await expect(diagnostic).toContainText('定位结果：NOT_FOUND');
+});
+
+test('older failed runs preserve the error without inventing observations from current targets', async ({
+  page,
+}) => {
+  const failure = { code: 'WAIT_TIMEOUT', message: '等待目标状态超时。', uncertain: false };
+  await openActions(page, {
+    sceneActions: {
+      ...base.sceneActions,
+      run: {
+        runId: 'old-failure',
+        sceneId: 'common',
+        actionId: 'submit',
+        mockSceneId: null,
+        name: '提交订单',
+        status: 'failed',
+        message: '场景操作已在失败步骤停止。',
+        failure,
+        metrics: { totalMs: 5000, resolveMs: 20, inputMs: 0, waitMs: 5000, stepsCompleted: 0 },
+        steps: [
+          {
+            id: 'wait',
+            path: 'common/submit/wait',
+            sceneId: 'common',
+            actionId: 'submit',
+            target: 'price',
+            tool: 'wait_for_widget',
+            status: 'failed',
+            durationMs: 5000,
+            failure,
+          },
+        ],
+      },
+    },
+  });
+  const result = page.getByRole('region', { name: '场景操作运行结果' });
+  await expect(result.getByRole('alert')).toContainText('WAIT_TIMEOUT · 等待目标状态超时。');
+  await expect(result).not.toContainText('Widget Key：order.price');
+  await expect(result).not.toContainText('最后观测');
+});
+
 test('reloaded test actions discard removed input overrides and disable unresolved references', async ({
   page,
 }) => {
@@ -361,4 +558,93 @@ test('reloaded action inputs use new defaults and secret flags while ordinary up
     action: 'scenes.actions.run',
     payload: { sceneId: 'common', actionId: 'submit', inputs: {}, backend: 'auto' },
   });
+});
+
+test('manual workflow resolves target aliases to Widget Keys without exposing text selectors or secrets', async ({
+  page,
+}) => {
+  const panel = await openActions(page, {
+    scenes: {
+      ...base.scenes,
+      scenes: [
+        {
+          ...commonScene,
+          targets: {
+            ...commonScene.targets,
+            price: {
+              key: 'order.price',
+              source: 'flutter',
+              text: 'never-render-this-selector-text',
+              ancestor: { semantics: 'never-render-this-ancestor-semantics' },
+            },
+            list: { source: 'device', accessibilityId: 'never-render-this-device-selector' },
+          },
+          actions: [
+            {
+              ...action,
+              inputs: { password: { secret: true, default: 'never-render-this-default' } },
+              steps: [
+                { id: 'fillPassword', type: 'enter_text', target: 'price', text: 'never-render-this-text' },
+                { id: 'wait', type: 'wait_for_widget', target: 'submit', state: 'visible' },
+                { id: 'scroll', type: 'scroll', target: 'list', untilTarget: 'submit' },
+                { id: 'commonStep', type: 'call', sceneId: 'insufficient', actionId: 'finish' },
+                { id: 'hide', type: 'hide_keyboard' },
+              ],
+            },
+          ],
+        },
+        {
+          ...mockScene,
+          actions: [{ id: 'finish', name: '等待主页', steps: [{ id: 'wait', type: 'tap', target: 'home' }] }],
+        },
+      ],
+    },
+  });
+  await expect(panel.getByRole('heading', { name: 'UI 操作（Workflow）' })).toBeVisible();
+  await panel.getByLabel('选择场景操作').selectOption('submit');
+  await panel.getByText('查看操作步骤（5）', { exact: true }).click();
+  const preview = panel.getByRole('list', { name: '操作步骤预览' });
+  await expect(preview.getByRole('listitem')).toHaveCount(5);
+  await expect(preview).toContainText('输入文本 · price');
+  await expect(preview).toContainText('等待控件 · submit');
+  await expect(preview.getByRole('listitem').nth(0)).toContainText(
+    'price → Widget Key：order.price · 来源：Flutter VM',
+  );
+  await expect(preview.getByRole('listitem').nth(1)).toContainText(
+    'submit → Widget Key：order.submit · 来源：跟随操作通道',
+  );
+  await expect(preview.getByRole('listitem').nth(2)).toContainText(
+    'list → 其他选择器（详见场景配置） · 来源：设备',
+  );
+  await expect(preview.getByRole('listitem').nth(2)).toContainText('submit → Widget Key：order.submit');
+  await expect(preview).toContainText('调用操作 · 余额不足 / 等待主页');
+  await expect(preview.getByRole('listitem').nth(4)).toHaveText('收起键盘hide');
+  await expect(preview).not.toContainText('undefined');
+  await expect(panel).not.toContainText('never-render-this-default');
+  await expect(panel).not.toContainText('never-render-this-text');
+  await expect(panel).not.toContainText('never-render-this-selector-text');
+  await expect(panel).not.toContainText('never-render-this-ancestor-semantics');
+  await expect(panel).not.toContainText('never-render-this-device-selector');
+  await expect(panel.getByLabel('操作参数 password')).toHaveValue('');
+  await panel.getByRole('button', { name: '运行操作', exact: true }).click();
+  expect((await messages(page)).filter((item: any) => item.action === 'scenes.actions.run')).toEqual([
+    {
+      action: 'scenes.actions.run',
+      payload: { sceneId: 'common', actionId: 'submit', inputs: {}, backend: 'auto' },
+    },
+  ]);
+});
+
+test('empty UI workflow explains configuration and provides explicit reload', async ({ page }) => {
+  const panel = await openActions(page, {
+    scenes: { ...base.scenes, scenes: [{ ...commonScene, actions: undefined }, mockScene] },
+  });
+  await expect(panel.getByText('尚未配置 UI 操作', { exact: true })).toBeVisible();
+  await expect(panel).toContainText('targets 和 actions');
+  await expect(panel).toContainText('激活场景、重连和重新加载均不会自动执行');
+  await panel.getByRole('button', { name: '重新加载场景配置', exact: true }).click();
+  expect((await messages(page)).at(-1)).toEqual({ action: 'project.reload', payload: {} });
+  await expect(panel.getByRole('button', { name: '运行操作', exact: true })).toHaveCount(0);
+  await update(page, { sceneActions: { running: true, locked: true } });
+  await expect(panel.getByRole('button', { name: '重新加载场景配置', exact: true })).toBeDisabled();
 });

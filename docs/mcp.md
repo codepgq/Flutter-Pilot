@@ -44,7 +44,7 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 
 | topic              | 内容                                                                            |
 | ------------------ | ------------------------------------------------------------------------------- |
-| `overview`（默认） | 能力场景、首次调用、规则文件和运行前提                                          |
+| `overview`（默认） | 能力场景、Prompt 导航、首次调用、规则文件和运行前提                             |
 | `http`             | `scenes.json` 中 HTTP 规则的字段、完整合法示例、请求／响应修改、转发及验证流程  |
 | `ws`               | `scenes.json` 中 WS 规则的 URL、方向、文本匹配、替换／丢弃及双向消息验证        |
 | `ui`               | 快照发现真实 Key、父范围查找、点击／输入／滚动／等待、Key 诊断与修复            |
@@ -52,7 +52,25 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 
 同一份指南还可通过 `resources/list` 发现，URI 为 `flutter-pilot://guides/<topic>`，使用 `resources/read` 读取。工具入口兼容只使用 MCP tools 的 Agent，资源入口方便支持参考资料的客户端；两者返回相同内容。
 
-支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 54 个模板：原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及全部 50 个工具的同名独立模板。`hot_reload`、`hot_restart`、Scene 操作和测试工具可以直接按同名 Prompt 查找，无需先打开其他场景模板。
+支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 58 个模板：三个能力入口、原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及全部 51 个工具的同名独立模板。`start_app`、`hide_keyboard`、`hot_reload`、`hot_restart`、Scene 操作和测试工具可以直接按同名 Prompt 查找，无需先打开其他场景模板。
+
+| Prompt | 查阅内容 |
+| --- | --- |
+| `capabilities` | 由当前注册表生成的全部工具及同名 Prompt 目录，导航 App、Mock、Key、键盘、等待诊断、Scene 和测试；只读查阅，无需任务或会话 |
+| `scene_action_quick_run` | 复用或启动 App、发现已有 actions、选择所需 Mock、传参运行、查询／取消、最终 UI 与本轮网络验证；包含工作台手动入口 |
+| `scene_action_authoring` | `scenes.json` 唯一来源、真实 Widget Key、无 target 的 `hide_keyboard`、公共 `call`、秘密参数、预检、归档及 Test Case v2 |
+
+先只查阅能力：
+
+```json
+{ "name": "capabilities" }
+```
+
+再按任务读取快速运行流程：
+
+```json
+{ "name": "scene_action_quick_run", "arguments": { "task": "复用当前项目的邮箱登录操作并验证主页与本轮 Mock 命中" } }
+```
 
 例如读取热重启提示词：
 
@@ -60,17 +78,27 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 { "name": "hot_restart", "arguments": { "task": "修改订单 Mock 后重启并验证空状态页面" } }
 ```
 
-每个模板可传可选 `task`，描述具体目标；工具模板包含准备、操作及验证步骤，并直接引用生产工具 schema，`task` 本身不是工具调用参数。模板可在 IDE 离线时读取，不会自行执行工具。`get_usage_guide` 模板不要求在线会话；运行时工具则引导 Agent 选择准确项目，并检查对应能力与前提。
+每个模板可传可选 `task`，描述具体目标；工具模板包含准备、操作及验证步骤，并直接引用生产工具 schema，`task` 本身不是工具调用参数。全部模板都可在 IDE 离线时读取，读取不会自行启动 App、修改 Mock 或执行 UI。`capabilities` 与 `get_usage_guide` 用于只读查阅；真正执行运行时任务时，再选择准确项目并检查对应能力与前提。
 
-Agent 的可调用能力由 `tools/list` 提供，Prompts 是可选的使用指导；未读取 Prompts 不等于工具不存在。初始化说明已明确列出所有工具及同名 Prompt 入口。不支持 Prompts 的客户端仍可通过工具描述和 `get_usage_guide` 发现用法。新增工具必须补齐同名提示词，类型检查及真实 MCP stdio 测试会校验完整覆盖和可读性。
+等待失败可分别查阅 `wait_for_widget`、`get_scene_action_run` 和 `get_test_run` 的同名 Prompt。直接等待的 `diagnostics`、Scene 运行的 `failure.diagnostics` 及测试步骤的 `steps[].failure.diagnostics` 包含 `selector`、`condition`、`timeoutMs`、`attempts` 和 `lastObservation`；先区分当前未找到目标与已找到但状态不满足，再检查页面、Key、键盘或网络，不盲目增加超时或重放操作。
 
-指南明确由 Agent 文件工具增量编辑规则，先通过 `get_network_status` 获取准确路径并保留已有规则。HTTP JSON 正文必须序列化为字符串；WS 规则针对业务连接，连接临时规则不能写入持久文件。保存后调用 `reload_rules`，检查各域加载与同步结果，再用 `activate_scene` 激活目标场景并验证本次新记录。UI 先用快照发现 Key，再确认唯一目标；无 Key 时可显式使用文字、语义、类型、祖先范围或快照引用；不静默更换定位方式。
+工具和 Prompt 以客户端实际加载的 MCP 桥接版本为准。更新插件后，需让 IDE 加载新版插件，再按客户端要求重连或新建 MCP 会话，重新调用 `prompts/list`；安装文件更新不代表已经运行的桥接进程或客户端缓存同步更新。
+
+Agent 的可调用能力由 `tools/list` 提供，Prompts 是可选的使用指导；未读取 Prompts 不等于工具不存在。初始化说明已明确列出所有工具及同名 Prompt 入口。不支持 Prompts 的客户端仍可通过工具描述和 `get_usage_guide` 发现用法。新增工具必须补齐同名提示词；重要使用流程也需进入场景 Prompt 与 `overview` 导航，类型检查及真实 MCP stdio 测试校验完整覆盖、离线发现和可读性。
+
+指南明确由 Agent 文件工具增量编辑规则，先通过 `get_network_status` 获取准确路径并保留已有规则。HTTP JSON 正文必须序列化为字符串；WS 规则针对业务连接，连接临时规则不能写入持久文件。保存后调用 `reload_rules`，检查所需域加载及客户端接入，再用 `activate_scene` 激活目标场景并验证本次新记录。先通过 `list_scenes` / `list_scene_actions` 复用已有操作；只有首次编写、Key 失效或起始页不匹配时才探索快照。无 Key 时可显式使用文字、语义、类型、祖先范围或快照引用；不静默更换定位方式。完整步骤与失败处理见 [Scene 联调流程](scene-authoring.md)。
 
 例如用户要求“模拟订单列表空数据并验证页面”，Agent 应先读取 `http`／`workflow` 指南，选择对应项目会话，读取并编辑规则，再完成重载、Mock、Key 操作和结果验证。具体是否主动调用仍由客户端 Agent 根据任务和上下文决定；MCP 说明提供发现与操作指引，不替代用户授权和客户端审批。
 
 ## 保存 Scene 操作并运行 Test Case
 
-固定登录、填表、下单确认操作可由 Agent 首次探索并验证，再保存到 `files.scenes` 的 Scene targets/actions 中，`reload_rules` 更新快照。`list_scenes` 发现概要，`list_scene_actions({sessionId,sceneId})` 查询 targets、操作说明与参数。`run_scene_action({sessionId,sceneId,actionId,inputs?,backend?})` 显式启动后台运行；公共操作不会切换当前 Mock，也允许无 Mock 执行。`get_scene_action_run` 查询进度，`cancel_scene_action_run` 请求取消。流程只在显式启动时执行；Scene 激活、重连或重开 IDE 不会触发 UI。完整格式见 [操作指南](workflows.md)。
+固定登录、填表、下单确认操作可由 Agent 首次探索并验证，再保存到 `files.scenes` 的 Scene targets/actions 中，`reload_rules` 更新快照。`list_scenes` 发现概要，`list_scene_actions({sessionId,sceneId})` 查询 targets、操作说明与参数。`run_scene_action({sessionId,sceneId,actionId,inputs?,backend?})` 显式启动后台运行；公共操作不会切换当前 Mock，也允许无 Mock 执行。`get_scene_action_run` 查询进度，`cancel_scene_action_run` 请求取消。等待失败的 `failure.diagnostics` 保留实际选择器、条件、期限、次数和最后观测，区分未找到目标与状态未满足；先核对起始页面、登录前提及本轮 Mock 命中。流程只在显式启动时执行；Scene 激活、重连或重开 IDE 不会触发 UI。完整格式见 [操作指南](workflows.md)。
+
+步骤的 `target` 是共享选择器名称。例如 `targets.emailInput = {"source":"flutter","key":"emailEntry.input"}`，`target:"emailInput"` 会编译为按该 Widget Key 精确定位。Agent 无需逐步截图或重新探索；运行时核对当前挂载控件的唯一性与可操作状态，避免沿用页面切换前的对象。工作台步骤预览展示对应 Widget Key 和来源。
+
+[动作目录](scene-actions-catalogue.md) 已归档不同登录起点和公共表单操作，步骤定义统一来自 [随包 Scene 示例](../resources/example.scenes.json)。业务项目采用同样的入口 → `call` → 公共操作结构，显式传递参数并保持秘密属性；修改后重载快照，不额外创建动作文件。输入改变布局时显式 `hide_keyboard` 确认收起再继续。
+
+执行前记录本轮请求基线，结束时分别检查操作终态、最终 UI 和新请求 Mock 命中。HTTP `applied` 不保证每个客户端或启动首请求被覆盖，`completed` 不保证后台初始化都成功；发现真实 401 / refresh 循环应停止触发、补齐实际漏接口再验证。有意模拟的 503 等失败应单独说明，不能当作完整业务通过，也不能与漏 Mock 混为一谈。
 
 需要业务通过标准时，在 `list_tests` 返回的 `files.tests` 保存 Test Case，使用 version:2 引用同一 Scene action。测试可组合临时 Scene、有状态 HTTP Mock、原始请求参数断言、响应变量提取、关联 WS 和精确订单行 UI 断言。`run_test` 返回 `runId` 后后台执行，`get_test_run` 查询，`cancel_test_run` 取消；只有 `passed` 表示测试通过，操作的 `completed` 不代替业务断言。完整定义与示例见 [测试指南](testing.md)。
 
@@ -82,6 +110,18 @@ Agent 的可调用能力由 `tools/list` 提供，Prompts 是可选的使用指�
 | `cancel_scene_action_run` / `cancel_test_run` | 接受 `sessionId`、`runId`，停止后续动作，等待当前动作结束和资源释放                                           |
 
 测试观察以主流程触发前的本轮基线为准；事件在指定 HTTP 断言成功后注入，用响应 `orderId` 关联 WS 与订单行，不能以任意旧 pending 通过。测试结束恢复自身临时 Mock，已经发生的登录和订单不能回滚。超时、断线或取消后不自动再次点击 confirm 或注入事件；检查结果和证据后再决定下一步。模拟注入验证 App 处理事件，真实后端链路应等待真实事件。
+
+## 从 Agent 启动 App 并执行场景
+
+App 尚未运行时，`list_sessions` 的 `capabilities.appLaunch.configurations` 提供当前工作区可用的命名 Dart Debug launch 配置，仅读取名称，环境变量和启动参数不对 Agent 输出。调用 `start_app({sessionId,configurationName,deviceId?,timeoutMs?})` 让 IDE 启动该配置；多设备时可用原生 `deviceId` 明确选择模拟器或实体设备，只覆盖该次启动的设备字段，不修改 `launch.json`。同名已运行会话会复用，显式指定设备时要求能确认设备一致；其他项目、手动 VM、设备不同或无法确认、多个调试会话不会被替换。配置必须来自工作区已有配置，不接受任意命令或临时启动参数。首次编译超过等待时间时可能返回 `TIMEOUT`，应先查询 `list_sessions` 和 IDE 调试控制台，不能重复启动。
+
+IDE 明确拒绝或抛出启动错误、目标调试会话结束时会释放启动状态，包括在两次轮询之间快速结束的会话。等待超时后的 `pendingConfiguration` 表示结果尚未确认，继续拦截重复启动；等待已结束后不因此锁住场景重载等其他工作台功能。后续启动或结束事件会解除待确认状态；若 IDE 没有产生调试会话，检查控制台后可重新加载当前 IDE 窗口恢复。IDE 启动请求本身仍在等待时，应先完成或取消 IDE 的设备／配置提示。
+
+`capabilities.appLaunch.sessions` 返回当前项目会话的 ID、显示名称、已确认的 `configurationName` 和设备 ID，不包含环境变量或启动参数。匹配使用准确的配置名称，允许 IDE 为显示名称添加工作区后缀。重开窗口后从 IDE 当前会话恢复配置身份；仅经 DTD 发现、无法确认配置的会话返回 `APP_SESSION_UNCONFIRMED`，在 IDE 选中该会话后重新打开工作台再检查，不能按显示名称猜测或重复启动。
+
+完整执行顺序：选择项目 → `reload_rules` → `activate_scene` → `start_app`（App 未运行时）→ 检查 VM 与 HTTP Mock 接入 → `list_scene_actions` → `run_scene_action` → `get_scene_action_run`，最后验证主页与本轮请求。App 启动完成只表示连接到对应 VM，启动首请求可能早于 Mock 注入；登录及进入主页由已保存操作执行。Scene 激活、文件重载和 IDE 恢复不会自行启动 App 或重放 UI。
+
+VM HTTP 状态包含 `attachedDioInstances`、`coverageMessage` 和 `warnings`。已应用只证明现有 Dio 已接入。若客户端在提交回调中才创建，首次请求可能早于扫描；需要稳定的无人介入流程时，在 App 的 Debug 启动入口提前创建流程所需客户端，页面就绪后再 `reload_rules` 同步。固定等待不能解决回调内部才创建客户端的问题，也不能用重跑提交来代替确认结果。
 
 ## 通过 MCP 热重载与热重启
 
@@ -192,6 +232,7 @@ auto 在设备连接后使用设备输入；失败不会换通道重放。device
 | -------------------------------------------------- | --------------------------------------------------------------------------------- |
 | `get_usage_guide`                                  | 按主题读取规则编辑、UI 定位和验证指南，无需在线 IDE                               |
 | `list_sessions`                                    | 获取已开启 MCP 的项目和能力                                                       |
+| `start_app`                                        | 复用或启动当前项目已保存的命名 Debug 配置，可指定已确认的设备                     |
 | `hot_reload` / `hot_restart`                       | 控制当前 VM 对应 IDE 调试会话的热重载／热重启                                     |
 | `list_scene_actions` / `run_scene_action`          | 读取或显式运行保存的参数化操作流程                                                |
 | `get_scene_action_run` / `cancel_scene_action_run` | 查询或取消流程；completed 仅代表操作完成                                          |
@@ -200,6 +241,7 @@ auto 在设备连接后使用设备输入；失败不会换通道重放。device
 | `get_ui_snapshot`                                  | 获取有界的已挂载 UI 结构                                                          |
 | `find_widget`                                      | 按 Key 查询目标                                                                   |
 | `tap` / `enter_text` / `scroll`                    | 点击、替换输入内容、滚动                                                          |
+| `get_keyboard_state` / `hide_keyboard`             | 查询键盘状态或收起并确认稳定隐藏；之后再等待和点击目标                             |
 | `wait_for_widget`                                  | 等待出现、消失或可操作                                                            |
 | `inspect_key_issues`                               | 诊断当前界面交互目标的 Key                                                        |
 | `list_screenshot_targets`                          | 查询当前可见的长图滚动区域                                                        |

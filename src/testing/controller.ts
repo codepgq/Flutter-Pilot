@@ -539,7 +539,12 @@ export class TestController {
                 ...step,
                 path: `${prefix}/${active.clean(step.path)}`,
                 ...(step.failure
-                  ? { failure: { ...step.failure, message: active.clean(step.failure.message) } }
+                  ? {
+                      failure: sanitize(
+                        step.failure as unknown as JsonValue,
+                        active.clean,
+                      ) as unknown as WorkflowFailure,
+                    }
                   : {}),
               })),
             );

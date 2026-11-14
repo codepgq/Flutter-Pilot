@@ -22,6 +22,7 @@ import {
   type Point,
   type Rect,
   type Selector,
+  type WaitDiagnostics,
 } from './model';
 
 export interface AutomationHost {
@@ -254,7 +255,7 @@ export class AutomationController {
       ].includes(tool)
         ? setTimeout(
             () => controller.abort(),
-            tool === 'wait_for_widget'
+            ['wait_for_widget', 'hide_keyboard'].includes(tool)
               ? (args.timeoutMs ?? 5000) + 2000
               : (args.timeoutMs ?? (tool === 'take_screenshot' ? 65000 : 30000)),
           )
@@ -703,34 +704,115 @@ export class AutomationController {
     return fail('SCROLL_LIMIT', '达到滚动上限。');
   }
   private async waitFor(args: Record<string, any>, signal: AbortSignal): Promise<UiResult> {
-    const until = Date.now() + (args.timeoutMs ?? 5000),
+    const timeoutMs = args.timeoutMs ?? 5000,
+      until = Date.now() + timeoutMs,
       condition = args.state ?? 'present';
+    const selector: Selector = {
+      ...selectorFor(args),
+      source: this.isNativeSelector(args) ? 'device' : 'flutter',
+    };
+    let attempts = 0;
     while (true) {
       checkCancelled(signal);
       let result: UiResult;
       try {
         result = await this.find(args, signal);
       } catch (error) {
-        if (error instanceof AutomationError && error.code === 'NOT_FOUND')
-          result = fail('NOT_FOUND', '未找到目标。');
-        else throw error;
+        if (!(error instanceof AutomationError) || error.code === 'CANCELLED') throw error;
+        result = fail(error.code, error.message, { uncertain: error.uncertain });
       }
-      if (!result.ok && result.code !== 'NOT_FOUND') return result;
-      const widget: any = result.widget;
+      attempts++;
+      const widget: any = result.widget ?? {};
+      const textMatches =
+        condition === 'text_equals'
+          ? widget.text === args.text
+          : condition === 'text_contains'
+            ? typeof widget.text === 'string' && widget.text.includes(args.text)
+            : condition === 'text_changed'
+              ? typeof widget.text === 'string' && widget.text !== args.text
+              : undefined;
+      const diagnostics: WaitDiagnostics = {
+        selector,
+        condition,
+        timeoutMs,
+        attempts,
+        lastObservation: {
+          code: result.ok ? 'FOUND' : (result.code ?? 'UI_OPERATION_FAILED'),
+          ...(typeof result.message === 'string' ? { message: result.message } : {}),
+          ...(result.ok ? { present: true } : result.code === 'NOT_FOUND' ? { present: false } : {}),
+          ...Object.fromEntries(
+            ['visible', 'enabled', 'actionable'].flatMap((key) =>
+              typeof widget[key] === 'boolean' ? [[key, widget[key]]] : [],
+            ),
+          ),
+          ...(textMatches !== undefined ? { textMatches: result.ok && textMatches } : {}),
+        },
+      };
+      if (!result.ok && result.code !== 'NOT_FOUND') return { ...result, diagnostics };
       const matches =
         condition === 'absent'
           ? result.code === 'NOT_FOUND'
           : result.ok &&
             (condition === 'present' ||
               (['visible', 'enabled', 'actionable'].includes(condition) && widget[condition] === true) ||
-              (condition === 'text_equals' && widget.text === args.text) ||
-              (condition === 'text_contains' &&
-                typeof widget.text === 'string' &&
-                widget.text.includes(args.text)) ||
-              (condition === 'text_changed' && typeof widget.text === 'string' && widget.text !== args.text));
-      if (matches) return success({ condition, ...(widget ? { widget } : {}) });
-      if (Date.now() >= until) return fail('WAIT_TIMEOUT', '等待目标状态超时。');
+              textMatches === true);
+      if (matches) return success({ condition, ...(result.widget ? { widget: result.widget } : {}) });
+      if (Date.now() >= until) {
+        const target = selector.key !== undefined ? `Key ${JSON.stringify(selector.key)}` : '目标控件';
+        const observed = !result.ok
+          ? '当前已挂载界面未找到匹配控件，请检查起始页面和目标 Key。'
+          : condition === 'absent'
+            ? '目标仍在当前已挂载界面中。'
+            : textMatches !== undefined
+              ? '目标已找到，但文字条件尚未满足。'
+              : `目标已找到，但 ${condition} 状态尚未满足。`;
+        return fail(
+          'WAIT_TIMEOUT',
+          `等待 ${target} 达到 ${condition} 状态超时（${timeoutMs} ms）；${observed}`,
+          {
+            diagnostics,
+          },
+        );
+      }
       await pause(Math.min(100, Math.max(1, until - Date.now())), signal);
+    }
+  }
+  private async hideKeyboard(args: Record<string, any>, signal: AbortSignal): Promise<UiResult> {
+    const backend = this.backend(args);
+    const shown = async (): Promise<boolean> => {
+      checkCancelled(signal);
+      const value =
+        backend === 'flutter'
+          ? this.require(await this.vm('get_keyboard_state', {})).shown
+          : await this.device().call('GET', '/appium/device/is_keyboard_shown', undefined, signal);
+      if (typeof value !== 'boolean')
+        throw new AutomationError('KEYBOARD_STATE_UNCONFIRMED', '无法确认键盘状态，未继续后续操作。');
+      return value;
+    };
+    const initiallyShown = await shown();
+    checkCancelled(signal);
+    // Flutter can still be presenting a keyboard after entering text. Send the
+    // hide command even before the first visible viewport update.
+    if (backend !== 'flutter' && !initiallyShown)
+      return success({ backend, shown: false, dispatched: false });
+    if (backend === 'flutter') {
+      const result = await this.vm('hide_keyboard', args);
+      if (!result.ok) return { ...result, backend };
+    } else await this.device().call('POST', '/appium/device/hide_keyboard', {}, signal);
+    const until = Date.now() + (args.timeoutMs ?? 5000);
+    // Native keyboard animations update the viewport asynchronously. Require
+    // two hidden observations so the next keyed tap uses the restored layout.
+    let hidden = false;
+    while (true) {
+      const current = !(await shown());
+      if (current && hidden) return success({ backend, shown: false, dispatched: true });
+      hidden = current;
+      if (Date.now() >= until)
+        return fail('KEYBOARD_NOT_HIDDEN', '键盘尚未确认收起，未继续后续操作。', {
+          backend,
+          dispatched: true,
+        });
+      await this.measure('waitMs', () => pause(Math.min(50, Math.max(1, until - Date.now())), signal));
     }
   }
   private async key(args: Record<string, any>, signal: AbortSignal): Promise<UiResult> {
@@ -1110,11 +1192,7 @@ export class AutomationController {
           })
         : this.vm(tool, args);
     }
-    if (tool === 'hide_keyboard') {
-      if (this.backend(args) === 'flutter') return { ...(await this.vm(tool, args)), backend: 'flutter' };
-      await this.device().call('POST', '/appium/device/hide_keyboard', {}, signal);
-      return success({ backend: 'device', dispatched: true, verified: false });
-    }
+    if (tool === 'hide_keyboard') return this.hideKeyboard(args, signal);
     if (tool === 'editor_action') {
       if (this.backend(args) === 'flutter')
         return {

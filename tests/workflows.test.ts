@@ -86,6 +86,33 @@ async function terminal(controller: WorkflowController, runId: string) {
 }
 
 describe('Scene action compilation', () => {
+  it.each(['auto', 'flutter', 'device'] as const)(
+    'compiles target-free keyboard dismissal with the %s execution backend',
+    (backend) => {
+      const flow = {
+        id: 'dismiss',
+        name: '收起键盘',
+        targets: { unused: { key: '${inputs.unrelated}' } },
+        steps: [{ id: 'hide', type: 'hide_keyboard', timeoutMs: 4000 }],
+      };
+      const result = compileSceneAction(validateSceneDocument(doc(flow)), 'orders', 'dismiss', {}, backend);
+      expect(result.steps).toEqual([
+        {
+          id: 'hide',
+          path: 'orders/dismiss/hide',
+          sceneId: 'orders',
+          actionId: 'dismiss',
+          tool: 'hide_keyboard',
+          args: { backend, timeoutMs: 4000 },
+        },
+      ]);
+      expect(() =>
+        validateSceneDocument(
+          doc({ ...flow, steps: [{ id: 'hide', type: 'hide_keyboard', target: 'unused' }] }),
+        ),
+      ).toThrow(/配置格式无效/);
+    },
+  );
   it('uses normalized action names without modifying the source definitions', () => {
     const original = doc({ ...order(), name: `${' '.repeat(300)}提交订单${' '.repeat(300)}` });
     const rawName = original.scenes[0].actions[0].name;
@@ -339,6 +366,44 @@ describe('Scene action compilation', () => {
 });
 
 describe('Scene action discovery and execution', () => {
+  it('runs explicit keyboard dismissal before submission and stops when dismissal fails', async () => {
+    const flow = {
+      id: 'email',
+      name: '邮箱登录',
+      targets: { email: { key: 'email.input' }, submit: { key: 'email.submit' } },
+      steps: [
+        { id: 'fill', type: 'enter_text', target: 'email', text: 'fixture@example.test' },
+        { id: 'hide', type: 'hide_keyboard' },
+        { id: 'submit', type: 'tap', target: 'submit' },
+      ],
+    };
+    const f = await fixture(doc(flow));
+    const run = await f.controller.start('orders', 'email', {}, 'flutter');
+    const result = await terminal(f.controller, run.runId);
+    expect(result.status).toBe('completed');
+    expect(result.steps[1]).toMatchObject({ tool: 'hide_keyboard', status: 'completed' });
+    expect(result.steps[1]).not.toHaveProperty('target');
+    expect(vi.mocked(f.host.execute).mock.calls.map(([, tool, args]) => ({ tool, args }))).toEqual([
+      {
+        tool: 'enter_text',
+        args: { selector: { key: 'email.input' }, text: 'fixture@example.test', backend: 'flutter' },
+      },
+      { tool: 'hide_keyboard', args: { backend: 'flutter' } },
+      { tool: 'tap', args: { selector: { key: 'email.submit' }, backend: 'flutter' } },
+    ]);
+    const failed = await fixture(doc(flow), async (_owner, tool) =>
+      tool === 'hide_keyboard'
+        ? { ok: false, code: 'KEYBOARD_UNAVAILABLE', message: '无法收起键盘。' }
+        : { ok: true },
+    );
+    const failedRun = await failed.controller.start('orders', 'email', {}, 'flutter');
+    expect((await terminal(failed.controller, failedRun.runId)).status).toBe('failed');
+    expect(vi.mocked(failed.host.execute).mock.calls.map(([, tool]) => tool)).toEqual([
+      'enter_text',
+      'hide_keyboard',
+    ]);
+    expect(failed.host.release).toHaveBeenCalledExactlyOnceWith(failedRun.runId);
+  });
   it('runs public cross Scene operations against the current Mock without switching it', async () => {
     const value = {
       version: 1,
@@ -512,6 +577,73 @@ describe('Scene action discovery and execution', () => {
     const read = f.controller.get(start.runId);
     read.run.steps[0].status = 'completed';
     expect(f.controller.get(start.runId).run.steps[0].status).toBe('failed');
+  });
+  it('preserves allowlisted wait diagnostics and redacts nested secret values', async () => {
+    const flow = {
+      id: 'wait',
+      name: '等待',
+      inputs: { password: { required: true, secret: true, default: 'secret123' } },
+      targets: { shell: { key: 'app.shell.root' } },
+      steps: [{ id: 'ready', type: 'wait_for_widget', target: 'shell', state: 'visible' }],
+    };
+    const f = await fixture(doc(flow), async () => ({
+      ok: false,
+      code: 'WAIT_TIMEOUT',
+      message: 'secret123 was not found',
+      diagnostics: {
+        selector: { source: 'flutter', key: 'app.shell.root', ancestor: { text: 'secret123' } },
+        condition: 'visible',
+        timeoutMs: 30000,
+        attempts: 42,
+        widget: { text: 'unrelated private text' },
+        lastObservation: {
+          code: 'NOT_FOUND',
+          message: 'secret123 is missing',
+          present: false,
+          text: 'unrelated private text',
+          bounds: { x: 0, y: 0 },
+        },
+      },
+    }));
+    const start = await f.controller.start('orders', 'wait');
+    const result = await terminal(f.controller, start.runId);
+    expect(result.failure?.diagnostics).toEqual({
+      selector: { source: 'flutter', key: 'app.shell.root', ancestor: { text: '[REDACTED]' } },
+      condition: 'visible',
+      timeoutMs: 30000,
+      attempts: 42,
+      lastObservation: { code: 'NOT_FOUND', message: '[REDACTED] is missing', present: false },
+    });
+    expect(result.steps[0].failure).toEqual(result.failure);
+    expect(JSON.stringify(result)).not.toContain('secret123');
+    expect(JSON.stringify(result)).not.toContain('unrelated private text');
+  });
+  it('preserves unknown presence for a failed wait locator', async () => {
+    const flow = {
+      id: 'wait',
+      name: '等待',
+      targets: { shell: { key: 'app.shell.root' } },
+      steps: [{ id: 'ready', type: 'wait_for_widget', target: 'shell', state: 'visible' }],
+    };
+    const f = await fixture(doc(flow), async () => ({
+      ok: false,
+      code: 'AMBIGUOUS_SELECTOR',
+      message: '范围内存在多个匹配目标。',
+      diagnostics: {
+        selector: { source: 'flutter', key: 'app.shell.root' },
+        condition: 'visible',
+        timeoutMs: 5000,
+        attempts: 1,
+        lastObservation: { code: 'AMBIGUOUS_SELECTOR', message: '范围内存在多个匹配目标。' },
+      },
+    }));
+    const start = await f.controller.start('orders', 'wait');
+    const result = await terminal(f.controller, start.runId);
+    expect(result.failure?.diagnostics).toMatchObject({
+      attempts: 1,
+      lastObservation: { code: 'AMBIGUOUS_SELECTOR' },
+    });
+    expect(result.failure?.diagnostics?.lastObservation).not.toHaveProperty('present');
   });
   it('stops at an ambiguous locator without retries or later confirmation', async () => {
     let count = 0;

@@ -1,5 +1,42 @@
 # 验收记录
 
+## 0.0.19 发布验证（2026-11-14）
+
+- 正式交付此前 0.0.18 本地安装版及后续公共操作归档、离线能力导航和等待失败诊断；发布版本、安装说明、lockfile 与 VSIX 路径统一为 0.0.19。
+- 758 项 Vitest / 46 文件、89 项 Playwright、TypeScript / Webview 类型、全仓格式、构建及 diff 检查通过。Python 代理 28 项通过、23 项真实代理集成因缺少 `MITMDUMP` 跳过。日志为 `artifacts/v0.0.19-{unit,ui,typecheck,format,build,proxy}.log`。
+- 安装包为 `artifacts/flutter-pilot-0.0.19.vsix`，采用 Cursor CLI `--force` 安装；包内文件与源码 / 构建、安装目录一致性及两个 MCP bridge 的离线 SDK stdio 结果见 `artifacts/v0.0.19-install-report.json`。核验包括 0.0.19 服务版本、51 个工具、58 个 Prompts、5 个指南资源、全部同名 Prompt 及离线指南读取。
+- 发布使用 main 提交及 v0.0.19 附注标签并常规推送；远端引用记录于 `artifacts/v0.0.19-release-report.json`。用户在方便时执行 Developer: Reload Window 加载新版；本轮不重复真实设备业务验收，启动首请求、完整地址恢复、资金流程及真机边界仍按下方记录。
+
+## 手动 Scene 超时诊断与现场恢复（2026-11-14）
+
+- 原 `open_home` 失败于首步 `wait_app_shell`，0/4 步、30173 ms。14:22:05 资料请求及 14:22:06 刷新请求未命中 Mock，均返回 401；14:22:12 开始的导航无法等到 App shell。现场查询确认 `registrationLogin.page.root` 与 Switch account 可见。不能仅凭这些记录确定漏拦截由重启首请求还是宿主暂停 / 租约失效引起。
+- 重载原 40 条规则后按实际页面显式复用 `switch_account_login_to_home`，15/15 步、4091 ms；本轮 18 次请求 / 17 个唯一接口全部 Mock，无新真实 401。原 `open_home` 再运行 4/4 步、271 ms，独立确认 `home.page.root` 可见，当前 Mock 保持不变。摘要证据见 `artifacts/scene-timeout-recovery-2026-11-14.json`。
+- 等待失败的源码诊断与工作台展示分别保留运行快照中的选择器、条件及最后观测，并区分目标未找到与状态未满足。现场恢复使用当前已安装扩展；新诊断源码尚未安装到活动 IDE。没有重启 App、清数据、修改业务源码或新增 Mock；冷启动完整拦截、完整地址恢复和资金流程不在本轮通过范围。
+- 全量 754 项 Vitest / 46 文件通过；最后补齐原生定位抛错诊断后，相关 5 文件 135 项通过，覆盖原生歧义 / 失效引用立即失败、未知存在状态、取消语义及候选不外泄。14 项 Scene 操作 Playwright、TypeScript / Webview 类型、全仓格式、构建和 diff 检查通过；390 / 1280px 合成失败报告截图已目视确认，无水平溢出。
+
+## MCP 能力与 Prompts 发现更新（2026-11-14）
+
+- 增加 `capabilities`、`scene_action_quick_run`、`scene_action_authoring` 三个入口，现共 58 个 Prompts / 51 个工具。能力目录从当前工具注册表生成，同名 Prompt 继续包含生产参数 schema；`overview`、初始化说明、README 和 MCP 文档同步导航。只查阅能力无需任务、IDE 或 sessionId，不触发运行时操作。
+- 补充 App 启动 / 复用、Scene 自动与手动执行、真实 Key、键盘稳定确认、公共操作归档及 Test Case v2；等待诊断可从直接等待、Scene 运行和测试步骤的同名 Prompt 查询。Flutter VM 操作不强制准备设备通道。
+- 全量 753 项 Vitest / 46 文件、类型、格式、构建及 diff 检查通过。真实 SDK stdio 在离线注册目录验证 `prompts/list` / `prompts/get`，58 个模板可读取，能力目录覆盖全部工具；证据为 `artifacts/mcp-capability-{unit,typecheck,format,build}.log` 和 `artifacts/mcp-capability-dist-smoke.json`。本节仅记录 MCP 发现与指引验证，不新增设备业务验收。
+
+## Scene 联调经验与操作归档（2026-11-14）
+
+- 根 `AGENTS.md`、`docs/scene-authoring.md` 及项目记忆固定了已有会话 / 动作优先、真实 Key、键盘确认、请求基线、后台初始化查漏和结果未确认不重放等约束。MCP 初始化、工具描述、同名 Prompt 与离线 `workflow.quickRun` 同步，动作目录仅索引，运行配置仍唯一来自业务 `scenes.json`。
+- 随包示例归档邮箱公共核心、首次入口、最近账号入口与已有会话返回主页；生产 schema / 编译器回归覆盖全部动作、15/15/4 展开、调用参数与秘密传播。Wali 新增纯操作 `wali_common_operations`，保留原三个业务入口、40 条 Mock 和激活选择，原子工具、选择器及参数逐项等价，报告为 `artifacts/wali-scene-action-archive-preflight.json`。
+- 配置重载后，iPhone 17 分别直接运行公共 `open_home`、从业务入口跨 Scene 调用公共 `open_home`，均 4/4 完成；独立确认主页可见，实际激活 Mock 仍为 `wali-wallet-logged-in`，40 条规则保持应用。证据为 `artifacts/wali-action-archive-{public-result,entry-result,home,network-status}.json`。本轮不重新登录、不重启 App，15 步登录实测沿用下方归档前的等价动作证据。
+- 归档后全量 740 项 Vitest / 45 文件、23 项 Scene / 操作工作台测试、类型、格式及构建通过，独立子代理联合复审通过。地址 probe 的有意 Mock 503、启动首请求窗口及未验收资金 / 完整地址恢复范围保持。
+
+## 0.0.18 Scene 滚动、Key 操作与 Wali 登录（2026-11-14，本地安装）
+
+- Scene 详情恢复连续滚动；UI 操作（Workflow）支持手动选择、参数、通道、步骤 Key 预览、运行、进度、取消及配置重载。真实 Cursor 工作台已滚动至 WS 规则末尾，并从钱包页手动运行 `open_home`，4/4 步完成，保留当前 Mock；证据为 `artifacts/wali-v18-manual-home-result.json`。
+- `steps[].target` 在编译时解析为所属 Scene 的 `targets` 选择器。Wali 的 11 个目标均绑定真实 Flutter Widget Key，执行时重新精确匹配已挂载控件，无需 Agent 再探索；缺失、重复、禁用和遮挡仍按现有契约拒绝或等待。真实底栏 Key 修复后 Home 可操作，Wallet Key 点击已验证。
+- iPhone 17 模拟器使用已保存的 `wali_app (Flutter Pilot)` Debug 配置启动，复用正式启动、认证及路由。`switch_account_login_to_home` 的 15 步登录已完成，含邮箱输入、稳定收起键盘、验证码及主页等待；独立查询 `home.page.root` 可见，验证码、登录、资料均命中 Mock 200。证据为 `artifacts/wali-v18-login-result.json`、`artifacts/wali-v18-home.json` 及对应 HTTP 记录。
+- Wali Scene 补齐为 40 条 HTTP 规则，覆盖账号详情、地址、组合、余额、活动、扫描及恢复任务通知；FUNGIBLE refresh 采用兼容响应。地址 probe 明确模拟 503 并退避，避免本登录场景伪造依赖请求内容的地址恢复结果；完整地址恢复与单独 NFT 刷新不在本轮范围内。
+- 最终 40 条配置加载后直接运行操作，15/15 步约 4.4 秒完成，独立确认主页可见；本轮验证码、登录、资料及主页初始化新请求全部命中 Mock，未再出现真实 401 / 刷新循环。地址 probe 命中上述有意设置的 Mock 503。结果与请求证据为 `artifacts/wali-v18-final40-{result,home,network}.json`；这是本轮观察结果，不代表长期压力或完整资产恢复验收。
+- 独立子代理审查并修复启动配置身份、取消竞态、按钮子区域手势归属、真实注入库可见符号及测试初始化竞态。最终 734 项 Vitest / 44 文件、86 项 Playwright、类型、格式、构建和打包通过；生产 VM 模板另以 Wali Flutter SDK 验证，Wali 底栏 9 项 Widget 测试通过。
+- 本地 VSIX 为 `artifacts/flutter-pilot-0.0.18.vsix`，已安装 Cursor。激活或重载 Scene 不会自动执行操作；Agent 显式调用 `start_app`、激活 Mock 和 `run_scene_action`，工作台也可手动运行。启动首请求可能早于 VM 注入，需在操作前同步并检查 Dio 接入及本轮请求；不宣称冷启动全部请求已拦截。Android、真机、创建钱包、签名和资金操作未在本轮验收。
+
 ## 0.0.17 Scene 操作与 Workflow 合并（2026-11-14）
 
 - `scenes.json` 成为 Mock、共享 targets 和多个命名 actions 的唯一配置来源；纯 Mock、纯操作、targets-only 与跨 Scene 子操作均支持。操作来源与当前 Mock 独立，激活、重载、重连和 IDE 恢复不重放 UI。

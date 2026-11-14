@@ -33,6 +33,8 @@ const fake = vi.hoisted(() => ({
   confirm: undefined as string | undefined,
   selectedWorkspace: '',
   shownDocuments: [] as string[],
+  launchConfigurations: [] as Record<string, unknown>[],
+  appStarts: [] as { folder: string; name: string; configuration?: Record<string, unknown> }[],
 }));
 vi.mock('vscode', async () => {
   const { join } = await import('node:path');
@@ -52,6 +54,14 @@ vi.mock('vscode', async () => {
     StatusBarAlignment: { Left: 1 },
     env: {},
     debug: {
+      startDebugging: async (folder: any, configuration: string | Record<string, unknown>) => {
+        fake.appStarts.push({
+          folder: folder.uri.fsPath,
+          name: typeof configuration === 'string' ? configuration : (configuration.name as string),
+          ...(typeof configuration === 'object' ? { configuration } : {}),
+        });
+        return false;
+      },
       onDidReceiveDebugSessionCustomEvent: (callback: any) => {
         fake.debugEvents = callback;
         return { dispose() {} };
@@ -78,7 +88,13 @@ vi.mock('vscode', async () => {
       },
       getConfiguration: () => ({
         get: (key: string, value: unknown) =>
-          key === 'autoStart' ? fake.autoStart : key === 'autoConnectVm' ? fake.autoConnectVm : value,
+          key === 'autoStart'
+            ? fake.autoStart
+            : key === 'autoConnectVm'
+              ? fake.autoConnectVm
+              : key === 'configurations'
+                ? fake.launchConfigurations
+                : value,
       }),
       onDidGrantWorkspaceTrust: () => ({ dispose() {} }),
       onDidChangeWorkspaceFolders: (callback: any) => {
@@ -263,6 +279,58 @@ describe('Scene 操作与业务测试扩展整合', () => {
       args: { sessionId: descriptor.sessionId, ...args },
     })) as any;
   }
+  it('discovers launch names without secrets and routes start_app only to this workspace', async () => {
+    const descriptor = await enable();
+    await message('connection.mode', { mode: 'vm' });
+    fake.launchConfigurations = [
+      {
+        type: 'dart',
+        request: 'launch',
+        name: 'app',
+        cwd: 'apps/app',
+        env: { SECRET: 'private-launch-value' },
+      },
+      { type: 'dart', request: 'launch', name: 'production', flutterMode: 'release' },
+    ];
+    const description = (await requestSession(descriptor, { kind: 'describe' })) as any;
+    expect(description.capabilities.appLaunch).toMatchObject({
+      supported: true,
+      configurations: [{ name: 'app' }],
+    });
+    const network = await call(descriptor, 'get_network_status');
+    expect(network.http).toMatchObject({
+      attachedDioInstances: 0,
+      coverage: 'existing_dio_instances',
+      warnings: expect.any(Array),
+    });
+    expect(network.http.coverageMessage).toContain('惰性');
+    expect(JSON.stringify(description)).not.toContain('private-launch-value');
+    expect(await call(descriptor, 'start_app', { configurationName: 'app' })).toMatchObject({
+      ok: false,
+      code: 'APP_LAUNCH_REJECTED',
+      submitted: true,
+    });
+    expect(fake.appStarts).toEqual([
+      {
+        folder: fake.workspace,
+        name: 'app',
+        configuration: { ...fake.launchConfigurations[0], __flutterPilotConfigurationName: 'app' },
+      },
+    ]);
+    expect(
+      await call(descriptor, 'start_app', { configurationName: 'app', deviceId: 'simulator-123' }),
+    ).toMatchObject({ code: 'APP_LAUNCH_REJECTED' });
+    expect(fake.appStarts.at(-1)).toEqual({
+      folder: fake.workspace,
+      name: 'app',
+      configuration: {
+        ...fake.launchConfigurations[0],
+        deviceId: 'simulator-123',
+        __flutterPilotConfigurationName: 'app',
+      },
+    });
+    expect(fake.launchConfigurations[0]).not.toHaveProperty('deviceId');
+  });
   it('discovers Scene actions, ignores legacy files, and opens scenes for repair', async () => {
     const descriptor = await enable();
     const legacy = join(fake.workspace, '.flutter-pilot', 'workflows.json');
@@ -1071,6 +1139,8 @@ beforeEach(async () => {
   fake.confirm = undefined;
   fake.selectedWorkspace = '';
   fake.shownDocuments = [];
+  fake.launchConfigurations = [];
+  fake.appStarts = [];
   await mkdir(fake.workspace, { recursive: true });
   await writeFile(
     join(fake.workspace, 'pubspec.yaml'),
@@ -1801,8 +1871,10 @@ describe('VM 连接模式扩展整合', () => {
       await activateVmMode();
       await open();
       emit();
-      await vi.waitFor(() => expect(latest().state.vm.status).toBe('connected'));
-      expect(latest().state.vmDiscovery.connectedSessionId).toBe('flutter-session');
+      await vi.waitFor(() => {
+        expect(latest().state.vm.status).toBe('connected');
+        expect(latest().state.vmDiscovery.connectedSessionId).toBe('flutter-session');
+      });
       expect(latest().state.vm.mockEnabled).toBe(false);
       expect(latest().state.ws.captureEnabled).toBe(false);
       expect(latest().state.ws.mockEnabled).toBe(false);
@@ -1814,7 +1886,10 @@ describe('VM 连接模式扩展整合', () => {
       expect(latest().state.vm.status).toBe('disconnected');
       expect(latest().state.vmDiscovery.candidates[0].status).toBe('paused');
       await message('vm.discovery.connect', { id: 'flutter-session' });
-      await vi.waitFor(() => expect(latest().state.vm.status).toBe('connected'));
+      await vi.waitFor(() => {
+        expect(latest().state.vm.status).toBe('connected');
+        expect(latest().state.vmDiscovery.connectedSessionId).toBe('flutter-session');
+      });
       fake.debugStopped({ id: 'flutter-session' });
       await vi.waitFor(() => expect(latest().state.vm.status).toBe('disconnected'));
     });

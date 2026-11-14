@@ -2913,7 +2913,6 @@ footer {
   grid-template-columns: minmax(0, 1fr);
   flex: 1;
   min-height: 0;
-  overflow: hidden;
 }
 .scene-layout.has-detail {
   grid-template-columns: minmax(240px, 35%) minmax(0, 1fr);
@@ -2921,8 +2920,6 @@ footer {
 .scene-list,
 .scene-detail {
   min-width: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
 }
 .scene-list-heading {
   padding: 8px 12px;
@@ -3099,5 +3096,39 @@ footer {
 }
 .scene-operation-panel p,
 .scene-operation-panel h3 {
+  overflow-wrap: anywhere;
+}
+.scene-operation-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.scene-operation-empty {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}
+.scene-operation-preview {
+  margin: 16px 0;
+}
+.scene-operation-preview li strong,
+.scene-operation-preview li small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.scene-run-failure {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.scene-run-failure strong,
+.scene-run-locator,
+.scene-run-path small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.scene-run-path {
+  margin-top: 6px;
   overflow-wrap: anywhere;
 }

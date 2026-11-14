@@ -292,7 +292,10 @@ export const automationMcpTools = {
     description: '查询当前键盘可见状态；Flutter 通道同时返回输入焦点信息。',
     schema: simple(),
   },
-  hide_keyboard: { description: '通过输入链路收起键盘；不能据此认定业务提交完成。', schema: simple() },
+  hide_keyboard: {
+    description: '通过输入链路收起键盘并有界等待隐藏状态确认，再继续后续操作；不能据此认定业务提交完成。',
+    schema: simple(),
+  },
   editor_action: {
     description: '向当前编辑器发送 done/search/send/go/next/previous/newline；需核对提交或焦点变化。',
     schema: simple({ action: z.enum(['done', 'search', 'send', 'go', 'next', 'previous', 'newline']) }),
@@ -324,7 +327,8 @@ export const automationMcpTools = {
       }),
   },
   wait_for_widget: {
-    description: '有界等待出现、消失、可见、启用、可操作或文字变化。文字条件需 text，超时不重放触发动作。',
+    description:
+      '有界等待出现、消失、可见、启用、可操作或文字变化。文字条件需 text；失败 diagnostics 包含实际选择器、条件、期限和最后观测状态，区分未找到与状态不满足。超时不重放触发动作。',
     schema: targeted({
       state: z
         .enum([

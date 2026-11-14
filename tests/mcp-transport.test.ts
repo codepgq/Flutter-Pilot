@@ -181,6 +181,9 @@ describe('MCP local session transport', () => {
       expect(client.getServerCapabilities()).toMatchObject({ tools: {}, resources: {}, prompts: {} });
       const prompts = await client.listPrompts();
       expect(prompts.prompts.map((prompt) => prompt.name)).toEqual([
+        'capabilities',
+        'scene_action_quick_run',
+        'scene_action_authoring',
         'http_mock',
         'websocket_mock',
         'flutter_ui',
@@ -195,6 +198,10 @@ describe('MCP local session transport', () => {
         await expect(client.getPrompt({ name: prompt.name })).resolves.toHaveProperty('messages');
       }
       await expect(client.getPrompt({ name: 'unknown' })).rejects.toMatchObject({ code: -32602 });
+      const capabilities = await client.getPrompt({ name: 'capabilities' });
+      const capabilityText = JSON.stringify(capabilities);
+      expect(capabilityText).not.toContain('尚未指定具体任务');
+      for (const name of Object.keys(mcpTools)) expect(capabilityText).toContain(`- ${name}：`);
       await expect(client.getPrompt({ name: 'http_mock', arguments: { extra: 'x' } })).rejects.toMatchObject({
         code: -32602,
       });
@@ -244,6 +251,8 @@ describe('MCP local session transport', () => {
     await client.readResource({ uri: 'flutter-pilot://guides/ui' });
     await client.listPrompts();
     await client.getPrompt({ name: 'flutter_ui' });
+    for (const name of ['capabilities', 'scene_action_quick_run', 'scene_action_authoring'])
+      await client.getPrompt({ name });
     expect(calls).toBe(0);
     const list = await client.callTool({ name: 'list_sessions', arguments: {} });
     expect(list.structuredContent).toMatchObject({

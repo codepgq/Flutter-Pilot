@@ -890,6 +890,33 @@ describe('test preflight and safe definitions', () => {
     expect(run.vars.copy).toBe('[REDACTED]');
     expect(JSON.stringify(run)).not.toContain('very-secret');
   });
+  it('redacts test-level secrets throughout nested Scene failure diagnostics', async () => {
+    const test = definition();
+    test.inputs!.password = 'outer-private-value';
+    const { controller, host, flows } = await fixture(test);
+    flows.scenes[0].actions![0].inputs!.password.secret = false;
+    flows.scenes[0].actions![0].steps = [
+      { id: 'ready', type: 'wait_for_widget', target: 'pending', state: 'visible' },
+    ];
+    vi.mocked(host.execute).mockResolvedValue({
+      ok: false,
+      code: 'WAIT_TIMEOUT',
+      message: 'outer-private-value was not found',
+      diagnostics: {
+        selector: { key: 'outer-private-value' },
+        condition: 'visible',
+        timeoutMs: 100,
+        attempts: 2,
+        lastObservation: { code: 'NOT_FOUND', message: 'missing outer-private-value', present: false },
+      },
+    });
+    const run = await terminal(controller, (await controller.start('pending')).runId);
+    expect(run.steps[0].failure?.diagnostics).toMatchObject({
+      selector: { key: '[REDACTED]' },
+      lastObservation: { message: 'missing [REDACTED]' },
+    });
+    expect(JSON.stringify(run)).not.toContain('outer-private-value');
+  });
   it('redacts secrets nested in extracted response objects from failure evidence', async () => {
     const test = definition();
     test.expect.http![0].extract!.payload = '/response/body/payload';

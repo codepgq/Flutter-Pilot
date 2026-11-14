@@ -3,6 +3,7 @@ import { isAbsolute, relative } from 'node:path';
 import type * as vscode from 'vscode';
 import { validateVmUrl } from './client';
 import { DtdClient } from './dtd';
+import { appLaunchConfigurationName, appLaunchConfigurationNameKey } from '../mcp/app-launch';
 
 interface Disposable {
   dispose(): void;
@@ -16,6 +17,8 @@ export interface VmDebugSession {
   customRequest?(command: string, args: Record<string, unknown>): PromiseLike<unknown>;
 }
 export interface VmDiscoveryHost {
+  getActiveSession?(): VmDebugSession | undefined;
+  configurationName?(session: VmDebugSession): string | undefined;
   getWorkspaceRoots(): readonly { id: string; path: string }[];
   onCustomEvent(
     listener: (event: { session: VmDebugSession; event: string; body?: unknown }) => void,
@@ -37,6 +40,17 @@ export interface VmDiscoverySnapshot {
   status: 'starting' | 'ready' | 'unavailable';
   message?: string;
   candidates: VmDiscoveredSession[];
+}
+export interface VmDebugSessionTarget {
+  id: string;
+  name: string;
+  configurationName?: string;
+  deviceId?: string;
+}
+export interface VmDebugSessionEvent {
+  kind: 'started' | 'stopped';
+  workspaceId?: string;
+  session: VmDebugSessionTarget;
 }
 interface SessionInput {
   id: string;
@@ -90,6 +104,7 @@ function record(value: unknown): Record<string, unknown> {
 export class VmDiscovery {
   private readonly disposables: Disposable[] = [];
   private readonly listeners = new Set<(snapshot: VmDiscoverySnapshot) => void>();
+  private readonly debugListeners = new Set<(event: VmDebugSessionEvent) => void>();
   private readonly sessions = new Map<string, StoredSession>();
   private readonly inputs = new Map<string, SessionInput>();
   private readonly revisions = new Map<string, number>();
@@ -118,8 +133,12 @@ export class VmDiscovery {
         this.controls.set(session.id, session);
         this.stopped.delete(session.id);
         this.changed(session.id);
+        this.publishDebugSession('started', session);
       }),
-      host.onSessionStopped((session) => this.stop(session.id)),
+      host.onSessionStopped((session) => {
+        this.stop(session.id);
+        this.publishDebugSession('stopped', session);
+      }),
       host.onCustomEvent((event) => this.handleEvent(event)),
       host.onWorkspaceChanged(() => {
         void this.refresh();
@@ -140,6 +159,60 @@ export class VmDiscovery {
   }
   address(id: string): string | undefined {
     return this.sessions.get(id)?.address;
+  }
+
+  subscribeDebugSessions(listener: (event: VmDebugSessionEvent) => void): Disposable {
+    this.debugListeners.add(listener);
+    return { dispose: () => this.debugListeners.delete(listener) };
+  }
+
+  private publishDebugSession(kind: VmDebugSessionEvent['kind'], session: VmDebugSession): void {
+    if (session.type !== 'dart' || this.disposed) return;
+    const deviceId = session.configuration.deviceId;
+    const configurationName = this.configurationName(session);
+    const event: VmDebugSessionEvent = {
+      kind,
+      workspaceId: session.workspaceId,
+      session: {
+        id: session.id,
+        name: session.name,
+        ...(configurationName ? { configurationName } : {}),
+        ...(typeof deviceId === 'string' ? { deviceId } : {}),
+      },
+    };
+    for (const listener of this.debugListeners) listener(event);
+  }
+
+  private configurationName(session: VmDebugSession): string | undefined {
+    if (this.host.configurationName) return this.host.configurationName(session);
+    const name = session.configuration[appLaunchConfigurationNameKey] ?? session.configuration.name;
+    return typeof name === 'string' ? name : undefined;
+  }
+
+  /** Include started sessions before their VM URI arrives, to prevent duplicate App launches. */
+  debugSessions(workspaceId: string): VmDebugSessionTarget[] {
+    const targets = new Map<string, VmDebugSessionTarget>();
+    for (const session of this.controls.values())
+      if (session.type === 'dart' && session.workspaceId === workspaceId && !this.stopped.has(session.id)) {
+        const deviceId = this.inputs.get(session.id)?.device ?? session.configuration.deviceId;
+        const configurationName = this.configurationName(session);
+        targets.set(session.id, {
+          id: session.id,
+          name: session.name,
+          ...(configurationName ? { configurationName } : {}),
+          ...(typeof deviceId === 'string' ? { deviceId } : {}),
+        });
+      }
+    for (const session of this.sessions.values())
+      if (session.summary.workspaceId === workspaceId && !targets.has(session.summary.id)) {
+        const deviceId = session.input.device;
+        targets.set(session.summary.id, {
+          id: session.summary.id,
+          name: session.summary.name,
+          ...(typeof deviceId === 'string' ? { deviceId } : {}),
+        });
+      }
+    return [...targets.values()];
   }
 
   /** Targets exactly one discovered Flutter session, including pre-existing DTD sessions. */
@@ -166,6 +239,8 @@ export class VmDiscovery {
   }
 
   private async startOrRefresh(): Promise<void> {
+    const active = this.host.getActiveSession?.();
+    if (active && !this.stopped.has(active.id)) this.controls.set(active.id, active);
     if (this.api) {
       await this.refresh();
       return;
@@ -471,6 +546,7 @@ export class VmDiscovery {
     this.sessions.clear();
     this.inputs.clear();
     this.listeners.clear();
+    this.debugListeners.clear();
     this.stopped.clear();
     this.controls.clear();
     this.revisions.clear();
@@ -488,6 +564,19 @@ export function createVscodeDiscoveryHost(api: typeof vscode): VmDiscoveryHost {
     customRequest: (command, args) => value.customRequest(command, args),
   });
   return {
+    getActiveSession: () => api.debug.activeDebugSession && session(api.debug.activeDebugSession),
+    configurationName: (session) => {
+      const folder = api.workspace.workspaceFolders?.find(
+        (folder) => folder.uri.toString() === session.workspaceId,
+      );
+      return folder
+        ? appLaunchConfigurationName(
+            api.workspace.getConfiguration('launch', folder.uri).get('configurations', []),
+            folder.uri.fsPath,
+            session.configuration,
+          )
+        : undefined;
+    },
     getWorkspaceRoots: () =>
       !api.workspace.isTrusted || api.env.remoteName || process.platform !== 'darwin'
         ? []

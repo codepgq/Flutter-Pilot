@@ -17,7 +17,7 @@ const inputs = z
 export const sceneActionMcpTools = {
   list_scene_actions: {
     description:
-      '读取指定 Scene 的共享 targets、命名操作、说明及参数；VM 离线也可查询。先探索一次保存稳定选择器，后续 run_scene_action 无需逐步模型判断。',
+      '读取指定 Scene 的共享 targets、命名操作、起始前提及参数；VM 离线也可查询。优先复用已有操作，target 自动解析真实 Key，无需逐步截图或 find_widget；仅缺少操作时探索并归档到 scenes.json。',
     schema: z.object({ ...session, sceneId: z.string().min(1).max(128) }).strict(),
   },
   run_scene_action: {
@@ -35,7 +35,7 @@ export const sceneActionMcpTools = {
   },
   get_scene_action_run: {
     description:
-      '查询本会话 场景操作 的进度、步骤耗时与失败位置，不执行或恢复步骤。终态 completed 不是测试通过；IDE 重开不恢复运行，结果未确认时先检查界面和新网络记录。',
+      '查询本会话 场景操作 的进度、步骤耗时与失败位置；等待失败的 failure.diagnostics 包含实际选择器、条件、期限和最后观测状态。不执行或恢复步骤。终态 completed 不是测试通过；IDE 重开不恢复运行，结果未确认时先检查界面和新网络记录。',
     schema: z.object(run).strict(),
   },
   cancel_scene_action_run: {

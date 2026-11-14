@@ -1,5 +1,23 @@
 # Flutter Pilot 项目记忆
 
+## 默认发布流程（2026-11-14）
+
+- 用户明确约定：今后在本仓库说“发布一个新版本”，即授权并要求完整完成 **commit、更新插件版本、创建新 tag、push 到远端仓库、安装到 Cursor**；不只做打包或本地安装，不必再次询问这些步骤。
+- 默认发布当前待交付改动，保留工作区内容；先检查远端、当前分支、已发布标签与本地安装版本。沿用补丁递增，版本应高于当前源码、已有标签及本地安装版本；同步 `package.json`、lockfile、README / CHANGELOG 和 VSIX 输出路径，MCP 版本继续共用扩展清单来源。
+- 运行改动范围所需的类型、单元 / 协议、工作台、格式和构建检查，生成本地 VSIX；使用 Cursor CLI `--force` 安装，核对包、源码 / 构建与安装文件一致性及离线 MCP 发现。验证后提交，创建 `v<version>` 附注标签，并常规推送当前发布分支和本次标签；核验远端引用，不强推或覆盖已有标签。
+- 沿用本地 VSIX 发布方式；扩展商店发布不属于此默认约定。活动 Cursor 窗口由用户在调试方便时 Reload Window，不自动重载。将当次版本、验证、安装和推送结果记录到 `IMPLEMENTATION.md` 与验收文档；失败时明确未完成步骤，不将历史验收作为本轮结果。
+- 本约定覆盖下方历史章节对未来发布授权的限制；历史“仅本地安装”“未提交 / 未推送”仍只描述当时状态。
+
+## 当前 Scene 与操作约束（2026-11-14）
+
+- 最新规范入口为根 `AGENTS.md`；快速联调见 [scene-authoring](../../docs/scene-authoring.md)，可复用操作见 [动作目录](../../docs/scene-actions-catalogue.md)。本节覆盖历史独立 Workflow 配置的描述；发布任务授权按上方“默认发布流程”，普通实现任务不自动发布。
+- `scenes.json` v1 是业务项目唯一 Mock / targets / actions 来源，`workflows.json` 不再读取或创建。公共操作放同文件纯操作 Scene，入口通过 `call` 显式传参；当前 Mock 与操作来源独立，激活、重载、重连和 IDE 恢复不执行 UI。Test Case 使用 v2 引用 Scene action。
+- 后续类似任务先发现已有会话和动作，仅缺失或失效时探索。`target` 引用真实 Key，运行器自动匹配当前挂载控件；不要求 Agent 每步重新截图或 `find_widget`。键盘改变布局时确认收起，再等待按钮可操作。
+- 输入和秘密参数逐层显式映射；操作起始状态不同要保留不同入口，禁止盲目重试。运行前建立网络基线，运行后确认 UI、新请求及 Mock 命中；`applied` / `completed` 不等于业务通过。
+- 用户要求将 Wali 本轮登录经验同步到项目约束、MCP 及其 Scene，归档可复用动作。Wali 保留原 40 条 HTTP Mock 与三个入口，公共核心放 `wali_common_operations`，具体目录保存在其 `.flutter-pilot/README.md`。
+- 0.0.18 曾仅在本地安装，未创建发布标签；本轮已升为 0.0.19 并通过 Cursor 安装与包一致性检查，交付范围及远端核验路径见 `IMPLEMENTATION.md` 的 0.0.19 条目。下方历史记录保留当时状态。
+- MCP 查阅入口为 `capabilities`（只读、无任务和会话前提），已有操作执行与新增归档分别为 `scene_action_quick_run`、`scene_action_authoring`。全部工具保留同名 Prompt；新增重要用法同时进入 `overview` 导航及 stdio 发现测试。Flutter VM 操作无需强制准备 Appium，设备通道按任务需要启用。
+
 ## 0.0.16 API 请求合并与发布授权（2026-11-13）
 
 - 用户要求合并 API 请求与请求历史，沿用 API 列表样式，每次调用单独展示；保留历史筛选、详情与 Mock 操作，底层 API 目录统计及 MCP 兼容。

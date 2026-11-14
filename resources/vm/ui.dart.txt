@@ -95,11 +95,17 @@
     }
     return all.where((e) => matches(e.widget.key, args['key'])).toList();
   }
-  bool interactive(Element e) {
-    if (e.widget is EditableText || e.widget is Scrollable) return true;
+  bool tapInteractive(Element e) {
     try { final dynamic w = e.widget; w.onPressed; return true; } catch (_) {}
-    for (final name in ['tap', 'double', 'long', 'pan', 'scale']) {
-      try { final dynamic w = e.widget; if ((name == 'tap' && w.onTap != null) || (name == 'double' && w.onDoubleTap != null) || (name == 'long' && w.onLongPress != null) || (name == 'pan' && w.onPanUpdate != null) || (name == 'scale' && w.onScaleUpdate != null)) return true; } catch (_) {}
+    for (final name in ['tap', 'tapDown', 'tapUp']) {
+      try { final dynamic w = e.widget; if ((name == 'tap' && w.onTap != null) || (name == 'tapDown' && w.onTapDown != null) || (name == 'tapUp' && w.onTapUp != null)) return true; } catch (_) {}
+    }
+    return false;
+  }
+  bool interactive(Element e) {
+    if (e.widget is EditableText || e.widget is Scrollable || tapInteractive(e)) return true;
+    for (final name in ['double', 'long', 'pan', 'scale']) {
+      try { final dynamic w = e.widget; if ((name == 'double' && w.onDoubleTap != null) || (name == 'long' && w.onLongPress != null) || (name == 'pan' && w.onPanUpdate != null) || (name == 'scale' && w.onScaleUpdate != null)) return true; } catch (_) {}
     }
     return false;
   }
@@ -108,13 +114,35 @@
     if (['BackButton', 'CloseButton', 'DrawerButton', 'EndDrawerButton'].contains(e.widget.runtimeType.toString())) return true;
     try { final dynamic w = e.widget; if (w.onPressed == null) return false; } catch (_) {}
     if (e.widget is EditableText) return !(e.widget as EditableText).readOnly;
+    if (e.widget is Semantics && (e.widget as Semantics).properties.enabled == false) return false;
     try { final dynamic w = e.widget; if (w.enabled == false) return false; } catch (_) {}
     return true;
   }
   Element? actionTarget(Element e) {
     if (interactive(e)) return e;
     final descendants = tree(e).where(interactive).toList();
-    if (descendants.isEmpty) return null;
+    if (descendants.isEmpty) {
+      Element? owner;
+      bool semanticButton(Element element) => element.widget is Semantics && (element.widget as Semantics).properties.button == true && (element.widget as Semantics).properties.onTap != null;
+      var declared = semanticButton(e);
+      // Generic ancestor gestures also wrap whole pages to dismiss keyboards.
+      // Only declared button subregions can delegate to those gestures. A
+      // semantics callback alone is insufficient: require a real pointer owner.
+      e.visitAncestorElements((parent) {
+        // editable_text.dart does not import GestureDetector into its VM
+        // evaluation scope. Read its public contract dynamically instead.
+        var gesture = false, excluded = false;
+        try { final dynamic widget = parent.widget; widget.onPanUpdate; widget.onScaleUpdate; if (widget.excludeFromSemantics is bool) { gesture = true; excluded = widget.excludeFromSemantics as bool; } } catch (_) {}
+        final delegated = declared && gesture && excluded;
+        // Composite controls may key their private pointer recognizer epoch;
+        // the explicit semantic button is its public subregion contract.
+        if (stable(parent.widget.key) && !delegated) return false;
+        if (semanticButton(parent)) declared = true;
+        if (tapInteractive(parent) && (!gesture || delegated)) { owner = parent; return false; }
+        return true;
+      });
+      return owner;
+    }
     final candidates = <Element>[];
     for (final child in descendants) {
       var nested = false;
@@ -126,6 +154,21 @@
       if (!nested) candidates.add(child);
     }
     return candidates.length == 1 ? candidates.single : null;
+  }
+  bool ancestorOf(Element parent, Element child) {
+    var found = false;
+    child.visitAncestorElements((element) { if (identical(element, parent)) { found = true; return false; } return true; });
+    return found;
+  }
+  bool actionEnabled(Element e, Element? owner) {
+    if (!enabled(e) || (owner != null && !enabled(owner))) return false;
+    if (owner == null || !ancestorOf(owner, e)) return true;
+    var value = true;
+    e.visitAncestorElements((parent) {
+      if (!enabled(parent)) value = false;
+      return value && !identical(parent, owner);
+    });
+    return value;
   }
   dynamic boxFor(Element e) {
     try { final render = e.findRenderObject(); return render is RenderBox && render.attached && render.hasSize && !render.size.isEmpty ? render : null; } catch (_) { return null; }
@@ -144,6 +187,7 @@
     GestureBinding.instance.hitTestInView(result, point, viewFor(box));
     return result.path.any((entry) => identical(entry.target, box));
   }
+  bool actionHit(Element e, Element? owner, dynamic box, dynamic point) => hit(e, box, point) && (owner == null || !ancestorOf(owner, e) || hit(owner, boxFor(owner), point));
   Map<String, dynamic> describe(Element e) {
     final box = boxFor(e);
     final point = box == null ? null : box.localToGlobal(box.size.center(Offset.zero));
@@ -157,7 +201,7 @@
       return path.length < 24;
     });
     final target = actionTarget(e);
-    final isEnabled = enabled(e) && (target == null || enabled(target));
+    final isEnabled = actionEnabled(e, target);
     final inputs = tree(e).where((child) => child.widget is EditableText).toList();
     final input = inputs.length == 1 ? inputs.single.widget as EditableText : null;
     dynamic inputBounds;
@@ -187,7 +231,7 @@
         selectionPoint = {'x': point.dx, 'y': point.dy};
       }
     }
-    return {'type': e.widget.runtimeType.toString(), 'key': keyData(e.widget.key), 'ancestorKeys': path, 'enabled': isEnabled, 'actionable': target != null && isEnabled && point != null && hit(e, box, point), 'visible': point != null && hit(e, box, point), 'actions': [if (target != null) ...['tap', 'double_tap', 'long_press', 'drag', 'swipe', 'pinch', 'rotate_gesture'], if (tree(e).where((child) => child.widget is EditableText).length == 1) ...['enter_text', 'edit_text'], if (tree(e).where((child) => child.widget is Scrollable).length == 1) 'scroll'], if (semantics != null) 'semantics': semantics, if (location != null) 'source': location, if (text != null) 'text': text.length > 1024 ? text.substring(0, 1024) : text, if (selectionPoint != null) 'selectionPoint': selectionPoint, if (inputBounds != null) 'inputBounds': inputBounds, if (inputFieldBounds != null) 'inputFieldBounds': inputFieldBounds, if (input != null) ...{'textLength': input.controller.text.length, 'focused': input.focusNode.hasFocus, 'selection': {'start': input.controller.selection.start, 'end': input.controller.selection.end}}, if (e.widget is EditableText && (e.widget as EditableText).obscureText) 'obscured': true, if (box != null) 'bounds': {'x': box.localToGlobal(Offset.zero).dx, 'y': box.localToGlobal(Offset.zero).dy, 'width': box.size.width, 'height': box.size.height}};
+    return {'type': e.widget.runtimeType.toString(), 'key': keyData(e.widget.key), 'ancestorKeys': path, 'enabled': isEnabled, 'actionable': target != null && isEnabled && point != null && actionHit(e, target, box, point), 'visible': point != null && hit(e, box, point), 'actions': [if (target != null) ...['tap', 'double_tap', 'long_press', 'drag', 'swipe', 'pinch', 'rotate_gesture'], if (tree(e).where((child) => child.widget is EditableText).length == 1) ...['enter_text', 'edit_text'], if (tree(e).where((child) => child.widget is Scrollable).length == 1) 'scroll'], if (semantics != null) 'semantics': semantics, if (location != null) 'source': location, if (text != null) 'text': text.length > 1024 ? text.substring(0, 1024) : text, if (selectionPoint != null) 'selectionPoint': selectionPoint, if (inputBounds != null) 'inputBounds': inputBounds, if (inputFieldBounds != null) 'inputFieldBounds': inputFieldBounds, if (input != null) ...{'textLength': input.controller.text.length, 'focused': input.focusNode.hasFocus, 'selection': {'start': input.controller.selection.start, 'end': input.controller.selection.end}}, if (e.widget is EditableText && (e.widget as EditableText).obscureText) 'obscured': true, if (box != null) 'bounds': {'x': box.localToGlobal(Offset.zero).dx, 'y': box.localToGlobal(Offset.zero).dy, 'width': box.size.width, 'height': box.size.height}};
   }
   Future<void> frame() async {
     binding.scheduleFrame();
@@ -433,9 +477,17 @@
     }
     if (tool == 'find_widget') return {'ok': true, 'count': 1, 'widget': describe(element)};
     if (tool == 'tap') {
-      if (!enabled(element)) return fail('NOT_ENABLED', '目标当前不可操作。');
       final target = actionTarget(element);
+      if (!actionEnabled(element, target)) return fail('NOT_ENABLED', '目标当前不可操作。');
       if (target == null) return fail('AMBIGUOUS_ACTION_TARGET', '指定 Key 必须对应唯一交互目标。');
+      // The owner only identifies who accepts the event. Keep the keyed
+      // subregion's point; a shared navigation bar's center is a different tab.
+      if (ancestorOf(target, element)) {
+        final box = boxFor(element);
+        if (box == null) return fail('NOT_VISIBLE', '目标尚未布局或不可见。');
+        if (!actionHit(element, target, box, box.localToGlobal(box.size.center(Offset.zero)))) return fail('NOT_HIT_TESTABLE', '目标被遮挡或不接收输入事件。');
+        return measureInput(() => pointer(element));
+      }
       return measureInput(() => pointer(target));
     }
     if (tool == 'scroll') {

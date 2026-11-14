@@ -37,8 +37,12 @@ describe('Workflow MCP contracts', () => {
     const examples = [...documentation.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) =>
       JSON.parse(match[1]),
     );
-    expect(() => validateSceneDocument(examples[0])).not.toThrow();
-    expect(() => parseTool('run_scene_action', examples[1])).not.toThrow();
+    const sceneExample = examples.find((value) => value.version === 1 && Array.isArray(value.scenes));
+    const runExample = examples.find((value) => value.sessionId && value.sceneId && value.actionId);
+    expect(sceneExample).toBeDefined();
+    expect(runExample).toBeDefined();
+    expect(() => validateSceneDocument(sceneExample)).not.toThrow();
+    expect(() => parseTool('run_scene_action', runExample)).not.toThrow();
   });
 
   it('accepts parameterized saved flows and rejects inline actions, scripts, paths and numeric money', () => {
@@ -89,6 +93,17 @@ describe('Workflow MCP contracts', () => {
     expect(guide).toContain('reload_rules');
   });
 
+  it('documents wait diagnostics in tools, same-name prompts and offline guides', () => {
+    for (const name of ['wait_for_widget', 'get_scene_action_run']) {
+      expect(mcpTools[name as keyof typeof mcpTools].description).toContain('diagnostics');
+      const prompt = getMcpPrompt(name).messages[0].content.text;
+      expect(prompt).toContain('lastObservation');
+      expect(prompt).toContain('NOT_FOUND');
+    }
+    for (const topic of ['ui', 'workflow'] as const)
+      expect(JSON.stringify(getUsageGuide(topic))).toContain('lastObservation');
+  });
+
   it('exposes read-only queries and forwards start/query/cancel over the real stdio bridge', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pilot-workflow-protocol-'));
     cleanups.push(() => rm(root, { recursive: true, force: true }));
@@ -101,6 +116,13 @@ describe('Workflow MCP contracts', () => {
       format: 'cjs',
     });
     const calls: { tool: string; args: Record<string, unknown> }[] = [];
+    const diagnostics = {
+      selector: { source: 'flutter', key: 'app.shell.root' },
+      condition: 'visible',
+      timeoutMs: 30000,
+      attempts: 20,
+      lastObservation: { code: 'NOT_FOUND', present: false },
+    };
     const registryRoot = join(root, 'sessions');
     const workspace = join(root, 'project');
     const server = new McpSessionServer({
@@ -115,6 +137,9 @@ describe('Workflow MCP contracts', () => {
           ok: true,
           runId: 'saved-run',
           status: tool === 'run_scene_action' ? 'running' : 'completed',
+          ...(tool === 'get_scene_action_run'
+            ? { run: { status: 'failed', failure: { code: 'WAIT_TIMEOUT', diagnostics } } }
+            : {}),
         };
       },
     });
@@ -147,9 +172,12 @@ describe('Workflow MCP contracts', () => {
     });
     expect(start.isError).not.toBe(true);
     expect(start.structuredContent).toMatchObject({ runId: 'saved-run', status: 'running' });
-    await client.callTool({
+    const query = await client.callTool({
       name: 'get_scene_action_run',
       arguments: { sessionId: 'project', runId: 'saved-run' },
+    });
+    expect(query.structuredContent).toMatchObject({
+      run: { status: 'failed', failure: { code: 'WAIT_TIMEOUT', diagnostics } },
     });
     await client.callTool({
       name: 'cancel_scene_action_run',

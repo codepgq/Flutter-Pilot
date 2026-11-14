@@ -34,7 +34,7 @@ export const testMcpTools = {
   },
   get_test_run: {
     description:
-      '查询本会话 Test Run 的步骤、HTTP/WS/UI 断言、证据、耗时和清理结果，不执行或恢复动作。区分 passed、断言失败、环境错误、取消与结果未确认；不会把旧记录或任意 pending 当作本轮成功。',
+      '查询本会话 Test Run 的步骤、HTTP/WS/UI 断言、证据、耗时和清理结果。操作等待失败可查 steps[].failure.diagnostics 的选择器、条件和最后状态；不执行或恢复动作。区分 passed、断言失败、环境错误、取消与结果未确认，不把旧记录或任意 pending 当作本轮成功。',
     schema: z.object(run).strict(),
   },
   cancel_test_run: {

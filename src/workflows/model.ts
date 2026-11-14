@@ -17,6 +17,7 @@ const input = z
 const step = z.discriminatedUnion('type', [
   z.object({ id: name, type: z.literal('tap'), target: name, timeoutMs: timeout }).strict(),
   z.object({ id: name, type: z.literal('enter_text'), target: name, text, timeoutMs: timeout }).strict(),
+  z.object({ id: name, type: z.literal('hide_keyboard'), timeoutMs: timeout }).strict(),
   z
     .object({
       id: name,
@@ -87,13 +88,13 @@ export interface ActionReference {
 export type SceneAction = z.infer<typeof action>;
 export type WorkflowStep = z.infer<typeof step>;
 export type WorkflowInput = z.infer<typeof input>;
-export type WorkflowTool = 'tap' | 'enter_text' | 'wait_for_widget' | 'scroll';
+export type WorkflowTool = 'tap' | 'enter_text' | 'hide_keyboard' | 'wait_for_widget' | 'scroll';
 export interface CompiledWorkflowStep {
   id: string;
   path: string;
   sceneId: string;
   actionId: string;
-  target: string;
+  target?: string;
   tool: WorkflowTool;
   args: Record<string, unknown>;
 }
@@ -189,7 +190,7 @@ export function validateSceneActions(doc: SceneDocument): SceneDocument {
       for (const item of value.steps) {
         if (ids.has(item.id)) invalid(`步骤 ID 重复：${scene.id}/${value.id}/${item.id}`);
         ids.add(item.id);
-        if (item.type !== 'call') {
+        if ('target' in item) {
           const targets = scene.targets ?? {};
           if (!own(targets, item.target)) invalid(`目标不存在：${scene.id}/${value.id}/${item.target}`);
           validateTemplates(targets[item.target], value.inputs ?? {});
@@ -306,12 +307,16 @@ export function compileSceneAction(
         continue;
       }
       if (steps.length >= 1000) invalid('一次运行展开后最多 1000 个操作步骤。');
-      const { id: _id, type, target, ...rest } = item;
+      const { id: _id, type, ...rest } = item;
+      const target = 'target' in item ? item.target : undefined;
       const args: Record<string, unknown> = {
-        selector: bindSelector(owner.targets![target] as Selector, inputs),
+        ...(target !== undefined
+          ? { selector: bindSelector(owner.targets![target] as Selector, inputs) }
+          : {}),
         backend,
         ...rest,
       };
+      delete args.target;
       if ('text' in args && typeof args.text === 'string') args.text = interpolate(args.text, inputs);
       if (item.type === 'scroll') {
         delete args.untilTarget;
@@ -326,7 +331,7 @@ export function compileSceneAction(
         path,
         sceneId: owner.id,
         actionId: value.id,
-        target: item.target,
+        ...(target !== undefined ? { target } : {}),
         tool: type,
         args: validated,
       });

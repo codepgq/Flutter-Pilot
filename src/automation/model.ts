@@ -21,6 +21,21 @@ export interface Selector {
   ref?: string;
   ancestor?: Omit<Selector, 'ancestor'>;
 }
+export interface WaitDiagnostics {
+  selector: Selector;
+  condition: string;
+  timeoutMs: number;
+  attempts: number;
+  lastObservation: {
+    code: string;
+    message?: string;
+    present?: boolean;
+    visible?: boolean;
+    enabled?: boolean;
+    actionable?: boolean;
+    textMatches?: boolean;
+  };
+}
 export interface Target {
   key?: string | number;
   ancestorKey?: string | number;

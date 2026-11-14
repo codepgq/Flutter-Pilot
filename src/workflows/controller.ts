@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { Backend } from '../automation/model';
+import type { Backend, Selector, WaitDiagnostics } from '../automation/model';
+import { uiSelectorSchema } from '../automation/tools';
 import type { UiResult } from '../vm/ui';
 import { compileSceneAction, WorkflowError, type CompiledWorkflow, type CompiledWorkflowStep } from './model';
 import type { SceneDocument } from '../scene-model';
@@ -20,13 +21,14 @@ export interface WorkflowFailure {
   code: string;
   message: string;
   uncertain: boolean;
+  diagnostics?: WaitDiagnostics;
 }
 export interface WorkflowStepResult {
   id: string;
   path: string;
   sceneId: string;
   actionId: string;
-  target: string;
+  target?: string;
   tool: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'uncertain' | 'skipped';
   startedAt?: number;
@@ -72,6 +74,61 @@ interface ActiveRun {
 const mutates = (tool: string) => tool !== 'wait_for_widget';
 const bounded = (value: unknown) =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+const object = (value: unknown): Record<string, unknown> | undefined =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+
+function waitDiagnostics(value: unknown, clean: (value: string) => string): WaitDiagnostics | undefined {
+  const data = object(value),
+    observation = object(data?.lastObservation);
+  if (!data || !observation) return;
+  const selector = uiSelectorSchema.safeParse(data.selector);
+  if (
+    !selector.success ||
+    ![
+      'present',
+      'absent',
+      'visible',
+      'enabled',
+      'actionable',
+      'text_equals',
+      'text_contains',
+      'text_changed',
+    ].includes(String(data.condition)) ||
+    bounded(data.timeoutMs) === undefined ||
+    !Number.isSafeInteger(data.attempts) ||
+    (data.attempts as number) < 1 ||
+    typeof observation.code !== 'string' ||
+    (observation.present !== undefined && typeof observation.present !== 'boolean')
+  )
+    return;
+  const cleanSelector = (input: Record<string, unknown>): Record<string, unknown> =>
+    Object.fromEntries(
+      Object.entries(input).map(([key, item]) => [
+        key,
+        typeof item === 'string' ? clean(item) : object(item) ? cleanSelector(object(item)!) : item,
+      ]),
+    );
+  return {
+    selector: cleanSelector(selector.data) as Selector,
+    condition: data.condition as string,
+    timeoutMs: data.timeoutMs as number,
+    attempts: data.attempts as number,
+    lastObservation: {
+      code: clean(observation.code).slice(0, 128),
+      ...(typeof observation.message === 'string'
+        ? { message: clean(observation.message).slice(0, 2048) }
+        : {}),
+      ...(typeof observation.present === 'boolean' ? { present: observation.present } : {}),
+      ...Object.fromEntries(
+        ['visible', 'enabled', 'actionable', 'textMatches'].flatMap((key) =>
+          typeof observation[key] === 'boolean' ? [[key, observation[key]]] : [],
+        ),
+      ),
+    },
+  };
+}
 
 /** Explicit, single-run orchestration. Scene restoration never invokes this controller. */
 export class WorkflowController {
@@ -176,7 +233,7 @@ export class WorkflowController {
           path: item.path,
           sceneId: item.sceneId,
           actionId: item.actionId,
-          target: item.target,
+          ...(item.target !== undefined ? { target: item.target } : {}),
           tool: item.tool,
           status: 'pending',
         })),
@@ -228,12 +285,14 @@ export class WorkflowController {
     const code = typeof result.code === 'string' ? result.code.slice(0, 128) : 'WORKFLOW_STEP_FAILED';
     const uncertain =
       result.uncertain === true || (mutates(item.tool) && ['TIMEOUT', 'SESSION_INVALIDATED'].includes(code));
+    const diagnostics = waitDiagnostics(result.diagnostics, clean);
     return {
       code,
       message: clean(
         typeof result.message === 'string' ? result.message : '步骤执行失败，请检查目标和自动化连接。',
       ).slice(0, 2048),
       uncertain,
+      ...(diagnostics ? { diagnostics } : {}),
     };
   }
   private async perform(

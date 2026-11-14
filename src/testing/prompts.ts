@@ -20,6 +20,7 @@ export const testPromptPlans = {
     topics: ['workflow'],
     steps: [
       '使用 run_test 返回的真实 runId 查询进度、流程步骤、HTTP/WS/UI 断言与证据。查询不会执行或恢复步骤，不为获取结果重新启动测试。',
+      '前置或主操作的等待失败在 steps[].failure.diagnostics 中查看 selector、condition、timeoutMs、attempts 和 lastObservation；按 present 及 visible/enabled/actionable/textMatches 区分缺失目标与状态不满足。诊断随操作秘密参数脱敏，先核对失败步骤和起点，不自动延长超时、重放操作或注入事件。',
       '区分操作 completed 与测试 passed；检查原始请求参数、本轮响应提取的订单 ID、同一订单事件及精确订单行，说明失败或未确认位置与清理结果。结果未确认时先检查页面和新网络记录，不自动重试有副作用的动作。',
     ],
   },

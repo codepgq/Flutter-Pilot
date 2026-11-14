@@ -3,7 +3,7 @@
   "displayName": "Flutter Pilot",
   "icon": "resources/flutter-pilot-icon.png",
   "description": "Flutter 运行时调试与 Agent 联调工作台：HTTP/WebSocket 采集与 Mock、UI 精确操作、热重载和 MCP。",
-  "version": "0.0.17",
+  "version": "0.0.19",
   "publisher": "flutter-pilot",
   "license": "MIT",
   "engines": {
@@ -160,7 +160,7 @@
     "test:proxy": "python3 -m unittest discover -s tests/proxy -v",
     "test:ui": "playwright test",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-pilot-0.0.17.vsix",
+    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-pilot-0.0.19.vsix",
     "test:ide": "node scripts/ide-test.mjs",
     "format:check": "prettier --check \"src/**/*.ts\" \"webview/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/*.{mjs,cjs}\" \"*.{json,ts,mts}\"",
     "test:vm": "node scripts/vm-injection-smoke.mjs",

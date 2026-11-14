@@ -4,7 +4,13 @@ import { mkdtemp, mkdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { VmDiscovery, type VmDebugSession, type VmDiscoveryHost } from '../src/vm/discovery';
+import {
+  createVscodeDiscoveryHost,
+  VmDiscovery,
+  type VmDebugSession,
+  type VmDiscoveryHost,
+} from '../src/vm/discovery';
+import { appLaunchConfigurationNameKey } from '../src/mcp/app-launch';
 
 const disposals: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -22,6 +28,7 @@ async function fixture(api?: unknown) {
   disposals.push(() => rm(root, { recursive: true, force: true }));
   const events = new EventEmitter();
   let roots = [{ id: 'workspace', path: root }];
+  let activeSession: VmDebugSession | undefined;
   const event = (name: string) => (listener: (...args: any[]) => void) => {
     events.on(name, listener);
     return {
@@ -31,6 +38,7 @@ async function fixture(api?: unknown) {
     };
   };
   const host: VmDiscoveryHost = {
+    getActiveSession: () => activeSession,
     getWorkspaceRoots: () => roots,
     onCustomEvent: event('custom'),
     onSessionStarted: event('start'),
@@ -56,8 +64,12 @@ async function fixture(api?: unknown) {
     root,
     events,
     discovery,
+    host,
     session,
     send,
+    setActiveSession: (value: VmDebugSession) => {
+      activeSession = value;
+    },
     setRoots: (value: typeof roots) => {
       roots = value;
       events.emit('roots');
@@ -106,6 +118,114 @@ async function daemon(handler: (request: any, socket: WebSocket) => void) {
 }
 
 describe('VM debugger discovery', () => {
+  it.each(['started', 'recovered'] as const)(
+    'resolves an adapter-mutated configuration for a %s session without guessing display prefixes',
+    async (mode) => {
+      const f = await fixture();
+      const configs = [
+        { name: 'app (Pilot)', type: 'dart', request: 'launch', cwd: 'app', program: 'lib/pilot.dart' },
+      ];
+      const adapter = createVscodeDiscoveryHost({
+        workspace: {
+          workspaceFolders: [{ uri: { fsPath: f.root, toString: () => 'workspace' } }],
+          getConfiguration: () => ({ get: () => configs }),
+        },
+      } as any);
+      f.host.configurationName = adapter.configurationName;
+      const target = {
+        ...f.session('decorated', {
+          ...configs[0],
+          name: 'app (Pilot) (iPhone 17)',
+          cwd: join(f.root, 'app'),
+          program: join(f.root, 'app/lib/pilot.dart'),
+          deviceName: 'iPhone 17 (ios)',
+          deviceId: 'sim',
+          ...(mode === 'started' ? { [appLaunchConfigurationNameKey]: 'app (Pilot)' } : {}),
+          env: { SECRET: 'do-not-publish' },
+        }),
+        name: 'app (Pilot) (iPhone 17)',
+      };
+      const listener = vi.fn();
+      f.discovery.subscribeDebugSessions(listener);
+      if (mode === 'started') f.events.emit('start', target);
+      else {
+        f.setActiveSession(target);
+        await f.discovery.start();
+      }
+      expect(f.discovery.debugSessions('workspace')).toEqual([
+        {
+          id: 'decorated',
+          name: 'app (Pilot) (iPhone 17)',
+          configurationName: 'app (Pilot)',
+          deviceId: 'sim',
+        },
+      ]);
+      expect(JSON.stringify(f.discovery.debugSessions('workspace'))).not.toContain('do-not-publish');
+      if (mode === 'started') expect(listener.mock.calls[0][0].session.configurationName).toBe('app (Pilot)');
+      target.configuration.program = join(f.root, 'app/lib/foreign.dart');
+      expect(f.discovery.debugSessions('workspace')[0]).not.toHaveProperty('configurationName');
+    },
+  );
+  it('keeps the exact configuration identity separate from an IDE decorated display name', async () => {
+    const f = await fixture();
+    const target = { ...f.session('decorated', { name: 'app', deviceId: 'sim' }), name: 'app (workspace)' };
+    const listener = vi.fn();
+    f.discovery.subscribeDebugSessions(listener);
+    f.events.emit('start', target);
+    expect(f.discovery.debugSessions('workspace')).toEqual([
+      { id: 'decorated', name: 'app (workspace)', configurationName: 'app', deviceId: 'sim' },
+    ]);
+    expect(listener.mock.calls[0][0].session).toMatchObject({
+      name: 'app (workspace)',
+      configurationName: 'app',
+    });
+  });
+  it('recovers configuration identity from the active IDE session after extension reload', async () => {
+    const f = await fixture();
+    f.setActiveSession({ ...f.session('active', { name: 'app', deviceId: 'sim' }), name: 'app (workspace)' });
+    await f.discovery.start();
+    expect(f.discovery.debugSessions('workspace')).toEqual([
+      { id: 'active', name: 'app (workspace)', configurationName: 'app', deviceId: 'sim' },
+    ]);
+  });
+  it('publishes device-bound start/stop events even when no VM URI was ever discovered', async () => {
+    const f = await fixture();
+    const listener = vi.fn();
+    const subscription = f.discovery.subscribeDebugSessions(listener);
+    const own = f.session('brief', { deviceId: 'simulator-123', env: { SECRET: 'private' } });
+    f.events.emit('start', own);
+    expect(f.discovery.debugSessions('workspace')).toEqual([
+      { id: 'brief', name: 'App brief', deviceId: 'simulator-123' },
+    ]);
+    f.events.emit('stop', own);
+    expect(listener.mock.calls.map(([event]) => event)).toEqual([
+      {
+        kind: 'started',
+        workspaceId: 'workspace',
+        session: { id: 'brief', name: 'App brief', deviceId: 'simulator-123' },
+      },
+      {
+        kind: 'stopped',
+        workspaceId: 'workspace',
+        session: { id: 'brief', name: 'App brief', deviceId: 'simulator-123' },
+      },
+    ]);
+    expect(JSON.stringify(listener.mock.calls)).not.toContain('private');
+    subscription.dispose();
+    f.events.emit('start', f.session('later'));
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+  it('tracks only this workspace started Dart sessions before VM URIs arrive and drops terminated ones', async () => {
+    const f = await fixture();
+    const own = f.session('starting');
+    f.events.emit('start', own);
+    f.events.emit('start', { ...f.session('unrelated'), workspaceId: 'other-workspace' });
+    f.events.emit('start', { ...f.session('node'), type: 'node' });
+    expect(f.discovery.debugSessions('workspace')).toEqual([{ id: 'starting', name: 'App starting' }]);
+    expect(f.discovery.snapshot().candidates).toEqual([]);
+    f.events.emit('stop', own);
+    expect(f.discovery.debugSessions('workspace')).toEqual([]);
+  });
   it('controls only the requested live Flutter session through its captured debug object', async () => {
     const f = await fixture();
     const selected = { ...f.session('selected'), customRequest: vi.fn(async () => undefined) };
@@ -425,6 +545,9 @@ describe('DTD existing-session discovery', () => {
       source: 'dtd',
       endpoint: 'localhost:3456',
     });
+    expect(f.discovery.debugSessions('workspace')).toEqual([
+      { id: 'existing', name: 'Existing App', deviceId: 'ios' },
+    ]);
     expect(JSON.stringify(f.discovery.snapshot())).not.toContain('secret');
     dtd.notify('Editor', 'debugSessionChanged', {
       debugSession: {

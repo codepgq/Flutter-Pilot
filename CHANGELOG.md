@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.0.19 — Scene 操作归档与等待诊断（2026-11-14）
+
+- 正式发布 0.0.18 本地安装版的场景滚动、手动 UI 操作入口、App 启动、键盘确认和 Key 交互修复。
+- 归档跨 Scene 公共操作、登录 / 导航入口及生产校验示例，完善真实 Key、参数脱敏、网络命中与最终 UI 核验流程。
+- 发布离线 `capabilities`、`scene_action_quick_run`、`scene_action_authoring` 导航，覆盖全部 51 个工具和 58 个 Prompts。
+- 等待失败保留实际选择器、条件、期限及最后观测；工作台展示可读步骤、真实 Key 和排查提示，嵌套业务测试保持秘密脱敏。
+
+## 0.0.18 — 场景滚动与 UI 操作入口（2026-11-14）
+
+- 修复打开 Scene 详情后滚轮被嵌套容器拦截的问题，宽屏和窄屏均可滚动到规则末尾并返回。
+- 场景内明确展示“UI 操作（Workflow）”，支持手动选择、参数、执行通道、Widget Key 步骤预览、运行与取消；空态提供配置和重载入口。
+- 新增 MCP `start_app`，显式启动当前工作区已保存的命名 Dart Debug 配置，连接后由 Agent 按需运行 Scene 操作。
+- 新增 `capabilities`、`scene_action_quick_run`、`scene_action_authoring` Prompts，支持离线查阅全部能力、快速运行已有操作及编写归档；51 个工具均保留同名 Prompt，共 58 个模板。
+- 修复 IDE 会话显示名附加设备名后的身份识别，保留超时解锁和设备校验；HTTP 状态补充已接入 Dio 数及惰性客户端覆盖边界。
+- Scene 操作新增 `hide_keyboard` 步骤，确认键盘稳定收起后再继续，避免输入后按钮位置变化导致点击失效。
+- 修复 Key 位于按钮子区域时的交互祖先识别，保留 Key 子区域的实际点击位置、禁用和遮挡检查。
+- Scene 等待失败保留实际目标、条件及最后观测，工作台显示可读失败步骤、真实 Key 和排查提示；耗时取整并注明等待包含定位，诊断及嵌套业务测试保持秘密脱敏。
+
 ## 0.0.17 — Scene 操作与 Workflow 合并（2026-11-14）
 
 - 将 Workflow 合并为 Scene 的 targets/actions；MCP、工作台和 Test Case v2 统一引用 Scene 操作。

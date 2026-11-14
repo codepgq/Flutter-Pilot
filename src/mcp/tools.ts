@@ -35,13 +35,29 @@ export function encodeWsMessage(args: Record<string, unknown>): string {
 export const mcpTools = {
   get_usage_guide: {
     description:
-      '当需要编辑 scenes.json、Mock API/WS、操作Flutter UI、修复Key或热重载/热重启时，先读取本指南。topic为overview/http/ws/ui/workflow，热更新见workflow。无需sessionId或在线IDE。每个工具另有同名MCP Prompt可按需读取操作步骤。',
+      '查阅 App 启动/热更新、API/WS Mock、Widget Key、键盘、Scene actions 和测试。topic 为 overview/http/ws/ui/workflow；overview 提供 capabilities、scene_action_quick_run、scene_action_authoring 等 Prompt 导航，已有操作按 workflow.quickRun 复用。无需 sessionId 或在线 IDE；工具另有同名 Prompt。',
     schema: z.object({ topic: z.enum(guideTopics).optional() }).strict(),
   },
   list_sessions: {
     description:
-      '需要Flutter Mock、UI操作或hot_reload/hot_restart时先get_usage_guide，再列出项目选择对应sessionId；检查vmConnected和capabilities.lifecycle等能力，不操作无关项目。',
+      '列出项目并选择任务对应 sessionId；检查 vmConnected、capabilities.appLaunch 的已有会话/设备和命名配置，优先复用已运行 App。VM 离线也能发现 Scene；启动超时先查询此处，不重复启动或操作无关项目。',
     schema: z.object({}).strict(),
+  },
+  start_app: {
+    description:
+      '显式启动当前项目已保存的 Dart Debug launch 配置，或复用同名现有会话，并等待 VM 连接。先从 list_sessions 的 capabilities.appLaunch.configurations 选择 configurationName；可选 deviceId 明确原生设备，不接受命令、启动参数或任意脚本。指定设备时只复用能确认同一设备的会话。启动不会执行 Scene 操作；检查网络状态后再 run_scene_action。超时可能仍在编译，先查询会话和 IDE，勿重复启动。',
+    schema: z
+      .object({
+        ...session,
+        configurationName: z.string().min(1).max(256),
+        deviceId: z
+          .string()
+          .regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/)
+          .refine((value) => !/^(chrome|edge|web-server)$/i.test(value))
+          .optional(),
+        timeoutMs: timeout,
+      })
+      .strict(),
   },
   hot_reload: {
     description:
@@ -58,7 +74,7 @@ export const mcpTools = {
   ...testMcpTools,
   get_network_status: {
     description:
-      '编辑Mock前获取files.scenes准确路径及开关状态；Agent读取并增量编辑文件，格式见get_usage_guide(topic=http/ws)，保存后reload_rules，再activate_scene统一开启所需Mock。',
+      '查询 files.scenes、当前 Mock 与分域接入状态；HTTP 查看 attachedDioInstances 和覆盖边界，只要求本流程所需域/客户端就绪。编辑后 reload_rules 并激活所需 Mock；applied 需以本轮新记录验证。',
     schema: z.object(session).strict(),
   },
   get_requests: {
@@ -116,7 +132,7 @@ export const mcpTools = {
   },
   list_scenes: {
     description:
-      '列出项目场景ID、名称、HTTP/WS规则数量、targets/actions 概要及当前激活和运行时状态，VM离线也可查询。规则正文通过files.scenes读取。',
+      '优先发现项目 Scene、HTTP/WS 规则数量、targets/actions 概要和当前 Mock；再 list_scene_actions 选择已有操作及参数，无需逐步探索或读取整份 Mock。VM 离线也可查询；定义仅来自 files.scenes。',
     schema: z.object(session).strict(),
   },
   activate_scene: {

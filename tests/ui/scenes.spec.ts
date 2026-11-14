@@ -252,3 +252,43 @@ for (const width of [1280, 390])
     await expect(page.getByRole('region', { name: '场景列表' })).toBeVisible();
     await page.screenshot({ path: `artifacts/scenes-${width}.png`, fullPage: true });
   });
+
+for (const width of [1280, 390])
+  test(`场景详情 ${width}px 可从操作面板滚动至规则末尾并返回`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const longScene = {
+      ...scene,
+      targets: { home: { text: '首页' } },
+      actions: [
+        {
+          id: 'login',
+          name: '登录并进入主页',
+          steps: [{ id: 'home', type: 'wait_for_widget', target: 'home' }],
+        },
+      ],
+      httpRules: Array.from({ length: 24 }, (_, index) => ({
+        ...http,
+        id: `http-${index}`,
+        name: `HTTP 规则 ${index + 1}`,
+      })),
+      wsRules: Array.from({ length: 12 }, (_, index) => ({
+        ...ws,
+        id: `ws-${index}`,
+        name: `WS 规则 ${index + 1}`,
+      })),
+    };
+    await open(page, { scenes: { ...fixture.scenes, scenes: [longScene] } });
+    await page.getByRole('button', { name: '查看场景 默认场景' }).click();
+    const detail = page.getByRole('region', { name: '场景详情' });
+    const bounds = (await detail.boundingBox())!;
+    await page.mouse.move(bounds.x + bounds.width / 2, Math.min(bounds.y + 100, 850));
+    const main = page.locator('main');
+    const initial = await main.evaluate((element) => element.scrollTop);
+    await page.mouse.wheel(0, 600);
+    await expect.poll(() => main.evaluate((element) => element.scrollTop)).toBeGreaterThan(initial);
+    await page.mouse.wheel(0, 100000);
+    await expect(detail.getByRole('heading', { name: 'WS 规则 12', exact: true })).toBeInViewport();
+    await page.mouse.wheel(0, -100000);
+    await expect.poll(() => main.evaluate((element) => element.scrollTop)).toBe(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
