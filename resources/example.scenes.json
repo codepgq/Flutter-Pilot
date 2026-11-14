@@ -42,6 +42,211 @@
           }
         }
       ]
+    },
+    {
+      "id": "common_operations",
+      "name": "公共操作（示例 Key 需替换）",
+      "httpRules": [],
+      "wsRules": [],
+      "targets": {
+        "loginPage": {
+          "key": "login.page"
+        },
+        "usernameInput": {
+          "key": "login.username"
+        },
+        "passwordInput": {
+          "key": "login.password"
+        },
+        "loginSubmitButton": {
+          "key": "login.submit"
+        },
+        "accountLabel": {
+          "key": "account.identity"
+        },
+        "priceInput": {
+          "key": "order.price"
+        },
+        "quantityInput": {
+          "key": "order.quantity"
+        },
+        "submitButton": {
+          "key": "order.submit"
+        },
+        "confirmation": {
+          "key": "order.confirmation"
+        },
+        "confirmPrice": {
+          "key": "order.confirm.price",
+          "ancestor": {
+            "key": "order.confirmation"
+          }
+        },
+        "confirmQuantity": {
+          "key": "order.confirm.quantity",
+          "ancestor": {
+            "key": "order.confirmation"
+          }
+        },
+        "confirmButton": {
+          "key": "order.confirm.submit",
+          "ancestor": {
+            "key": "order.confirmation"
+          }
+        }
+      },
+      "actions": [
+        {
+          "id": "login",
+          "name": "登录并确认账号（替换为实际 Key）",
+          "inputs": {
+            "username": {
+              "required": true
+            },
+            "password": {
+              "required": true,
+              "secret": true
+            }
+          },
+          "steps": [
+            {
+              "id": "waitLogin",
+              "type": "wait_for_widget",
+              "target": "loginPage",
+              "state": "visible"
+            },
+            {
+              "id": "fillUsername",
+              "type": "enter_text",
+              "target": "usernameInput",
+              "text": "${inputs.username}"
+            },
+            {
+              "id": "fillPassword",
+              "type": "enter_text",
+              "target": "passwordInput",
+              "text": "${inputs.password}"
+            },
+            {
+              "id": "submitLogin",
+              "type": "tap",
+              "target": "loginSubmitButton"
+            },
+            {
+              "id": "waitAccountIdentity",
+              "type": "wait_for_widget",
+              "target": "accountLabel",
+              "state": "text_equals",
+              "text": "${inputs.username}",
+              "timeoutMs": 10000
+            }
+          ],
+          "description": "仅执行操作，不切换当前 Mock；执行前确认起始页面。"
+        },
+        {
+          "id": "submit_order",
+          "name": "填入价格数量并确认下单（替换为实际 Key）",
+          "inputs": {
+            "price": {
+              "required": true
+            },
+            "quantity": {
+              "required": true
+            }
+          },
+          "steps": [
+            {
+              "id": "fillPrice",
+              "type": "enter_text",
+              "target": "priceInput",
+              "text": "${inputs.price}"
+            },
+            {
+              "id": "fillQuantity",
+              "type": "enter_text",
+              "target": "quantityInput",
+              "text": "${inputs.quantity}"
+            },
+            {
+              "id": "waitSubmit",
+              "type": "wait_for_widget",
+              "target": "submitButton",
+              "state": "actionable"
+            },
+            {
+              "id": "openConfirmation",
+              "type": "tap",
+              "target": "submitButton"
+            },
+            {
+              "id": "waitConfirmation",
+              "type": "wait_for_widget",
+              "target": "confirmation",
+              "state": "visible"
+            },
+            {
+              "id": "checkConfirmPrice",
+              "type": "wait_for_widget",
+              "target": "confirmPrice",
+              "state": "text_equals",
+              "text": "${inputs.price}"
+            },
+            {
+              "id": "checkConfirmQuantity",
+              "type": "wait_for_widget",
+              "target": "confirmQuantity",
+              "state": "text_equals",
+              "text": "${inputs.quantity}"
+            },
+            {
+              "id": "confirmOnce",
+              "type": "tap",
+              "target": "confirmButton"
+            }
+          ],
+          "description": "仅执行操作，不切换当前 Mock；执行前确认起始页面。"
+        },
+        {
+          "id": "login_and_submit_order",
+          "name": "登录后下单（顺序复用子流程）",
+          "inputs": {
+            "username": {
+              "required": true
+            },
+            "password": {
+              "required": true,
+              "secret": true
+            },
+            "price": {
+              "required": true
+            },
+            "quantity": {
+              "default": "2"
+            }
+          },
+          "steps": [
+            {
+              "id": "login",
+              "type": "call",
+              "inputs": {
+                "username": "${inputs.username}",
+                "password": "${inputs.password}"
+              },
+              "actionId": "login"
+            },
+            {
+              "id": "submitOrder",
+              "type": "call",
+              "inputs": {
+                "price": "${inputs.price}",
+                "quantity": "${inputs.quantity}"
+              },
+              "actionId": "submit_order"
+            }
+          ],
+          "description": "仅执行操作，不切换当前 Mock；执行前确认起始页面。"
+        }
+      ]
     }
   ]
 }

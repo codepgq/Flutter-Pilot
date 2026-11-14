@@ -1,5 +1,14 @@
 # 验收记录
 
+## 0.0.17 Scene 操作与 Workflow 合并（2026-11-14）
+
+- `scenes.json` 成为 Mock、共享 targets 和多个命名 actions 的唯一配置来源；纯 Mock、纯操作、targets-only 与跨 Scene 子操作均支持。操作来源与当前 Mock 独立，激活、重载、重连和 IDE 恢复不重放 UI。
+- 工作台操作入口并入 Scene 详情，MCP 改用 Scene action 工具；Test Case v2 显式引用操作并保留 HTTP / WS / UI 断言、事件及临时环境清理。旧 workflows.json 保留但不再读取或创建，旧测试格式明确报错。
+- 独立子代理完成核心、运行时、测试、UI、协议及文档审核；已修复 secret 默认值暴露、测试等待设备锁时的环境变更、排队启动与连接设置绕过运行锁、参数重载残留和名称规范化问题。
+- 发布 UI 检查发现的场景重命名初始化竞态已修复，原失败用例连续执行 20 次通过。
+- 发布验证：689 项 Vitest / 42 文件、82 项 Playwright，TypeScript / Webview 类型、格式、构建及 diff 检查。设备业务 E2E 沿用既有验收边界，本轮未重复真机验收。
+- 本地 VSIX、Cursor CLI 安装及 main / 附注标签 v0.0.17 推送沿用既有发布流程。安装包为 `artifacts/flutter-pilot-0.0.17.vsix`，包与安装文件一致性及离线 MCP 握手结果记录于 `artifacts/v0.0.17-install-report.json`。活动 Cursor 窗口在方便时执行 Developer: Reload Window 加载新版。
+
 ## 0.0.16 API 请求与请求历史合并（2026-11-13）
 
 - API 请求统一使用历史数据源，每次调用分别展示，保留搜索、组合筛选、30 条分页、单次详情、备注标签、删除、清空和生成 Mock；底层目录统计与 MCP 接口兼容。

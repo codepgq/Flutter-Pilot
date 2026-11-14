@@ -27,7 +27,7 @@ export class TestStore {
       }
       return validateTestDocument(value);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, tests: [] };
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 2, tests: [] };
       throw error;
     }
   }

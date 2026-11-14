@@ -4,7 +4,6 @@ import { encodeWsMessage } from './tools';
 
 export interface NetworkHost {
   scenesPath: string;
-  workflowsPath?: string;
   testsPath?: string;
   listScenes(): unknown;
   activateScene(id: string | null): Promise<void>;
@@ -29,7 +28,6 @@ export class McpNetworkController {
       ...this.host.status(),
       files: {
         scenes: this.host.scenesPath,
-        ...(this.host.workflowsPath ? { workflows: this.host.workflowsPath } : {}),
         ...(this.host.testsPath ? { tests: this.host.testsPath } : {}),
       },
       loaded: this.loaded,

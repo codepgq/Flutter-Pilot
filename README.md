@@ -6,7 +6,9 @@
 
 配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key、文字或语义定位页面，通过 VM 或设备输入操作，减少逐步截图识别的耗时与 token 消耗。
 
-当前版本为 **0.0.16**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+当前版本为 **0.0.17**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+
+**0.0.17 更新**：Workflow 合并为 Scene 的命名操作，Mock、targets 和 actions 统一保存在 `scenes.json`；公共操作可配合不同 Mock 复用，工作台支持参数、执行通道、进度和取消，业务测试升级为 Test Case v2。旧 `workflows.json` 保留但不再读取。
 
 **0.0.16 更新**：API 请求与请求历史合并为一个 Tab，每次调用单独一行，沿用紧凑列表并统一搜索、筛选和分页；详情固定到所选请求，保留备注标签、修改对比和生成 Mock，修复清空、末页删除及快速切换时的详情与分页问题。
 
@@ -16,11 +18,11 @@
 
 **移动交互**：新增私有 Appium 设备通道，支持无 Key 定位、多指手势、文本编辑、键盘和系统操作，详见 [移动交互指南](docs/mobile-automation.md)。
 
-**可复用 Workflow**：Agent 首次探索并保存登录、填表、下单确认等流程，后续通过 `run_workflow` 一次启动，由插件执行参数化步骤；支持进度、耗时、失败位置和取消。流程与 Mock Scene 分开，连接恢复不会重复执行 UI；`completed` 表示操作完成。详见 [Workflow 指南](docs/workflows.md)。
+**Scene 操作**：Mock、共享 targets 和多个命名 actions 统一保存于 `scenes.json`。Agent 首次探索验证后，通过 `run_scene_action` 参数化执行登录、填表或下单；公共操作可复用于不同 Mock，运行不切换当前 Mock。支持后台进度、耗时、取消与失败即停，连接恢复不重放。详见 [操作指南](docs/workflows.md)。
 
-**业务测试**：Test Case 复用 Workflow，组合临时 Scene、有状态 HTTP Mock、本轮请求参数断言、响应变量提取、关联 WS 事件和精确订单行验证。`run_test` 后台执行，`get_test_run` 查询证据，只有 `passed` 表示测试通过；取消和断线不自动重放提交。详见 [测试指南](docs/testing.md)。
+**业务测试**：Test Case v2 引用 Scene 操作，组合临时 Scene、有状态 HTTP Mock、本轮请求参数断言、响应变量提取、关联 WS 事件和精确订单行验证。`run_test` 后台执行，`get_test_run` 查询证据，只有 `passed` 表示测试通过；取消和断线不自动重放提交。详见 [测试指南](docs/testing.md)。
 
-**MCP 全能力提示词**：50 个工具均有同名独立 Prompt，包括 `hot_reload` / `hot_restart`、截图、Workflow 和测试工具；保留四个场景模板，共 54 个。每个工具提示词提供操作步骤和生产参数定义，新增能力漏写模板会被检查发现。
+**MCP 全能力提示词**：50 个工具均有同名独立 Prompt，包括 `hot_reload` / `hot_restart`、截图、Scene 操作和测试工具；保留四个场景模板，共 54 个。每个工具提示词提供操作步骤和生产参数定义，新增能力漏写模板会被检查发现。
 
 **0.0.6 修复 Cursor 设置卡死和已有 VM 会话补查恢复**：打开工作台会重新补查先前已运行的 Flutter Debug 会话；新增 MCP `hot_reload` / `hot_restart`，精确控制当前 VM 绑定的 IDE 调试会话。
 
@@ -103,7 +105,7 @@ Agent 可按 `ValueKey<String/int>`、文字、语义、类型、祖先或快照
 
 WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服务端消息，`send_ws_message` 通过 App 当前真实 WS 连接发给服务端。均需开启 WS 采集并确认连接已接入，并选择准确的在线连接；不新建连接。可传原始 `text`，或传 `topic` 和 `data` 组装为 `{"topic": "...", "data": ...}`；自定义业务协议使用完整原始文本。真实发送经过当前 outbound 规则，可能被替换或丢弃；工具调用成功后仍需核对消息和业务结果。
 
-服务提供 `overview`、`http`、`ws`、`ui`、`workflow` 五个指南主题，以及 54 个 MCP 提示模板：保留 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，全部 50 个工具另有同名独立模板，包含 `hot_reload`、`hot_restart`、Workflow 和 Test Case。每个工具模板提供准备、操作、验证步骤及与工具共用的参数 schema；新增工具遗漏模板会使类型或测试检查失败。指南可通过工具或资源读取；支持 Prompts 的客户端可按需读取并填写任务。Agent 通过 `tools/list` 获取可调用能力，初始化说明与 Prompts 补充用法；是否主动使用仍取决于客户端和 Agent。
+服务提供 `overview`、`http`、`ws`、`ui`、`workflow` 五个指南主题，以及 54 个 MCP 提示模板：保留 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，全部 50 个工具另有同名独立模板，包含 `hot_reload`、`hot_restart`、Scene 操作和 Test Case。每个工具模板提供准备、操作、验证步骤及与工具共用的参数 schema；新增工具遗漏模板会使类型或测试检查失败。指南可通过工具或资源读取；支持 Prompts 的客户端可按需读取并填写任务。Agent 通过 `tools/list` 获取可调用能力，初始化说明与 Prompts 补充用法；是否主动使用仍取决于客户端和 Agent。
 
 | 能力 | MCP 工具及同名 Prompt |
 | --- | --- |
@@ -117,7 +119,7 @@ WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服�
 | 网络状态与 HTTP 记录 | `get_network_status`、`get_requests`、`get_request` |
 | WebSocket | `get_ws_connections`、`get_ws_messages`、`inject_ws_message`、`send_ws_message` |
 | 场景与采集 | `reload_rules`、`set_capture_enabled`、`list_scenes`、`activate_scene`、`deactivate_scene` |
-| 可复用流程           | `list_workflows`、`run_workflow`、`get_workflow_run`、`cancel_workflow_run`                              |
+| Scene 操作           | `list_scene_actions`、`run_scene_action`、`get_scene_action_run`、`cancel_scene_action_run`                              |
 | 业务测试             | `list_tests`、`run_test`、`get_test_run`、`cancel_test_run`                                              |
 
 支持标准 MCP Prompts 的客户端可通过 `prompts/list` 发现这些模板，并用 `prompts/get` 按名称读取；`task` 是可选的提示词参数，不是工具参数。截图示例：先通过 `list_sessions` 选择已连接 VM 的项目，调用 `take_screenshot` 并传入 `sessionId` 和 `mode: "screen"`；需要长图时使用 `mode: "long"`，有多个滚动区域时先通过 `list_screenshot_targets` 选择 `targetId`。结果是 MCP PNG 图片内容，由客户端显示。
@@ -158,7 +160,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 
 ### 从 VSIX 安装
 
-1. 获取 `flutter-pilot-0.0.16.vsix`。从源码构建见下方步骤。
+1. 获取 `flutter-pilot-0.0.17.vsix`。从源码构建见下方步骤。
 2. 在 VS Code 或 Cursor 扩展面板右上角菜单选择 **Install from VSIX… / 从 VSIX 安装…**。
 3. 选择安装包，按 IDE 提示重新加载窗口。
 4. 打开包含 `pubspec.yaml` 的 Flutter 项目根目录，并信任工作区。
@@ -168,7 +170,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 安装当前 Flutter Pilot 包，例如：
 
 ```sh
-cursor --install-extension artifacts/flutter-pilot-0.0.16.vsix --force
+cursor --install-extension artifacts/flutter-pilot-0.0.17.vsix --force
 # VS Code 使用 code --install-extension 同一文件 --force
 ```
 
@@ -191,7 +193,7 @@ npm test
 npm run package
 ```
 
-产物为 `artifacts/flutter-pilot-0.0.16.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
+产物为 `artifacts/flutter-pilot-0.0.17.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
 
 ### 使用已有引擎
 
@@ -592,9 +594,8 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 项目根目录/
 └── .flutter-pilot/
     ├── project.json              # 项目 UUID、格式版本、接入方式和项目设置
-    ├── scenes.json               # 场景及持久激活状态，统一包含 HTTP / WS 规则
-    ├── workflows.json            # 可选：已探索验证的参数化操作流程
-    └── tests.json                # 可选：复用流程的业务测试与关联断言
+    ├── scenes.json               # 场景及持久激活状态，统一包含 HTTP / WS 规则、targets 和 actions
+    └── tests.json                # 可选：引用 Scene 操作的 v2 业务测试与关联断言
 ```
 
 `project.json` 示例（UUID 由插件生成，下面仅演示结构）：
@@ -794,7 +795,7 @@ python3 tool/device_smoke.py --mitmdump /absolute/path/to/mitmdump --ios YOUR_SI
 
 ```sh
 npm run package
-shasum -a 256 artifacts/flutter-pilot-0.0.16.vsix
+shasum -a 256 artifacts/flutter-pilot-0.0.17.vsix
 ```
 
 VSIX 包含扩展构建产物、VM 注入模板、代理 addon、引擎清单及文档，不包含 Node 开发依赖、Flutter 示例构建结果或真实证书。首次引擎下载单独发生。源码中的 README 修改后，应重新打包，安装包内的文档才会更新。

@@ -79,17 +79,32 @@ const ui = z
     if (v.stableForMs !== undefined && v.stableForMs > (v.timeoutMs ?? 30000))
       ctx.addIssue({ code: 'custom', message: '稳定观察时间不能超过断言超时。' });
   });
+const actionReference = z
+  .object({
+    sceneId: z
+      .string()
+      .min(1)
+      .max(128)
+      .refine((value) => value.trim().length > 0 && !value.includes('${')),
+    actionId: name,
+  })
+  .strict();
 const test = z
   .object({
     id: name,
     name: z.string().trim().min(1).max(256),
-    workflowId: name,
+    action: actionReference,
     inputs: z.record(variable, text).optional(),
     setup: z
-      .array(z.object({ workflowId: name, inputs: z.record(variable, text).optional() }).strict())
+      .array(z.object({ action: actionReference, inputs: z.record(variable, text).optional() }).strict())
       .max(20)
       .optional(),
-    sceneId: name.optional(),
+    sceneId: z
+      .string()
+      .min(1)
+      .max(128)
+      .refine((value) => value.trim().length > 0)
+      .optional(),
     mock: z.unknown().optional(),
     timeoutMs: duration,
     expect: z
@@ -110,7 +125,7 @@ export type WsExpectation = z.infer<typeof ws>;
 export type UiExpectation = z.infer<typeof ui>;
 export type TestCase = Omit<z.infer<typeof test>, 'mock'> & { mock?: TestMock };
 export interface TestDocument {
-  version: 1;
+  version: 2;
   tests: TestCase[];
 }
 export class TestError extends Error {
@@ -215,8 +230,28 @@ export function bindTestMock(
   return validateTestMock(bound);
 }
 export function validateTestDocument(value: unknown): TestDocument {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const document = value as { version?: unknown; tests?: unknown };
+    if (
+      document.version === 1 ||
+      (Array.isArray(document.tests) &&
+        document.tests.some(
+          (item) =>
+            item &&
+            typeof item === 'object' &&
+            ('workflowId' in item ||
+              (Array.isArray(item.setup) &&
+                item.setup.some(
+                  (entry: unknown) => entry && typeof entry === 'object' && 'workflowId' in entry,
+                ))),
+        ))
+    )
+      return invalid(
+        '测试配置仅支持 version: 2；请用 action: { sceneId, actionId } 替换旧 workflowId 引用，setup 使用相同 action 引用。',
+      );
+  }
   const parsed = z
-    .object({ version: z.literal(1), tests: z.array(test).max(200) })
+    .object({ version: z.literal(2), tests: z.array(test).max(200) })
     .strict()
     .safeParse(value);
   if (!parsed.success)
@@ -252,5 +287,5 @@ export function validateTestDocument(value: unknown): TestDocument {
     }
     return result;
   });
-  return { version: 1, tests };
+  return { version: 2, tests };
 }

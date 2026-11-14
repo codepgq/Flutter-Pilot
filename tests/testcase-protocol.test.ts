@@ -12,7 +12,8 @@ import { getUsageGuide, guideTopics } from '../src/mcp/guide';
 import { testToolNames } from '../src/testing/tools';
 import { bindJsonTemplate, bindTestMock, validateTestDocument } from '../src/testing/model';
 import { compileTestMock } from '../src/testing/mock-model';
-import { compileWorkflow, validateWorkflowDocument } from '../src/workflows/model';
+import { compileSceneAction } from '../src/workflows/model';
+import { validateSceneDocument } from '../src/scene-model';
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -24,13 +25,16 @@ describe('Test Case MCP contracts', () => {
     const example = JSON.parse(await readFile('resources/example.tests.json', 'utf8'));
     expect((getUsageGuide('workflow').testing as Record<string, unknown>).exampleDocument).toEqual(example);
     const document = validateTestDocument(example);
-    const workflows = validateWorkflowDocument(
-      JSON.parse(await readFile('resources/example.workflows.json', 'utf8')),
-    );
+    const scenes = validateSceneDocument(JSON.parse(await readFile('resources/example.scenes.json', 'utf8')));
     expect(document.tests).toHaveLength(2);
     for (const test of document.tests) {
-      expect(test.workflowId).toBe('submit_order');
-      const compiled = compileWorkflow(workflows, test.workflowId, test.inputs ?? {});
+      expect(test.action.actionId).toBe('submit_order');
+      const compiled = compileSceneAction(
+        scenes,
+        test.action.sceneId,
+        test.action.actionId,
+        test.inputs ?? {},
+      );
       expect(compiled.steps.filter((step) => step.target === 'confirmButton')).toHaveLength(1);
     }
     const success = document.tests[0];
@@ -55,12 +59,12 @@ describe('Test Case MCP contracts', () => {
     expect(() => parseTool('run_test', snippets[0])).not.toThrow();
     expect(() =>
       validateTestDocument({
-        version: 1,
+        version: 2,
         tests: [
           {
             id: 'doc',
             name: '文档片段',
-            workflowId: 'submit_order',
+            action: { sceneId: 'common_operations', actionId: 'submit_order' },
             inputs: { price: '100.00', quantity: '2' },
             expect: { http: [snippets[1]] },
             events: [snippets[2]],

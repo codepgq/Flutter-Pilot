@@ -27,7 +27,9 @@ export function TestPanel({
   const [selected, setSelected] = useState('');
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const test = tests.find((item) => item.id === selected);
-  const flow = state.workflows?.catalogue?.workflows.find((item) => item.id === test?.workflowId);
+  const actionScene = state.scenes?.scenes.find((scene) => scene.id === test?.action.sceneId);
+  const action = actionScene?.actions?.find((item) => item.id === test?.action.actionId);
+  const actionInputsKey = JSON.stringify([test?.action, action?.inputs]);
   const run = data?.run;
   useEffect(() => {
     send('tests.refresh');
@@ -38,6 +40,9 @@ export function TestPanel({
       setInputs({});
     }
   }, [tests, selected]);
+  useEffect(() => {
+    setInputs({});
+  }, [actionInputsKey]);
   return (
     <div className="workflows-page">
       <section className="card" aria-label="业务测试">
@@ -46,8 +51,7 @@ export function TestPanel({
           <span className="badge">{tests.length} 个测试</span>
         </div>
         <p className="muted">
-          组合临时场景、可复用流程与本轮 HTTP / WS / UI 断言。使用当前 Debug
-          App，结束后恢复临时环境并保留页面。
+          组合临时场景、场景操作与本轮 HTTP / WS / UI 断言。使用当前 Debug App，结束后恢复临时环境并保留页面。
         </p>
         <div className="mcp-actions">
           <button onClick={() => send('tests.refresh')} disabled={state.busy}>
@@ -67,10 +71,16 @@ export function TestPanel({
           </p>
         )}
         {!tests.length && !data?.error && (
-          <p>暂无测试。让 Agent 引用已保存的 Workflow，补充本轮请求与业务结果断言。</p>
+          <p>暂无测试。让 Agent 引用 Scene 中已保存的操作，补充本轮请求与业务结果断言。</p>
         )}
         {!!tests.length && (
           <>
+            {test && (
+              <p className="muted">
+                操作来源：{actionScene?.name ?? test.action.sceneId} / {action?.name ?? test.action.actionId}
+              </p>
+            )}
+            {test && !action && <p role="alert">测试引用的场景操作不存在，请检查配置并重新加载场景。</p>}
             <div className="workflow-fields">
               <label>
                 选择测试
@@ -91,8 +101,8 @@ export function TestPanel({
                   ))}
                 </select>
               </label>
-              {flow &&
-                Object.entries(flow.inputs).map(([key, spec]) => (
+              {action &&
+                Object.entries(action.inputs ?? {}).map(([key, spec]) => (
                   <label key={`${test?.id}:${key}`}>
                     {key}（覆盖参数）
                     <input
@@ -110,14 +120,18 @@ export function TestPanel({
             </div>
             <button
               className="primary"
-              disabled={!test || data?.locked || state.busy}
+              disabled={!test || !action || data?.locked || state.busy}
               onClick={() => {
                 send('tests.run', {
                   testId: selected,
-                  inputs: Object.fromEntries(Object.entries(inputs).filter(([, value]) => value !== '')),
+                  inputs: Object.fromEntries(
+                    Object.entries(inputs).filter(
+                      ([key, value]) => Object.hasOwn(action?.inputs ?? {}, key) && value !== '',
+                    ),
+                  ),
                 });
                 setInputs((old) =>
-                  Object.fromEntries(Object.entries(old).filter(([key]) => !flow?.inputs[key]?.secret)),
+                  Object.fromEntries(Object.entries(old).filter(([key]) => !action?.inputs?.[key]?.secret)),
                 );
               }}
             >

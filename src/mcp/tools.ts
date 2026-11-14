@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { guideTopics } from './guide';
 import { automationMcpTools } from '../automation/tools';
-import { workflowMcpTools } from '../workflows/tools';
+import { sceneActionMcpTools } from '../workflows/tools';
 import { testMcpTools } from '../testing/tools';
 
 const session = { sessionId: z.string().min(1).max(256) };
@@ -54,7 +54,7 @@ export const mcpTools = {
     schema: z.object({ ...session, timeoutMs: timeout }).strict(),
   },
   ...automationMcpTools,
-  ...workflowMcpTools,
+  ...sceneActionMcpTools,
   ...testMcpTools,
   get_network_status: {
     description:
@@ -116,7 +116,7 @@ export const mcpTools = {
   },
   list_scenes: {
     description:
-      '列出项目场景ID、名称、HTTP/WS规则数量及当前激活和运行时状态，VM离线也可查询。规则正文通过files.scenes读取。',
+      '列出项目场景ID、名称、HTTP/WS规则数量、targets/actions 概要及当前激活和运行时状态，VM离线也可查询。规则正文通过files.scenes读取。',
     schema: z.object(session).strict(),
   },
   activate_scene: {

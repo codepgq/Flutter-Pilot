@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   HistoryEntry,
@@ -15,7 +15,7 @@ import './style.css';
 import { inspectJson } from './body';
 import { WebSocketPanel } from './websocket';
 import { McpPanel } from './mcp';
-import { WorkflowPanel } from './workflows';
+import { SceneActionsPanel, SceneActionRunPanel } from './scene-actions';
 import { TestPanel } from './tests';
 import type { WsRule } from '../src/ws/model';
 import type { Scene } from '../src/scene-model';
@@ -48,7 +48,7 @@ const initial: WorkbenchState = {
   logs: [],
   busy: false,
 };
-type Tab = 'apis' | 'rules' | 'breakpoints' | 'connection' | 'websocket' | 'mcp' | 'workflows' | 'tests';
+type Tab = 'apis' | 'rules' | 'breakpoints' | 'connection' | 'websocket' | 'mcp' | 'tests';
 type Snapshot = RequestSnapshot | ResponseSnapshot;
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
@@ -366,16 +366,11 @@ function App() {
     { id: 'apis', label: 'API 请求', icon: 'radar', count: state.history.total },
     { id: 'websocket', label: 'WebSocket', icon: 'radar', count: state.ws?.messages.total ?? 0 },
     { id: 'rules', label: 'Mock 场景', icon: 'rules', count: state.scenes?.scenes.length ?? 0 },
-    {
-      id: 'workflows',
-      label: '业务流程',
-      icon: 'play',
-      count: state.workflows?.catalogue?.workflows.length ?? 0,
-    },
     { id: 'tests', label: '业务测试', icon: 'play', count: state.tests?.catalogue?.tests.length ?? 0 },
     { id: 'breakpoints', label: '断点队列', icon: 'pause', count: state.pending.length },
     { id: 'mcp', label: 'MCP', icon: 'plug' },
   ];
+  const environmentBusy = state.busy || !!state.sceneActions?.locked || !!state.tests?.locked;
   const enabled = state.rules.filter((r) => r.enabled).length;
   const vmMode = state.mode !== 'proxy';
   const running = vmMode ? state.vm?.status === 'connected' : state.proxyActive;
@@ -394,7 +389,7 @@ function App() {
         <div className="header-actions">
           <Button
             action="screenshot.capture"
-            disabled={state.busy || !vmMode || state.vm?.status !== 'connected'}
+            disabled={environmentBusy || !vmMode || state.vm?.status !== 'connected'}
             title={
               vmMode && state.vm?.status === 'connected'
                 ? '截取 Flutter App，支持当前屏幕和滚动长图'
@@ -438,7 +433,7 @@ function App() {
                 action={vmMode ? (running ? 'vm.disconnect' : undefined) : running ? 'stop' : 'start'}
                 onClick={vmMode && !running ? () => setTab('connection') : undefined}
                 primary={!running}
-                disabled={state.busy || (vmMode && state.vm?.status === 'connecting')}
+                disabled={environmentBusy || (vmMode && state.vm?.status === 'connecting')}
               >
                 <Icon name={running ? 'stop' : 'play'} size={14} />
                 {vmMode
@@ -487,7 +482,7 @@ function App() {
       <main>
         {tab === 'connection' && (
           <>
-            <Connection state={state} preview={preview} />
+            <Connection state={{ ...state, busy: environmentBusy }} preview={preview} />
             {state.project && (
               <section className="project-binding" aria-label="当前绑定项目">
                 <details className="compact-disclosure">
@@ -502,7 +497,7 @@ function App() {
                       <Button onClick={() => send('project.open', { kind: 'rules' })} disabled={state.busy}>
                         规则文件
                       </Button>
-                      <Button action="project.reload" disabled={state.busy}>
+                      <Button action="project.reload" disabled={environmentBusy}>
                         读取项目文件
                       </Button>
                     </div>
@@ -517,7 +512,6 @@ function App() {
           </>
         )}
         {tab === 'mcp' && <McpPanel state={state} send={send} />}
-        {tab === 'workflows' && <WorkflowPanel state={state} send={send} />}
         {tab === 'tests' && <TestPanel state={state} send={send} />}
         <div className="http-workspace" hidden={tab !== 'apis'} key={state.mode ?? 'vm'}>
           <HttpRequests
@@ -536,7 +530,7 @@ function App() {
             state={state.ws}
             connected={state.vm?.status === 'connected'}
             vmMode={vmMode}
-            busy={state.busy}
+            busy={environmentBusy}
             send={send}
             openScenes={() => setTab('rules')}
             createInScene={(rule) => {
@@ -1549,13 +1543,14 @@ function Scenes({
   const selected = scenes.find((scene) => scene.id === openId);
   const active = scenes.find((scene) => scene.id === state.scenes?.activeSceneId);
   const [name, setName] = useState('');
-  useEffect(() => setName(selected?.name ?? ''), [selected?.id, selected?.name]);
+  useLayoutEffect(() => setName(selected?.name ?? ''), [selected?.id, selected?.name]);
   const choose = (id: string) => {
     setEdit(undefined);
     clearWsDraft();
     setOpenId(id);
     send('scenes.select', { id });
   };
+  const environmentBusy = state.busy || !!state.sceneActions?.locked || !!state.tests?.locked;
   const runtime = state.sceneRuntime;
   const applied =
     runtime && [runtime.http, runtime.ws].every((domain) => ['unneeded', 'applied'].includes(domain.status));
@@ -1567,7 +1562,7 @@ function Scenes({
         </h2>
         <div className="toolbar-actions">
           <Button
-            disabled={state.busy}
+            disabled={environmentBusy}
             onClick={() => {
               awaitingNewScene.current = true;
               send('scenes.create', { name: '新场景' });
@@ -1575,10 +1570,11 @@ function Scenes({
           >
             新建场景
           </Button>
-          <Button action="rules.import" disabled={state.busy}>
+          <Button action="rules.import" disabled={environmentBusy}>
             导入场景
           </Button>
           <Button action="rules.export">导出场景</Button>
+          <Button action="scenes.open">打开场景配置</Button>
         </div>
       </div>
       <section className="card scene-runtime" aria-label="场景运行状态">
@@ -1594,16 +1590,16 @@ function Scenes({
           ))}
         {active && (
           <>
-            <Button disabled={state.busy} onClick={() => send('scenes.activate', { id: active.id })}>
+            <Button disabled={environmentBusy} onClick={() => send('scenes.activate', { id: active.id })}>
               重新应用
             </Button>
-            <Button disabled={state.busy} action="scenes.deactivate">
+            <Button disabled={environmentBusy} action="scenes.deactivate">
               停用场景
             </Button>
           </>
         )}
         {!active && runtime && [runtime.http, runtime.ws].some((domain) => domain.status === 'error') && (
-          <Button disabled={state.busy} action="scenes.deactivate">
+          <Button disabled={environmentBusy} action="scenes.deactivate">
             重试停用
           </Button>
         )}
@@ -1614,6 +1610,7 @@ function Scenes({
           {state.lastError}
         </div>
       )}
+      <SceneActionRunPanel state={state} send={send} />
       <div className={`scene-layout ${selected ? 'has-detail' : ''}`}>
         <section className="scene-list" aria-label="场景列表">
           <div className="scene-list-heading">
@@ -1628,7 +1625,7 @@ function Scenes({
                 aria-label={`启用场景 ${scene.name}`}
                 aria-checked={active?.id === scene.id}
                 title={active?.id === scene.id ? '停用此场景' : '激活此场景'}
-                disabled={state.busy}
+                disabled={environmentBusy}
                 onClick={() =>
                   active?.id === scene.id
                     ? send('scenes.deactivate')
@@ -1651,6 +1648,7 @@ function Scenes({
                 {active?.id === scene.id && <span className="tag scene-active">已激活</span>}
                 <span className="scene-counts">
                   HTTP {scene.httpRules.length} / WS {scene.wsRules.length}
+                  {!!scene.actions?.length && ` / 操作 ${scene.actions.length}`}
                 </span>
                 <span aria-hidden="true">›</span>
               </button>
@@ -1660,7 +1658,7 @@ function Scenes({
             <Empty
               icon="rules"
               title="创建第一个场景"
-              description="一个场景可以同时组织多个 HTTP 和 WebSocket Mock。"
+              description="场景可保存 HTTP / WebSocket Mock、稳定目标和命名操作。"
             />
           )}
         </section>
@@ -1688,29 +1686,37 @@ function Scenes({
                 onChange={(event) => setName(event.target.value)}
               />
               <Button
-                disabled={state.busy || !name.trim()}
+                disabled={environmentBusy || !name.trim()}
                 onClick={() => send('scenes.rename', { id: selected.id, name: name.trim() })}
               >
                 保存名称
               </Button>
               <Button
                 primary
-                disabled={state.busy}
+                disabled={environmentBusy}
                 onClick={() => send('scenes.activate', { id: selected.id })}
               >
                 {active?.id === selected.id ? '应用此场景' : '激活此场景'}
               </Button>
-              <Button disabled={state.busy} onClick={() => send('scenes.duplicate', { id: selected.id })}>
+              <Button
+                disabled={environmentBusy}
+                onClick={() => send('scenes.duplicate', { id: selected.id })}
+              >
                 复制场景
               </Button>
-              <Button danger disabled={state.busy} onClick={() => send('scenes.delete', { id: selected.id })}>
+              <Button
+                danger
+                disabled={environmentBusy}
+                onClick={() => send('scenes.delete', { id: selected.id })}
+              >
                 删除场景
               </Button>
             </div>
+            <SceneActionsPanel key={selected.id} scene={selected} state={state} send={send} />
             <Rules
               key={selected.id}
               scene={selected}
-              state={{ ...state, rules: selected.httpRules }}
+              state={{ ...state, busy: environmentBusy, rules: selected.httpRules }}
               edit={edit}
               setEdit={setEdit}
             />
@@ -1739,7 +1745,7 @@ function Scenes({
               }}
               connected={state.vm?.status === 'connected'}
               vmMode={state.mode !== 'proxy'}
-              busy={state.busy}
+              busy={environmentBusy}
               send={(action, payload) =>
                 send(action, { ...((payload as object) ?? {}), sceneId: selected.id })
               }

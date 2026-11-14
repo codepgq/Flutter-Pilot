@@ -17,12 +17,12 @@ const inputs = z
 export const testMcpTools = {
   list_tests: {
     description:
-      '读取项目 Test Case、关联流程及 files.tests 路径；离线也可查询定义。测试组合 Workflow、临时 Mock 和本轮 HTTP/WS/UI 断言；保存或重连不会执行 UI。',
+      '读取项目 Test Case、关联 Scene 操作及 files.tests 路径；离线也可查询定义。测试组合 Scene 操作、临时 Mock 和本轮 HTTP/WS/UI 断言；保存或重连不会执行 UI。',
     schema: z.object(session).strict(),
   },
   run_test: {
     description:
-      '校验并显式启动保存的 Test Case，立即返回 runId。后台准备临时环境、建立本轮网络基线、执行 Workflow 并验证关联断言；用 get_test_run 查询，只有 passed 表示测试通过。超时不自动重放提交或事件。',
+      '校验并显式启动保存的 Test Case，立即返回 runId。后台准备临时环境、建立本轮网络基线、执行 Scene 操作并验证关联断言；用 get_test_run 查询，只有 passed 表示测试通过。超时不自动重放提交或事件。',
     schema: z
       .object({
         ...session,

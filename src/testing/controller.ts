@@ -11,8 +11,8 @@ import {
   type WorkflowStepResult,
   type WorkflowFailure,
 } from '../workflows/controller';
-import { compileWorkflow, validateWorkflowDocument, type WorkflowDocument } from '../workflows/model';
-import { WorkflowStore } from '../workflows/store';
+import { compileSceneAction, validateSceneActions, type ActionReference } from '../workflows/model';
+import type { SceneDocument } from '../scene-model';
 import { TestStore } from './store';
 import {
   TestError,
@@ -35,7 +35,7 @@ export interface NetworkBaseline {
   wsIds: string[];
 }
 export interface TestHost extends WorkflowHost {
-  loadWorkflows(): Promise<WorkflowDocument>;
+  loadScenes(): Promise<SceneDocument>;
   prepare(
     runId: string,
     sceneId: string | undefined,
@@ -60,7 +60,9 @@ export interface TestAssertionResult {
 export interface TestRun {
   kind: 'test';
   testId: string;
-  workflowId: string;
+  action: ActionReference;
+  sceneId?: string;
+  mockSceneId: string | null;
   runId: string;
   name: string;
   status: 'running' | 'passed' | 'failed' | 'error' | 'cancelled' | 'uncertain';
@@ -85,7 +87,7 @@ export interface TestRun {
 }
 interface Prepared {
   test: TestCase;
-  workflows: WorkflowDocument;
+  scenes: SceneDocument;
   inputs: Record<string, string>;
   secrets: string[];
   mock?: TestMock;
@@ -264,7 +266,7 @@ export class TestController {
       tests: doc.tests.map((test) => ({
         id: test.id,
         name: test.name,
-        workflowId: test.workflowId,
+        action: structuredClone(test.action),
         sceneId: test.sceneId,
         assertionCount:
           (test.expect.http?.length ?? 0) + (test.expect.ws?.length ?? 0) + (test.expect.ui?.length ?? 0),
@@ -298,12 +300,14 @@ export class TestController {
     runId: string,
     backend: Backend,
   ): Promise<Prepared> {
-    const [document, workflows] = await Promise.all([this.store.read(), this.host.loadWorkflows()]);
+    const [document, scenes] = await Promise.all([this.store.read(), this.host.loadScenes()]);
     const test = document.tests.find((item) => item.id === testId);
     if (!test) throw new TestError('TEST_NOT_FOUND', '指定测试不存在，请先调用 list_tests。');
-    validateWorkflowDocument(workflows);
-    const root = workflows.workflows.find((item) => item.id === test.workflowId);
-    if (!root) throw new TestError('INVALID_TEST', '测试引用的工作流不存在。');
+    validateSceneActions(scenes);
+    const root = scenes.scenes
+      .find((scene) => scene.id === test.action.sceneId)
+      ?.actions?.find((item) => item.id === test.action.actionId);
+    if (!root) throw new TestError('INVALID_TEST', '测试引用的 Scene 操作不存在。');
     const inputNames = new Set(Object.keys(root.inputs ?? {}));
     for (const value of Object.values(overrides))
       if (typeof value !== 'string' || value.length > 16384)
@@ -329,7 +333,13 @@ export class TestController {
       return (resolved[key] = value);
     };
     const bound = Object.fromEntries(Object.keys(test.inputs ?? {}).map((key) => [key, resolveInput(key)]));
-    const main = compileWorkflow(workflows, test.workflowId, { ...bound, ...overrides }, backend);
+    const main = compileSceneAction(
+      scenes,
+      test.action.sceneId,
+      test.action.actionId,
+      { ...bound, ...overrides },
+      backend,
+    );
     const inputs = main.inputs,
       secrets = [...main.secrets];
     for (const [key, value] of Object.entries(inputs)) if (sensitive(key) && value) secrets.push(value);
@@ -339,9 +349,10 @@ export class TestController {
     validateTemplates(test.sceneId, availableInputs, vars, false);
     validateTemplates(test.mock, availableInputs, vars, false);
     for (const setup of test.setup ?? []) {
-      const child = compileWorkflow(
-        workflows,
-        setup.workflowId,
+      const child = compileSceneAction(
+        scenes,
+        setup.action.sceneId,
+        setup.action.actionId,
         bindTemplates(setup.inputs ?? {}, inputs, runId),
         backend,
       );
@@ -405,12 +416,12 @@ export class TestController {
     }
     return {
       test: structuredClone(test),
-      workflows: structuredClone(workflows),
+      scenes: structuredClone(scenes),
       inputs,
       secrets,
       mock,
       backend,
-      hash: createHash('sha256').update(JSON.stringify({ test, workflows })).digest('hex'),
+      hash: createHash('sha256').update(JSON.stringify({ test, scenes })).digest('hex'),
     };
   }
   async start(testId: string, overrides: Record<string, string> = {}, backend: Backend = 'auto') {
@@ -430,7 +441,9 @@ export class TestController {
       const run: TestRun = {
         kind: 'test',
         testId,
-        workflowId: test.workflowId,
+        action: structuredClone(test.action),
+        mockSceneId: null,
+        ...(test.sceneId ? { sceneId: test.sceneId } : {}),
         runId,
         name: clean(test.name),
         status: 'running',
@@ -493,17 +506,18 @@ export class TestController {
   private async workflow(
     active: Active,
     prepared: Prepared,
-    workflowId: string,
+    action: ActionReference,
     inputs: Record<string, string>,
     prefix: string,
   ) {
     check(active);
     const offset = active.run.steps.length;
     const inner = new WorkflowController(
-      { directory: '', file: '', read: async () => prepared.workflows } as WorkflowStore,
+      { read: async () => prepared.scenes },
       {
         acquire: async () => {},
         release: async () => {},
+        mockSceneId: () => active.run.mockSceneId,
         execute: async (_owner, tool, args, signal) => {
           check(active);
           if (tool !== 'wait_for_widget') active.mutationDispatched = true;
@@ -536,7 +550,7 @@ export class TestController {
     );
     active.inner = inner;
     try {
-      const result = await inner.start(workflowId, inputs, prepared.backend);
+      const result = await inner.start(action.sceneId, action.actionId, inputs, prepared.backend);
       if (active.controller.signal.aborted) inner.cancel(result.runId);
       await inner.waitForIdle();
       const run = inner.get(result.runId).run;
@@ -545,7 +559,7 @@ export class TestController {
       if (run.status !== 'completed')
         throw new TestError(
           run.failure?.code ?? 'WORKFLOW_FAILED',
-          run.failure?.message ?? '测试工作流未完成。',
+          run.failure?.message ?? '测试操作未完成。',
           run.status === 'uncertain',
         );
     } finally {
@@ -792,12 +806,14 @@ export class TestController {
           ws: !!(prepared.test.expect.ws?.length || prepared.test.events?.length),
         },
       );
+      run.mockSceneId =
+        this.host.mockSceneId?.() ?? bindTemplates(prepared.test.sceneId, prepared.inputs, run.runId) ?? null;
       check(active);
       for (const [index, setup] of (prepared.test.setup ?? []).entries())
         await this.workflow(
           active,
           prepared,
-          setup.workflowId,
+          setup.action,
           bindTemplates(setup.inputs ?? {}, prepared.inputs, run.runId),
           `setup${index + 1}`,
         );
@@ -813,7 +829,7 @@ export class TestController {
           return error;
         },
       );
-      await this.workflow(active, prepared, prepared.test.workflowId, prepared.inputs, 'main');
+      await this.workflow(active, prepared, prepared.test.action, prepared.inputs, 'main');
       active.flowFinished = true;
       while (!run.assertions.filter((item) => item.kind !== 'ui').every((item) => item.status === 'passed')) {
         check(active);

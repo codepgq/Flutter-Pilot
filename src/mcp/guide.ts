@@ -1,5 +1,5 @@
 import { automationGuide, automationInstructions } from '../automation/prompts';
-import workflowExample from '../../resources/example.workflows.json';
+import savedScenesExample from '../../resources/example.scenes.json';
 import testExample from '../../resources/example.tests.json';
 /** Agent-facing reference, bundled into MCP so it is available even without an IDE session. */
 export const guideTopics = ['overview', 'http', 'ws', 'ui', 'workflow'] as const;
@@ -13,8 +13,8 @@ get_usage_guide 无需 sessionId，插件未运行也能读取；也可通过 re
 规则使用 Agent 自身的文件编辑能力维护，通过 get_network_status 获取准确路径，保留已有规则；保存后 reload_rules，再 activate_scene 统一开启所需采集/Mock，再操作 UI、查询记录验证。MCP 本身不提供文件编辑或规则 CRUD。
 需要应用源码变更或重新进入启动状态时，通过 hot_reload 保留状态热重载，或 hot_restart 重置内存并重新执行入口；仅支持当前VM准确对应的Cursor/VS Code Flutter Debug会话。修改Mock文件先reload_rules，热重启不会代替规则加载，也不保证启动首请求已被Mock；重启后检查网络状态并用新记录和UI验证。
 所有运行时工具必须明确 sessionId。UI 优先 Key，也支持显式文字、语义、类型、祖先范围、快照引用和坐标；不静默更换定位策略。先读取快照并确认唯一。设备连接后 auto 使用系统输入，失败不换通道重放。完整移动交互工具：${automationInstructions}。UI 超时先检查结果，不自动重试。
-重复操作优先 list_workflows 查询项目已保存流程；首次由 Agent 探索并验证一次，按 files.workflows 增量保存稳定选择器、字符串参数和步骤。run_workflow 显式启动后台串行运行，get_workflow_run 查询进度和耗时，cancel_workflow_run 取消。保存流程只允许稳定选择器，禁止临时 ref、坐标和任意脚本。Scene 仅构造网络环境；激活、重连或 IDE 重开不会运行 UI 流程。completed 只表示操作完成，不表示测试通过；结果未确认不自动重跑。
-需要可重复业务验证时，list_tests 读取 files.tests 和已保存 Test Case，run_test 显式启动，get_test_run 查询，cancel_test_run 取消。Test Case 引用 Workflow，组合临时 Scene/有状态 HTTP Mock、本轮请求参数与响应变量、关联 WS 和精确订单行断言。触发前建立网络基线；事件只在对应 HTTP 断言成功后注入；只有 passed 表示测试通过。结束恢复自身临时 Mock；真实操作不回滚，重连不重跑。
+重复操作先 list_scenes 发现操作概要，再 list_scene_actions(sceneId) 查询共享 targets、操作说明与参数；首次由 Agent 探索并验证一次，在 files.scenes 增量保存稳定选择器和 actions，reload_rules 更新加载快照。run_scene_action 显式启动后台串行运行，get_scene_action_run 查询进度和耗时，cancel_scene_action_run 取消。保存流程只允许稳定选择器，禁止临时 ref、坐标和任意脚本。Scene 同时保存可选 Mock、targets 和命名操作；操作不隐式切换当前 Mock，允许无 Mock 执行。运行期间锁定环境修改；由 Agent 根据网络状态决定执行时机，不强制等待所有域就绪。激活、重连或 IDE 重开不会运行 UI 流程。completed 只表示操作完成，不表示测试通过；结果未确认不自动重跑。
+需要可重复业务验证时，list_tests 读取 files.tests 和已保存 Test Case，run_test 显式启动，get_test_run 查询，cancel_test_run 取消。Test Case v2 引用 Scene action，组合临时 Scene/有状态 HTTP Mock、本轮请求参数与响应变量、关联 WS 和精确订单行断言。触发前建立网络基线；事件只在对应 HTTP 断言成功后注入；只有 passed 表示测试通过。结束恢复自身临时 Mock；真实操作不回滚，重连不重跑。
 WS主动消息用inject_ws_message向App注入模拟服务端事件，或send_ws_message通过App当前连接发往服务端；两者需确认WS采集已接入目标连接，按业务协议传原始text或topic/data。发送可能被outbound规则替换或丢弃，需查询实际结果；成功返回不等于业务成功。
 只在用户任务范围内操作；本说明不会替代用户授权、客户端审批或保证 Agent 一定自动调用。`;
 
@@ -66,8 +66,8 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       '需要替换/丢弃业务 WebSocket 消息、向App注入订单或资产事件、通过真实连接发送topic/data、检查双向消息时，读取 ws。',
       '需要按Key快速精确定位组件并点击/输入/滚动，减少截图识别的耗时和token，或检查Key缺陷时，读取 ui。',
       '需要完成 Mock 配置 → 页面操作 → 网络与界面验证时，读取 workflow。',
-      '登录、填表、下单确认等固定操作需要加速时，读取 workflow：探索一次保存 Workflow，后续参数化执行，无需逐步模型判断。',
-      '需要将流程沉淀为测试、校验本轮订单请求与 pending 结果时，读取 workflow 的 testing：Test Case 复用 Workflow，并关联 HTTP、WS 和 UI 证据。',
+      '登录、填表、下单确认等固定操作需要加速时，读取 workflow：探索一次保存 Scene 操作，后续参数化执行，无需逐步模型判断。',
+      '需要将流程沉淀为测试、校验本轮订单请求与 pending 结果时，读取 workflow 的 testing：Test Case 复用 Scene 操作，并关联 HTTP、WS 和 UI 证据。',
       '需要通过MCP热重载源码、热重启应用以展示不同状态和UI时，读取 workflow 的 lifecycle；无需额外终端操作入口。',
     ],
     start: [
@@ -78,7 +78,6 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
     ],
     files: {
       scenes: '.flutter-pilot/scenes.json',
-      workflows: '.flutter-pilot/workflows.json',
       tests: '.flutter-pilot/tests.json',
     },
     boundaries: [
@@ -203,22 +202,22 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
   },
   ui: {
     ...automationGuide(),
-    reusableWorkflows:
-      '首次探索定位目标后，使用稳定选择器编写 Workflow；后续 run_workflow 由插件完成每步定位、动作和等待，不需要 Agent 额外 find_widget 或整页快照。保存临时 ref、坐标或跨界面缓存控件对象均不支持。格式与执行见 workflow 指南。',
+    reusableActions:
+      '首次探索定位目标后，使用稳定选择器编写 Scene 操作；后续 run_scene_action 由插件完成每步定位、动作和等待，不需要 Agent 额外 find_widget 或整页快照。保存临时 ref、坐标或跨界面缓存控件对象均不支持。格式与执行见 workflow 指南。',
   },
   workflow: {
     title: '按需主动调用：规则文件 → UI 操作 → 网络与页面验证',
     reusable: {
-      title: 'Agent 探索一次，保存 Workflow，插件确定性执行',
-      files: { workflows: '.flutter-pilot/workflows.json' },
-      exampleDocument: workflowExample,
+      title: 'Agent 探索一次，保存 Scene 操作，插件确定性执行',
+      files: { scenes: '.flutter-pilot/scenes.json' },
+      exampleDocument: savedScenesExample,
       fields: {
         document:
-          '严格 JSON：{version:1,workflows:[{id,name,inputs?,targets,steps}]}；没有 activeWorkflow 或自动执行字段。',
+          '严格 JSON：{version:1,activeSceneId:null,scenes:[{id,name,httpRules:[],wsRules:[],targets?,actions?}]}；action 含 id/name/description?/inputs?/steps。支持纯 Mock、纯操作及 targets-only，没有自动执行字段。',
         inputs:
           '输入定义为 {参数名:{required?:boolean,default?:string,secret?:boolean}}；运行 inputs 为字符串字典。模板仅支持 ${inputs.name}，可用于 text、选择器字符串及子流程参数，不执行表达式。',
         targets:
-          '目标名称到稳定组合 Selector 的字典，如 {priceInput:{key:"order.price"},confirm:{key:"confirm",ancestor:{key:"dialog"}}}；原生目标可显式 source=device。禁用 ref 与 point。示例 Key 必须替换成实际验证过的选择器。',
+          '目标名称到稳定组合 Selector 的字典，如 {priceInput:{key:"order.price"},confirm:{key:"confirm",ancestor:{key:"dialog"}}}；每个操作只绑定其使用的 targets，互不要求对方的输入。原生目标可显式 source=device。禁用 ref 与 point。示例 Key 必须替换成实际验证过的选择器。',
         steps:
           '每步必须有唯一 id 和 type。type 仅允许 tap、enter_text、wait_for_widget、scroll、call；目标字段 target 引用 targets 中的名称。',
         tap: '{id,type:"tap",target,timeoutMs?}；点击一次，不自动重试。',
@@ -228,55 +227,59 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
           '{id,type:"wait_for_widget",target,state?,text?,timeoutMs?}；state 为 present/absent/visible/enabled/actionable/text_equals/text_contains/text_changed，文字条件必须有 text。',
         scroll:
           '{id,type:"scroll",target,untilTarget?,direction?,distance?,durationMs?,maxSteps?,timeoutMs?}；target 为容器，untilTarget 为同一 targets 中的滚动查找目标。',
-        call: '{id,type:"call",workflowId,inputs?}；inputs 显式映射到子流程参数，如 {price:"${inputs.price}"}，按顺序展开，不允许循环。',
+        call: '{id,type:"call",sceneId?,actionId,inputs?}；省略 sceneId 引用同 Scene。跨 Scene 仅复用操作，不切换 Mock；inputs 显式映射参数，如 {price:"${inputs.price}"}，预检引用、参数、循环和展开限额。',
         limits:
-          '文件最多2 MiB、200流程、5000定义步骤；每流程最多500步；嵌套最多16层，一次展开最多1000动作。timeoutMs 为100..30000，maxSteps 为1..30。',
+          'Scene 文件最多64 MiB；每 Scene 最多200操作，每操作最多500步、整个文件最多5000定义步骤；嵌套最多16层，一次展开最多1000动作。timeoutMs 为100..30000，maxSteps 为1..30。',
       },
       concepts: {
-        scene: '仅保存 HTTP/WS Mock 环境，保持持久激活和断线恢复语义，不包含 UI 步骤。',
-        workflow: '参数化的输入、点击、等待、滚动和子流程。显式启动，失败停止，不自行改写定义或选择器。',
+        scene: '统一保存可选 HTTP/WS Mock、共享 targets 和多个命名 actions。激活只应用 Mock，绝不执行操作。',
+        action:
+          '参数化的输入、点击、等待、滚动和子操作。显式启动，失败停止；来源 Scene 与当前 Mock 可以不同，运行记录保存实际 mockSceneId。',
         testCase:
-          '独立组合 Scene、Workflow、网络关联和业务断言；Workflow 的 completed 只说明操作完成，不是测试 passed。使用 run_test 与本轮关联断言判断业务结果。',
+          '独立组合 Mock Scene、Scene action、网络关联和业务断言；操作的 completed 只说明操作完成，不是测试 passed。使用 run_test 与本轮关联断言判断业务结果。',
       },
       authoring: [
-        '先 list_workflows 获取准确 files.workflows；缺文件返回空流程，不自动写入。用 Agent 文件工具增量维护该文件。',
+        '先 get_network_status 获取 files.scenes；list_scenes 读取概要，list_scene_actions(sceneId) 查询操作和参数。用 Agent 文件工具增量维护 scenes.json。停止读取或创建 workflows.json，不迁移或删除用户旧文件。',
         '首次在目标 App 按实际页面探索并验证操作，提取稳定 Key 或明确文字/语义及祖先范围，命名 targets；不要直接使用示例中未验证的 Key。',
-        '按 fields 和 exampleDocument 保存 version:1、workflows 数组；流程含 id/name、inputs、targets、steps。输入值均为字符串，price/quantity 不转换为浮点数；可复用子流程。示例名称和 Key 仅为格式演示，需先确认实际控件。',
-        '保存后 list_workflows 校验。run_workflow 每次重读并完整预检引用、输入及展开步骤，再启动；运行中的定义快照不受文件后续编辑影响。无需 reload_rules，后者只读取 Scene。',
+        '按 fields 和 exampleDocument 保存 version:1、scenes 数组；共享 targets 在 Scene 上，actions 含 id/name、可选 description/inputs 和 steps。输入值均为字符串，price/quantity 不转换为浮点数；可复用子流程。示例名称和 Key 仅为格式演示，需先确认实际控件。',
+        '保存后 reload_rules 校验并更新已加载 Scene 快照。run_scene_action 使用该快照完整预检引用、输入及展开步骤；文件中途编辑不会改变本轮。激活、reload、重连和 IDE 恢复都不执行操作。',
       ],
       execution: [
-        step('list_workflows', selected),
+        step('list_scene_actions', { ...selected, sceneId: 'common_operations' }),
         '选择流程并核对起始页面与登录账号；需要 Mock 时先独立准备 Scene 并确认运行时接入。运行器不会自动登录或切换场景。',
-        step('run_workflow', {
+        step('run_scene_action', {
           ...selected,
-          workflowId: '<已确认的流程ID>',
+          sceneId: 'common_operations',
+          actionId: 'submit_order',
           inputs: { price: '100.00', quantity: '2' },
         }),
-        '保存返回的 runId；后台执行不会因该 MCP 调用结束而取消。运行中独占 UI 操作，使用查询和取消工具管理，不能插入点击或重启。',
-        step('get_workflow_run', { ...selected, runId: '<run_workflow返回的runId>' }),
+        '保存返回的 runId；后台执行不会因该 MCP 调用结束而取消。运行中独占 UI 操作并锁定环境修改，使用查询和取消工具管理，不能插入点击或重启。',
+        step('get_scene_action_run', { ...selected, runId: '<run_scene_action返回的runId>' }),
         '查询到终态后报告实际步骤与耗时。completed 不替代订单参数、HTTP/WS 命中及当前订单行的业务断言。',
       ],
       cancellation: {
-        call: step('cancel_workflow_run', { ...selected, runId: '<run_workflow返回的runId>' }),
+        call: step('cancel_scene_action_run', { ...selected, runId: '<run_scene_action返回的runId>' }),
         meaning:
           '取消后等待当前动作结束并释放资源；已经发生的订单或登录不回滚。结果 uncertain 时先检查界面与新网络记录，不自动重试 confirm、下单或整个流程。',
       },
       boundaries: [
         '只允许已保存的线性步骤和子流程，不接收任意脚本、坐标或临时 ref；持久化稳定选择器，执行时重新定位。',
         '首版单设备串行；每步沿用原子动作的命中、窗口和设备防护。运行有界记录保留在当前插件会话，IDE 重开不恢复运行或自动重跑。',
-        'Workflow 自身不执行网络断言或注入事件；需要这些能力时引用同一流程建立 Test Case，见 testing。手动录制器、复杂分支语言与 CI 启动/数据隔离仍不提供。',
+        'Scene 操作自身不执行网络断言或注入事件；需要这些能力时引用同一流程建立 Test Case，见 testing。手动录制器、复杂分支语言与 CI 启动/数据隔离仍不提供。',
       ],
     },
     testing: {
-      title: '复用 Workflow 的 Test Case 与本轮关联断言',
-      files: { tests: '.flutter-pilot/tests.json', workflows: '.flutter-pilot/workflows.json' },
+      title: '复用 Scene 操作的 Test Case 与本轮关联断言',
+      files: { tests: '.flutter-pilot/tests.json', scenes: '.flutter-pilot/scenes.json' },
       exampleDocument: testExample,
       authoring: [
-        '先 list_tests 获取 files.tests 准确路径，list_workflows 确认 workflowId。Agent 增量保存严格 JSON {version:1,tests:[...]}；缺文件返回空列表，读取不创建文件，保存后无需 reload_rules。',
-        '用例包含 id/name/workflowId、字符串 inputs、可选 setup 子流程、sceneId 或 mock、timeoutMs、expect 和 events。每次运行校验文件并冻结定义；示例协议、URL 和 Key 为占位，必须替换为实际已验证内容。',
-        'setup 显式准备登录和页面，每项 {workflowId,inputs?}，登录流程必须核对账号。主流程应只提交操作，不绑定成功结果；成功、拒绝和确认取消使用各自断言。',
+        '先 list_tests 获取 files.tests 准确路径，list_scene_actions(sceneId) 确认 actionId。Agent 增量保存严格 JSON {version:2,tests:[...]}；缺文件返回空列表，读取不创建文件，保存后无需 reload_rules。',
+        '用例包含 id/name/action:{sceneId,actionId}、字符串 inputs、可选 setup 子流程、sceneId 或 mock、timeoutMs、expect 和 events。每次运行校验文件并冻结定义；示例协议、URL 和 Key 为占位，必须替换为实际已验证内容。',
+        'setup 显式准备登录和页面，每项 {action:{sceneId,actionId},inputs?}，登录流程必须核对账号。主流程应只提交操作，不绑定成功结果；成功、拒绝和确认取消使用各自断言。',
       ],
       fields: {
+        action:
+          'action:{sceneId,actionId} 指定操作来源；外层 sceneId 选择测试 Mock，省略沿用当前激活场景。setup 使用相同引用和显式 inputs 映射。旧 version:1/workflowId 明确报错，不迁移。',
         inputs:
           '测试 inputs 为主流程字符串参数，run_test.inputs 可覆盖；金额和数量不转浮点数。模板仅支持 ${inputs.name}、${run.id} 和已提取的 ${vars.name}，不执行表达式。Mock 和 JSON 事件模板先解析 JSON、按字符串值绑定再序列化，避免参数引号破坏协议。',
         http: 'expect.http:[{id,match:{method?,host?,path?},requestJson?,responseJson?,status?,mocked?,extract?,timeoutMs?}]。match 至少有一个条件；JSON 断言字典以 JSON Pointer 为键，指向请求/响应正文。requestJson 检查 App 原始提交；extract 例如 {orderId:"/response/body/data/orderId"}。',

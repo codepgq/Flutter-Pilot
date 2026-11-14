@@ -1,11 +1,15 @@
 import { validateRuleDocument, type Rule } from './model';
 import { validateWsRuleDocument, type WsRule } from './ws/model';
+import type { Selector } from './automation/model';
+import { validateSceneActions, type SceneAction } from './workflows/model';
 
 export interface Scene {
   id: string;
   name: string;
   httpRules: Rule[];
   wsRules: WsRule[];
+  targets?: Record<string, Selector>;
+  actions?: SceneAction[];
 }
 export interface SceneDocument {
   version: 1;
@@ -36,7 +40,9 @@ export function validateSceneDocument(input: unknown): SceneDocument {
       !scene ||
       typeof scene !== 'object' ||
       Array.isArray(scene) ||
-      Object.keys(scene).some((key) => !['id', 'name', 'httpRules', 'wsRules'].includes(key))
+      Object.keys(scene).some(
+        (key) => !['id', 'name', 'httpRules', 'wsRules', 'targets', 'actions'].includes(key),
+      )
     )
       throw new Error('场景包含无效或未知字段');
     if (typeof scene.id !== 'string' || !scene.id.trim() || scene.id.length > 128 || ids.has(scene.id))
@@ -58,5 +64,5 @@ export function validateSceneDocument(input: unknown): SceneDocument {
   }
   if (doc.activeSceneId !== null && (typeof doc.activeSceneId !== 'string' || !ids.has(doc.activeSceneId)))
     throw new Error('activeSceneId 必须为 null 或已有场景 ID');
-  return structuredClone(doc);
+  return structuredClone(validateSceneActions(doc));
 }

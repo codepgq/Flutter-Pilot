@@ -190,7 +190,7 @@ export function McpPanel({
             <code>topic: ui</code>：双通道快照、多种定位、手势、文本编辑、设备键盘与系统导航。
           </li>
           <li>
-            <code>topic: workflow</code>：规则编辑、重载、开关、UI 操作与结果验证的完整流程。
+            <code>topic: workflow</code>：Scene 中的固定操作、参数、运行进度与业务测试。
           </li>
         </ul>
         <p className="muted">
@@ -199,7 +199,8 @@ export function McpPanel({
         </p>
         <p>
           编辑 <code>.flutter-pilot/scenes.json</code> → 调用 <code>reload_rules</code> →{' '}
-          <code>activate_scene</code> 激活场景 → 按 Key 操作 UI → 查询网络记录。
+          <code>activate_scene</code> 激活 Mock → <code>list_scene_actions</code> 查找已保存操作 →{' '}
+          <code>run_scene_action</code> 按需执行 → 查询网络记录。
         </p>
         <p>优先按 Key 定位，也可显式使用文字、语义、类型、祖先范围或坐标；定位失败不会静默切换策略。</p>
         <p className="muted">

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { validateRuleDocument, type Rule } from './model';
 import type { WsRule } from './ws/model';
 import type { Scene, SceneDocument, SceneRuntime } from './scene-model';
-import { SceneStore } from './scenes';
+import { cloneScenes, SceneStore } from './scenes';
 
 type Domain = 'http' | 'ws';
 export interface SceneHost {
@@ -65,6 +65,9 @@ export class SceneController {
         name: scene.name,
         httpRuleCount: scene.httpRules.length,
         wsRuleCount: scene.wsRules.length,
+        targetCount: Object.keys(scene.targets ?? {}).length,
+        actionCount: scene.actions?.length ?? 0,
+        actions: (scene.actions ?? []).map((action) => ({ id: action.id, name: action.name })),
         enabledHttpRuleCount: scene.httpRules.filter((rule) => rule.enabled).length,
         enabledWsRuleCount: scene.wsRules.filter((rule) => rule.enabled).length,
       })),
@@ -270,10 +273,10 @@ export class SceneController {
     );
   }
   create(name: string, source?: Scene) {
-    const scene: Scene = source ? structuredClone(source) : { id: '', name, httpRules: [], wsRules: [] };
-    scene.id = randomUUID();
+    const scene: Scene = source
+      ? cloneScenes([source])[0]
+      : { id: randomUUID(), name, httpRules: [], wsRules: [] };
     scene.name = name;
-    for (const rule of [...scene.httpRules, ...scene.wsRules]) rule.id = randomUUID();
     return this.change((doc) => {
       doc.scenes.push(scene);
     }).then(() => this.select(scene.id));

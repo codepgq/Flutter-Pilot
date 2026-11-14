@@ -119,9 +119,7 @@ export interface ApiCatalogEntry {
   lastAt: number;
 }
 export interface WorkbenchState {
-  workflows?: {
-    file: string;
-    catalogue?: Awaited<ReturnType<import('./workflows/controller').WorkflowController['list']>>;
+  sceneActions?: {
     run?: ReturnType<import('./workflows/controller').WorkflowController['get']>['run'];
     running: boolean;
     locked?: boolean;

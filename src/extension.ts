@@ -2,8 +2,7 @@ import { AutomationController } from './automation/controller';
 import { AutomationRuntime } from './automation/runtime';
 import { automationTools } from './automation/model';
 import { WorkflowController } from './workflows/controller';
-import { WorkflowStore } from './workflows/store';
-import { workflowMcpTools } from './workflows/tools';
+import { sceneActionMcpTools } from './workflows/tools';
 import { TestController } from './testing/controller';
 import { TestStore } from './testing/store';
 import { testMcpTools } from './testing/tools';
@@ -17,9 +16,10 @@ import { readFile, mkdir, writeFile, rename, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { EngineManager } from './engine';
 import { RuntimeManager } from './runtime';
-import { SceneStore } from './scenes';
+import { SceneStore, cloneScenes } from './scenes';
 import { SceneController } from './scene-controller';
 import { validateSceneDocument } from './scene-model';
+import { sceneWorkbenchSnapshot } from './scene-view';
 import { isFlutterWorkspace } from './discovery';
 import { VmSession } from './vm/session';
 import { VmUiController } from './vm/ui';
@@ -260,10 +260,8 @@ class Workbench {
   private readonly ui: VmUiController;
   private readonly automation: AutomationController;
   private readonly workflows: WorkflowController;
-  private readonly workflowStore: WorkflowStore;
   private workflowOwner?: string;
   private workflowRunId?: string;
-  private workflowList: Awaited<ReturnType<WorkflowController['list']>> | undefined;
   private workflowError?: string;
   private executionEpoch = 0;
   private workflowLaunch?: { key: string; signal?: AbortSignal };
@@ -388,33 +386,39 @@ class Workbench {
         changed: () => this.push(),
       },
     );
-    this.workflowStore = new WorkflowStore(project.rulesDirectory);
-    this.workflows = new WorkflowController(this.workflowStore, {
-      acquire: async (owner) => {
-        if (
-          this.workflowLaunch &&
-          (this.workflowLaunch.key !== this.executionKey() || this.workflowLaunch.signal?.aborted)
-        )
-          throw new McpToolError('SESSION_INVALIDATED', '流程预检期间会话已取消或变更，未执行 UI。');
-        if (this.testEnvironments.size)
-          throw new McpToolError('TEST_CLEANUP_REQUIRED', '上次测试环境尚未恢复，请先在业务测试中恢复环境。');
-        if (this.workflowOwner && this.workflowOwner !== owner)
-          throw new McpToolError('WORKFLOW_BUSY', '已有流程或测试正在运行。');
-        this.workflowOwner = owner;
-        try {
-          await this.automation.acquireWorkflow(owner);
-        } catch (error) {
+    this.workflows = new WorkflowController(
+      { read: async () => structuredClone(this.scenes.document) },
+      {
+        mockSceneId: () => this.scenes.document.activeSceneId,
+        acquire: async (owner) => {
+          if (
+            this.workflowLaunch &&
+            (this.workflowLaunch.key !== this.executionKey() || this.workflowLaunch.signal?.aborted)
+          )
+            throw new McpToolError('SESSION_INVALIDATED', '流程预检期间会话已取消或变更，未执行 UI。');
+          if (this.testEnvironments.size)
+            throw new McpToolError(
+              'TEST_CLEANUP_REQUIRED',
+              '上次测试环境尚未恢复，请先在业务测试中恢复环境。',
+            );
+          if (this.workflowOwner && this.workflowOwner !== owner)
+            throw new McpToolError('WORKFLOW_BUSY', '已有流程或测试正在运行。');
+          this.workflowOwner = owner;
+          try {
+            await this.automation.acquireWorkflow(owner);
+          } catch (error) {
+            if (this.workflowOwner === owner) this.workflowOwner = undefined;
+            throw error;
+          }
+        },
+        execute: (owner, tool, args, signal) => this.automation.executeWorkflow(owner, tool, args, signal),
+        release: async (owner) => {
+          await this.automation.releaseWorkflow(owner);
           if (this.workflowOwner === owner) this.workflowOwner = undefined;
-          throw error;
-        }
+        },
+        changed: () => this.push(),
       },
-      execute: (owner, tool, args, signal) => this.automation.executeWorkflow(owner, tool, args, signal),
-      release: async (owner) => {
-        await this.automation.releaseWorkflow(owner);
-        if (this.workflowOwner === owner) this.workflowOwner = undefined;
-      },
-      changed: () => this.push(),
-    });
+    );
     this.scenes = new SceneController(this.store, {
       snapshot: () => ({
         key: `${this.mode}:${this.vmEpoch}:${this.vm.state.status}:${this.vm.state.isolates}:${this.engineEpoch}:${this.proxyActive}`,
@@ -500,6 +504,7 @@ class Workbench {
       connections: () => this.vm.websocket.store.connections(),
     });
     this.tests = new TestController(this.testStore, {
+      mockSceneId: () => this.scenes.active?.id ?? null,
       acquire: async (owner) => {
         if (
           this.testLaunch &&
@@ -522,7 +527,7 @@ class Workbench {
         if (this.workflowOwner === owner) this.workflowOwner = undefined;
       },
       changed: () => this.push(),
-      loadWorkflows: () => this.workflowStore.read(),
+      loadScenes: async () => structuredClone(this.scenes.document),
       prepare: (runId, sceneId, mock, requirements) => this.prepareTest(runId, sceneId, mock, requirements),
       ready: (runId, signal) => this.prepareTestReady(runId, signal),
       cleanup: (runId) => this.cleanupTest(runId),
@@ -537,7 +542,6 @@ class Workbench {
     });
     this.mcpNetwork = new McpNetworkController({
       scenesPath: this.store.file,
-      workflowsPath: this.workflowStore.file,
       testsPath: this.testStore.file,
       listScenes: () => this.scenes.summary(),
       activateScene: (id) => this.scenes.activate(id),
@@ -716,7 +720,7 @@ class Workbench {
         this.automation.cancel();
         return;
       }
-      if (input.action === 'workflows.cancel') {
+      if (input.action === 'scenes.actions.cancel') {
         try {
           const runId = (input.payload as { runId?: unknown } | undefined)?.runId;
           if (typeof runId === 'string') this.workflows.cancel(runId);
@@ -827,9 +831,7 @@ class Workbench {
       ws: { ...this.vm.websocket.state },
       mcp: this.mcpState,
       automation: this.automation.snapshot,
-      workflows: {
-        file: this.workflowStore.file,
-        catalogue: this.workflowList,
+      sceneActions: {
         ...(this.workflowRunId ? { run: this.workflows.get(this.workflowRunId).run } : {}),
         running: !!activeWorkflow,
         locked: !!this.workflowOwner,
@@ -845,7 +847,7 @@ class Workbench {
         cleanupPending: [...this.testEnvironments.keys()].filter((id) => id !== activeTest),
       },
       rules: this.rules,
-      scenes: this.scenes.document,
+      scenes: sceneWorkbenchSnapshot(this.scenes.document),
       selectedSceneId: this.scenes.selected?.id,
       sceneRuntime: this.scenes.runtime,
       history: this.history,
@@ -901,7 +903,6 @@ class Workbench {
   private async initializeSession() {
     await mkdir(this.storage, { recursive: true, mode: 0o700 });
     await this.scenes.initialize();
-    await this.refreshWorkflows();
     await this.refreshTests();
     await this.vm.websocket.init();
     // Existing HTTP facts stay intact; only positively identified upgrade records are projected.
@@ -959,12 +960,14 @@ class Workbench {
   }
   async applyAutoStart() {
     await this.initialize();
+    this.ensureEnvironmentMutable();
     if (this.mode === 'vm') return;
     if (!this.config().get<boolean>('autoStart', true)) {
       await this.stop();
       return;
     }
     await this.enqueue(async () => {
+      this.ensureEnvironmentMutable();
       const executable = await this.runtime.findExecutable(
         this.config().get<string>('enginePath') || undefined,
       );
@@ -1015,6 +1018,7 @@ class Workbench {
     }
   }
   private async startInternal() {
+    this.ensureEnvironmentMutable();
     if (this.disposed) return;
     await this.engine.rpc('proxy.start', {});
     await this.health();
@@ -1072,9 +1076,11 @@ class Workbench {
   }
   async start() {
     await this.initialize();
+    this.ensureEnvironmentMutable();
     if (this.mode === 'vm') throw new Error('VM 模式请在“连接与诊断”输入本次 Flutter VM WS 并点击连接。');
     await this.enqueue(() =>
       this.operation(async () => {
+        this.ensureEnvironmentMutable();
         await this.ensureEngine();
         await this.startInternal();
         if (this.panel) await this.reloadHistory();
@@ -1124,16 +1130,6 @@ class Workbench {
       this.push();
     }
   }
-  private async refreshWorkflows() {
-    try {
-      this.workflowList = await this.workflows.list();
-      this.workflowError = undefined;
-    } catch (error) {
-      this.workflowList = undefined;
-      this.workflowError = messageOf(error);
-    }
-    this.push();
-  }
   private cancelCurrentWorkflow() {
     ++this.executionEpoch;
     const id = this.workflows.snapshot.activeRunId;
@@ -1143,6 +1139,11 @@ class Workbench {
   }
   private executionKey() {
     return `${this.mcpGeneration}:${this.vmEpoch}:${this.executionEpoch}`;
+  }
+  private ensureEnvironmentMutable() {
+    if (this.workflowOwner || this.workflows.snapshot.activeRunId || this.tests.snapshot.activeRunId)
+      throw new McpToolError('WORKFLOW_BUSY', '操作或测试运行期间不能修改网络环境，请先取消或等待完成。');
+    this.ensureTestCleanupComplete();
   }
   private ensureTestCleanupComplete() {
     if (this.testEnvironments.size && !this.tests.snapshot.activeRunId)
@@ -1340,21 +1341,17 @@ class Workbench {
       throw error;
     }
   }
-  private async executeWorkflowTool(tool: string, args: Record<string, unknown>, signal?: AbortSignal) {
+  private async executeSceneActionTool(tool: string, args: Record<string, unknown>, signal?: AbortSignal) {
     try {
-      if (tool === 'list_workflows') {
-        const result = await this.workflows.list();
-        this.workflowList = result;
+      if (tool === 'list_scene_actions') return this.workflows.list(args.sceneId as string);
+      if (tool === 'run_scene_action') {
         this.workflowError = undefined;
-        this.push();
-        return result;
-      }
-      if (tool === 'run_workflow') {
         this.workflowLaunch = { key: this.executionKey(), signal };
         let result;
         try {
           result = await this.workflows.start(
-            args.workflowId as string,
+            args.sceneId as string,
+            args.actionId as string,
             args.inputs as Record<string, string> | undefined,
             args.backend as 'auto' | 'flutter' | 'device' | undefined,
           );
@@ -1365,9 +1362,11 @@ class Workbench {
         this.push();
         return result;
       }
-      if (tool === 'cancel_workflow_run') return this.workflows.cancel(args.runId as string);
+      if (tool === 'cancel_scene_action_run') return this.workflows.cancel(args.runId as string);
       return this.workflows.get(args.runId as string);
     } catch (error) {
+      this.workflowError = messageOf(error);
+      this.push();
       if (error instanceof Error && typeof (error as Error & { code?: string }).code === 'string')
         throw new McpToolError((error as Error & { code: string }).code, error.message);
       throw error;
@@ -1683,7 +1682,7 @@ class Workbench {
               automation: this.automation.snapshot,
               network: true,
               lifecycle: this.mcpLifecycle.status(),
-              workflows: { supported: true, file: this.workflowStore.file, running: !!this.workflowOwner },
+              sceneActions: { supported: true, file: this.store.file, running: !!this.workflowOwner },
               tests: {
                 supported: true,
                 file: this.testStore.file,
@@ -1700,8 +1699,8 @@ class Workbench {
             )
               return { ok: false, code: 'SESSION_INVALIDATED', message: 'MCP 会话已关闭，操作未执行。' };
             if (tool === 'get_automation_status') return this.automation.execute(tool, args, context.signal);
-            if (['get_workflow_run', 'cancel_workflow_run'].includes(tool))
-              return this.executeWorkflowTool(tool, args);
+            if (['get_scene_action_run', 'cancel_scene_action_run'].includes(tool))
+              return this.executeSceneActionTool(tool, args);
             if (['get_test_run', 'cancel_test_run'].includes(tool)) return this.executeTestTool(tool, args);
             const run = this.messageQueue.then(async () => {
               if (
@@ -1730,15 +1729,31 @@ class Workbench {
                   this.push();
                 }
               }
-              if (Object.hasOwn(workflowMcpTools, tool))
-                return this.executeWorkflowTool(tool, args, context.signal);
+              if (Object.hasOwn(sceneActionMcpTools, tool))
+                return this.executeSceneActionTool(tool, args, context.signal);
               if (Object.hasOwn(testMcpTools, tool)) return this.executeTestTool(tool, args, context.signal);
               if (automationTools.has(tool)) {
                 this.ensureTestCleanupComplete();
                 return this.automation.execute(tool, args, context.signal);
               }
               if (
-                this.testEnvironments.size &&
+                this.workflows.snapshot.activeRunId &&
+                [
+                  'reload_rules',
+                  'activate_scene',
+                  'deactivate_scene',
+                  'set_capture_enabled',
+                  'inject_ws_message',
+                  'send_ws_message',
+                ].includes(tool)
+              )
+                return {
+                  ok: false,
+                  code: 'WORKFLOW_BUSY',
+                  message: '场景操作运行期间不能修改网络环境，请先取消或等待完成。',
+                };
+              if (
+                (this.tests.snapshot.activeRunId || this.testEnvironments.size) &&
                 [
                   'reload_rules',
                   'activate_scene',
@@ -1818,28 +1833,19 @@ class Workbench {
       return;
     }
     await this.initialize();
-    if (action === 'workflows.refresh') {
-      await this.refreshWorkflows();
-      return;
-    }
-    if (action === 'workflows.run') {
-      await this.executeWorkflowTool(
-        'run_workflow',
-        parseTool('run_workflow', { ...payload, sessionId: this.mcpSessionId }),
+    if (action === 'scenes.actions.run') {
+      await this.executeSceneActionTool(
+        'run_scene_action',
+        parseTool('run_scene_action', { ...payload, sessionId: this.mcpSessionId }),
       );
       return;
     }
-    if (action === 'workflows.open') {
-      try {
-        await writeFile(
-          this.workflowStore.file,
-          JSON.stringify({ version: 1, workflows: [] }, null, 2) + '\n',
-          { flag: 'wx', mode: 0o600 },
-        );
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      }
-      await vscode.window.showTextDocument(vscode.Uri.file(this.workflowStore.file), { preview: false });
+    if (action === 'scenes.actions.cancel') {
+      this.workflows.cancel(String(payload.runId));
+      return;
+    }
+    if (action === 'scenes.open') {
+      await vscode.window.showTextDocument(vscode.Uri.file(this.store.file), { preview: false });
       return;
     }
     if (action === 'tests.refresh') {
@@ -1860,7 +1866,7 @@ class Workbench {
     }
     if (action === 'tests.open') {
       try {
-        await writeFile(this.testStore.file, JSON.stringify({ version: 1, tests: [] }, null, 2) + '\n', {
+        await writeFile(this.testStore.file, JSON.stringify({ version: 2, tests: [] }, null, 2) + '\n', {
           flag: 'wx',
           mode: 0o600,
         });
@@ -1876,8 +1882,15 @@ class Workbench {
     )
       throw new Error('流程正在运行，请先取消流程再更改连接或探测 UI。');
     if (
-      this.testEnvironments.size &&
-      /^(scenes\.(?!select)|rules\.|ws\.(rules\.|capture|mock|push|send|clear|rescan)|vm\.(capture|rescan)|history\.(delete|clear)|project.reload|start$|stop$|proxy.stop|setLan$|setup\.(apply|revert))/.test(
+      this.workflows.snapshot.activeRunId &&
+      /^(scenes\.(?!select|open)|rules\.(?!open|export)|ws\.(rules\.(?!open)|capture|mock|push|send|clear|rescan)|vm\.(capture|rescan)|project.reload|install$|start$|stop$|proxy.stop|setLan$|selectHost$|connectAndroid$|setup\.(apply|revert))/.test(
+        action,
+      )
+    )
+      throw new Error('场景操作运行期间不能修改网络环境，请先取消或等待完成。');
+    if (
+      (this.tests.snapshot.activeRunId || this.testEnvironments.size) &&
+      /^(scenes\.(?!select)|rules\.|ws\.(rules\.|capture|mock|push|send|clear|rescan)|vm\.(capture|rescan)|history\.(delete|clear)|project.reload|install$|start$|stop$|proxy.stop|setLan$|selectHost$|connectAndroid$|setup\.(apply|revert))/.test(
         action,
       )
     )
@@ -2268,14 +2281,7 @@ class Workbench {
           if (!uris?.[0]) break;
           const document = validateSceneDocument(JSON.parse(await readFile(uris[0].fsPath, 'utf8')));
           await this.scenes.change((doc) => {
-            doc.scenes.push(
-              ...document.scenes.map((scene) => ({
-                ...scene,
-                id: randomUUID(),
-                httpRules: scene.httpRules.map((rule) => ({ ...rule, id: randomUUID() })),
-                wsRules: scene.wsRules.map((rule) => ({ ...rule, id: randomUUID() })),
-              })),
-            );
+            doc.scenes.push(...cloneScenes(document.scenes));
           });
           break;
         }

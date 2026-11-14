@@ -42,17 +42,17 @@ MCP 在连接初始化时向 Agent 提供能力说明与适用场景。任务涉
 { "topic": "http" }
 ```
 
-| topic              | 内容                                                                           |
-| ------------------ | ------------------------------------------------------------------------------ |
-| `overview`（默认） | 能力场景、首次调用、规则文件和运行前提                                         |
-| `http`             | `scenes.json` 中 HTTP 规则的字段、完整合法示例、请求／响应修改、转发及验证流程 |
-| `ws`               | `scenes.json` 中 WS 规则的 URL、方向、文本匹配、替换／丢弃及双向消息验证       |
-| `ui`               | 快照发现真实 Key、父范围查找、点击／输入／滚动／等待、Key 诊断与修复           |
-| `workflow`         | 保存并复用 Workflow、Test Case 关联 HTTP/WS/UI 断言、临时有状态 Mock 与热更新  |
+| topic              | 内容                                                                            |
+| ------------------ | ------------------------------------------------------------------------------- |
+| `overview`（默认） | 能力场景、首次调用、规则文件和运行前提                                          |
+| `http`             | `scenes.json` 中 HTTP 规则的字段、完整合法示例、请求／响应修改、转发及验证流程  |
+| `ws`               | `scenes.json` 中 WS 规则的 URL、方向、文本匹配、替换／丢弃及双向消息验证        |
+| `ui`               | 快照发现真实 Key、父范围查找、点击／输入／滚动／等待、Key 诊断与修复            |
+| `workflow`         | 保存并复用 Scene 操作、Test Case 关联 HTTP/WS/UI 断言、临时有状态 Mock 与热更新 |
 
 同一份指南还可通过 `resources/list` 发现，URI 为 `flutter-pilot://guides/<topic>`，使用 `resources/read` 读取。工具入口兼容只使用 MCP tools 的 Agent，资源入口方便支持参考资料的客户端；两者返回相同内容。
 
-支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 54 个模板：原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及全部 50 个工具的同名独立模板。`hot_reload`、`hot_restart`、Workflow 和测试工具可以直接按同名 Prompt 查找，无需先打开其他场景模板。
+支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 54 个模板：原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及全部 50 个工具的同名独立模板。`hot_reload`、`hot_restart`、Scene 操作和测试工具可以直接按同名 Prompt 查找，无需先打开其他场景模板。
 
 例如读取热重启提示词：
 
@@ -68,18 +68,18 @@ Agent 的可调用能力由 `tools/list` 提供，Prompts 是可选的使用指�
 
 例如用户要求“模拟订单列表空数据并验证页面”，Agent 应先读取 `http`／`workflow` 指南，选择对应项目会话，读取并编辑规则，再完成重载、Mock、Key 操作和结果验证。具体是否主动调用仍由客户端 Agent 根据任务和上下文决定；MCP 说明提供发现与操作指引，不替代用户授权和客户端审批。
 
-## 保存 Workflow 并运行 Test Case
+## 保存 Scene 操作并运行 Test Case
 
-固定登录、填表、下单确认操作可由 Agent 首次探索并验证，再保存到 `list_workflows` 返回的 `files.workflows`。`run_workflow` 一次启动，插件沿稳定选择器顺序执行，`get_workflow_run` 查询进度和耗时，`cancel_workflow_run` 请求取消。流程只在显式启动时执行；Scene 激活、重连或重开 IDE 不会触发 UI。完整格式见 [Workflow 指南](workflows.md)。
+固定登录、填表、下单确认操作可由 Agent 首次探索并验证，再保存到 `files.scenes` 的 Scene targets/actions 中，`reload_rules` 更新快照。`list_scenes` 发现概要，`list_scene_actions({sessionId,sceneId})` 查询 targets、操作说明与参数。`run_scene_action({sessionId,sceneId,actionId,inputs?,backend?})` 显式启动后台运行；公共操作不会切换当前 Mock，也允许无 Mock 执行。`get_scene_action_run` 查询进度，`cancel_scene_action_run` 请求取消。流程只在显式启动时执行；Scene 激活、重连或重开 IDE 不会触发 UI。完整格式见 [操作指南](workflows.md)。
 
-需要业务通过标准时，在 `list_tests` 返回的 `files.tests` 保存 Test Case，引用同一 Workflow。测试可组合临时 Scene、有状态 HTTP Mock、原始请求参数断言、响应变量提取、关联 WS 和精确订单行 UI 断言。`run_test` 返回 `runId` 后后台执行，`get_test_run` 查询，`cancel_test_run` 取消；只有 `passed` 表示测试通过，Workflow 的 `completed` 不代替业务断言。完整定义与示例见 [测试指南](testing.md)。
+需要业务通过标准时，在 `list_tests` 返回的 `files.tests` 保存 Test Case，使用 version:2 引用同一 Scene action。测试可组合临时 Scene、有状态 HTTP Mock、原始请求参数断言、响应变量提取、关联 WS 和精确订单行 UI 断言。`run_test` 返回 `runId` 后后台执行，`get_test_run` 查询，`cancel_test_run` 取消；只有 `passed` 表示测试通过，操作的 `completed` 不代替业务断言。完整定义与示例见 [测试指南](testing.md)。
 
-| 工具                                      | 行为                                                                                                |
-| ----------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `list_workflows` / `list_tests`           | 读取项目定义和准确文件路径，缺文件返回空列表，不要求 VM 在线                                        |
-| `run_workflow` / `run_test`               | 接受 `sessionId`、`workflowId` / `testId`、可选字符串 `inputs` 和 `backend`，显式启动并返回 `runId` |
-| `get_workflow_run` / `get_test_run`       | 接受 `sessionId`、`runId`，只读查询进度、步骤与证据                                                 |
-| `cancel_workflow_run` / `cancel_test_run` | 接受 `sessionId`、`runId`，停止后续动作，等待当前动作结束和资源释放                                 |
+| 工具                                          | 行为                                                                                                          |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `list_scene_actions` / `list_tests`           | 查询已加载 Scene 操作 / 测试定义和路径，不要求 VM 在线                                                        |
+| `run_scene_action` / `run_test`               | 接受 `sessionId`、`sceneId` + `actionId` / `testId`、可选字符串 `inputs` 和 `backend`，显式启动并返回 `runId` |
+| `get_scene_action_run` / `get_test_run`       | 接受 `sessionId`、`runId`，只读查询进度、步骤与证据                                                           |
+| `cancel_scene_action_run` / `cancel_test_run` | 接受 `sessionId`、`runId`，停止后续动作，等待当前动作结束和资源释放                                           |
 
 测试观察以主流程触发前的本轮基线为准；事件在指定 HTTP 断言成功后注入，用响应 `orderId` 关联 WS 与订单行，不能以任意旧 pending 通过。测试结束恢复自身临时 Mock，已经发生的登录和订单不能回滚。超时、断线或取消后不自动再次点击 confirm 或注入事件；检查结果和证据后再决定下一步。模拟注入验证 App 处理事件，真实后端链路应等待真实事件。
 
@@ -188,31 +188,31 @@ auto 在设备连接后使用设备输入；失败不会换通道重放。device
 
 ## 工具列表
 
-| 工具                                     | 用途                                                           |
-| ---------------------------------------- | -------------------------------------------------------------- |
-| `get_usage_guide`                        | 按主题读取规则编辑、UI 定位和验证指南，无需在线 IDE            |
-| `list_sessions`                          | 获取已开启 MCP 的项目和能力                                    |
-| `hot_reload` / `hot_restart`             | 控制当前 VM 对应 IDE 调试会话的热重载／热重启                  |
-| `list_workflows` / `run_workflow`        | 读取或显式运行保存的参数化操作流程                            |
-| `get_workflow_run` / `cancel_workflow_run` | 查询或取消流程；completed 仅代表操作完成                     |
-| `list_tests` / `run_test`                | 读取或显式运行含本轮 HTTP/WS/UI 断言的 Test Case              |
-| `get_test_run` / `cancel_test_run`       | 查询或取消测试；只有 passed 表示测试通过                     |
-| `get_ui_snapshot`                        | 获取有界的已挂载 UI 结构                                       |
-| `find_widget`                            | 按 Key 查询目标                                                |
-| `tap` / `enter_text` / `scroll`          | 点击、替换输入内容、滚动                                       |
-| `wait_for_widget`                        | 等待出现、消失或可操作                                         |
-| `inspect_key_issues`                     | 诊断当前界面交互目标的 Key                                     |
-| `list_screenshot_targets`                | 查询当前可见的长图滚动区域                                     |
-| `take_screenshot`                        | 截取当前 Flutter 屏幕或指定区域滚动长图，返回 MCP PNG 图片     |
-| `get_network_status`                     | 查询采集／Mock／规则加载状态和文件位置                         |
-| `get_requests` / `get_request`           | 分页查询 HTTP 记录与详情                                       |
-| `get_ws_connections` / `get_ws_messages` | 查询 WS 连接和消息；`includeBodies` 请求正文                   |
-| `inject_ws_message`                      | 向 App 注入模拟服务端消息，支持原始文本或 topic/data           |
-| `send_ws_message`                        | 经 App 真实 WS 连接发送消息，受当前 outbound 规则影响          |
-| `reload_rules`                           | 整份读取、校验并按激活状态同步 `scenes.json`，无 `domain` 参数 |
-| `list_scenes`                            | 列出场景摘要（ID、名称、规则数量）、激活场景和 HTTP/WS 应用状态，支持 VM 离线查询        |
-| `activate_scene` / `deactivate_scene`    | 持久选择或停用场景；离线待应用，重连自动恢复                   |
-| `set_capture_enabled`                    | 控制指定 `http`／`ws` 域采集；关闭暂停该域 Mock，重新开启恢复  |
+| 工具                                               | 用途                                                                              |
+| -------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `get_usage_guide`                                  | 按主题读取规则编辑、UI 定位和验证指南，无需在线 IDE                               |
+| `list_sessions`                                    | 获取已开启 MCP 的项目和能力                                                       |
+| `hot_reload` / `hot_restart`                       | 控制当前 VM 对应 IDE 调试会话的热重载／热重启                                     |
+| `list_scene_actions` / `run_scene_action`          | 读取或显式运行保存的参数化操作流程                                                |
+| `get_scene_action_run` / `cancel_scene_action_run` | 查询或取消流程；completed 仅代表操作完成                                          |
+| `list_tests` / `run_test`                          | 读取或显式运行含本轮 HTTP/WS/UI 断言的 Test Case                                  |
+| `get_test_run` / `cancel_test_run`                 | 查询或取消测试；只有 passed 表示测试通过                                          |
+| `get_ui_snapshot`                                  | 获取有界的已挂载 UI 结构                                                          |
+| `find_widget`                                      | 按 Key 查询目标                                                                   |
+| `tap` / `enter_text` / `scroll`                    | 点击、替换输入内容、滚动                                                          |
+| `wait_for_widget`                                  | 等待出现、消失或可操作                                                            |
+| `inspect_key_issues`                               | 诊断当前界面交互目标的 Key                                                        |
+| `list_screenshot_targets`                          | 查询当前可见的长图滚动区域                                                        |
+| `take_screenshot`                                  | 截取当前 Flutter 屏幕或指定区域滚动长图，返回 MCP PNG 图片                        |
+| `get_network_status`                               | 查询采集／Mock／规则加载状态和文件位置                                            |
+| `get_requests` / `get_request`                     | 分页查询 HTTP 记录与详情                                                          |
+| `get_ws_connections` / `get_ws_messages`           | 查询 WS 连接和消息；`includeBodies` 请求正文                                      |
+| `inject_ws_message`                                | 向 App 注入模拟服务端消息，支持原始文本或 topic/data                              |
+| `send_ws_message`                                  | 经 App 真实 WS 连接发送消息，受当前 outbound 规则影响                             |
+| `reload_rules`                                     | 整份读取、校验并按激活状态同步 `scenes.json`，无 `domain` 参数                    |
+| `list_scenes`                                      | 列出场景摘要（ID、名称、规则数量）、激活场景和 HTTP/WS 应用状态，支持 VM 离线查询 |
+| `activate_scene` / `deactivate_scene`              | 持久选择或停用场景；离线待应用，重连自动恢复                                      |
+| `set_capture_enabled`                              | 控制指定 `http`／`ws` 域采集；关闭暂停该域 Mock，重新开启恢复                     |
 
 除 `get_usage_guide`、`list_sessions` 外，工具均需 `sessionId`。正式参数及边界以客户端发现的工具 schema 为准。MCP 不提供任意 Dart 求值或规则增删改工具。
 

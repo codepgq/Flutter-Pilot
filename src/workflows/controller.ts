@@ -1,14 +1,19 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Backend } from '../automation/model';
 import type { UiResult } from '../vm/ui';
-import { compileWorkflow, WorkflowError, type CompiledWorkflow, type CompiledWorkflowStep } from './model';
-import { WorkflowStore } from './store';
+import { compileSceneAction, WorkflowError, type CompiledWorkflow, type CompiledWorkflowStep } from './model';
+import type { SceneDocument } from '../scene-model';
+
+export interface SceneActionSource {
+  read(): Promise<SceneDocument>;
+}
 
 export interface WorkflowHost {
   acquire(owner: string): Promise<void>;
   execute(owner: string, tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<UiResult>;
   release(owner: string): Promise<void>;
   changed(): void;
+  mockSceneId?(): string | null;
 }
 export type WorkflowRunStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'uncertain';
 export interface WorkflowFailure {
@@ -19,7 +24,8 @@ export interface WorkflowFailure {
 export interface WorkflowStepResult {
   id: string;
   path: string;
-  workflowId: string;
+  sceneId: string;
+  actionId: string;
   target: string;
   tool: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'uncertain' | 'skipped';
@@ -33,8 +39,10 @@ export interface WorkflowStepResult {
 }
 export interface WorkflowRun {
   runId: string;
-  workflowId: string;
+  sceneId: string;
+  actionId: string;
   name: string;
+  mockSceneId: string | null;
   definitionHash: string;
   inputs: Record<string, string>;
   backend: Backend;
@@ -72,7 +80,7 @@ export class WorkflowController {
   private disposed = false;
   private readonly runs = new Map<string, WorkflowRun>();
   constructor(
-    readonly store: WorkflowStore,
+    readonly store: SceneActionSource,
     private readonly host: WorkflowHost,
   ) {}
   private changed() {
@@ -88,7 +96,9 @@ export class WorkflowController {
       ...(this.active ? { activeRunId: this.active.run.runId } : {}),
       recentRuns: [...this.runs.values()].reverse().map((run) => ({
         runId: run.runId,
-        workflowId: run.workflowId,
+        sceneId: run.sceneId,
+        actionId: run.actionId,
+        mockSceneId: run.mockSceneId,
         name: run.name,
         status: run.status,
         startedAt: run.startedAt,
@@ -98,17 +108,22 @@ export class WorkflowController {
       })),
     };
   }
-  async list() {
-    const doc = await this.store.read();
+  async list(sceneId: string) {
+    const doc = structuredClone(await this.store.read());
+    const scene = doc.scenes.find((item) => item.id === sceneId);
+    if (!scene) throw new WorkflowError('SCENE_NOT_FOUND', '指定场景不存在，请先调用 list_scenes。');
     return {
       ok: true,
-      files: { workflows: this.store.file },
-      workflows: doc.workflows.map((flow) => ({
-        id: flow.id,
-        name: flow.name,
-        stepCount: flow.steps.length,
+      sceneId,
+      name: scene.name,
+      targets: scene.targets ?? {},
+      actions: (scene.actions ?? []).map((value) => ({
+        id: value.id,
+        name: value.name,
+        ...(value.description !== undefined ? { description: value.description } : {}),
+        stepCount: value.steps.length,
         inputs: Object.fromEntries(
-          Object.entries(flow.inputs ?? {}).map(([key, spec]) => [
+          Object.entries(value.inputs ?? {}).map(([key, spec]) => [
             key,
             {
               ...spec,
@@ -117,31 +132,39 @@ export class WorkflowController {
           ]),
         ),
       })),
+      mockSceneId: this.host.mockSceneId?.() ?? null,
       ...this.snapshot,
     };
   }
-  async start(workflowId: string, inputs: Record<string, string> = {}, backend: Backend = 'auto') {
-    if (this.disposed) throw new WorkflowError('SESSION_INVALIDATED', '工作流会话已关闭。');
+  async start(
+    sceneId: string,
+    actionId: string,
+    inputs: Record<string, string> = {},
+    backend: Backend = 'auto',
+  ) {
+    if (this.disposed) throw new WorkflowError('SESSION_INVALIDATED', '场景操作会话已关闭。');
     if (this.starting || this.active)
-      throw new WorkflowError('WORKFLOW_BUSY', '已有工作流正在执行，请先查询或取消该运行。');
+      throw new WorkflowError('WORKFLOW_BUSY', '已有场景操作正在执行，请先查询或取消该运行。');
     this.starting = true;
     try {
-      const doc = await this.store.read();
-      const compiled = compileWorkflow(doc, workflowId, inputs, backend);
-      if (this.disposed) throw new WorkflowError('SESSION_INVALIDATED', '工作流会话已关闭。');
+      const doc = structuredClone(await this.store.read());
+      const compiled = compileSceneAction(doc, sceneId, actionId, inputs, backend);
+      if (this.disposed) throw new WorkflowError('SESSION_INVALIDATED', '场景操作会话已关闭。');
       const owner = randomUUID();
       const secrets = compiled.secrets.sort((a, b) => b.length - a.length);
       const clean = (value: string) =>
         secrets.reduce((result, secret) => result.split(secret).join('[REDACTED]'), value);
       const run: WorkflowRun = {
         runId: owner,
-        workflowId: compiled.workflow.id,
-        name: compiled.workflow.name,
+        sceneId,
+        actionId,
+        name: compiled.action.name,
+        mockSceneId: this.host.mockSceneId?.() ?? null,
         definitionHash: createHash('sha256').update(JSON.stringify(doc)).digest('hex'),
         inputs: Object.fromEntries(
           Object.entries(compiled.inputs).map(([key, value]) => [
             key,
-            compiled.workflow.inputs?.[key]?.secret ? '[REDACTED]' : clean(value),
+            compiled.action.inputs?.[key]?.secret ? '[REDACTED]' : clean(value),
           ]),
         ),
         backend,
@@ -151,13 +174,14 @@ export class WorkflowController {
         steps: compiled.steps.map((item) => ({
           id: item.id,
           path: item.path,
-          workflowId: item.workflowId,
+          sceneId: item.sceneId,
+          actionId: item.actionId,
           target: item.target,
           tool: item.tool,
           status: 'pending',
         })),
         metrics: { totalMs: 0, actionMs: 0, waitMs: 0, resolveMs: 0, inputMs: 0, stepsCompleted: 0 },
-        message: '工作流正在执行；操作完成不等同业务测试通过。',
+        message: '场景操作正在执行；操作完成不等同业务测试通过。',
       };
       this.runs.set(run.runId, run);
       while (this.runs.size > 50) this.runs.delete(this.runs.keys().next().value!);
@@ -181,8 +205,8 @@ export class WorkflowController {
     const run = this.runs.get(runId);
     if (!run)
       throw new WorkflowError(
-        'WORKFLOW_RUN_NOT_FOUND',
-        '运行记录不存在或已过期，请调用 list_workflows 查询最近运行。',
+        'SCENE_ACTION_RUN_NOT_FOUND',
+        '运行记录不存在或已过期，请调用 list_scene_actions 查询最近运行。',
       );
     return { ok: true, run: structuredClone(run) };
   }
@@ -228,7 +252,7 @@ export class WorkflowController {
           run.status = 'cancelled';
           run.failure = {
             code: 'CANCELLED',
-            message: '工作流已取消，已执行的操作不会自动回滚。',
+            message: '场景操作已取消，已执行的操作不会自动回滚。',
             uncertain: false,
           };
           break;
@@ -305,7 +329,7 @@ export class WorkflowController {
         message:
           !acquired && typeof value?.message === 'string'
             ? clean(value.message).slice(0, 2048)
-            : '工作流执行失败，请检查运行记录。',
+            : '场景操作执行失败，请检查运行记录。',
         uncertain: false,
       };
       for (const record of run.steps)
@@ -334,12 +358,12 @@ export class WorkflowController {
       run.metrics.totalMs = run.durationMs;
       run.message =
         run.status === 'completed'
-          ? '工作流操作完成；尚未执行业务断言，不代表测试通过。'
+          ? '场景操作完成；尚未执行业务断言，不代表测试通过。'
           : run.status === 'uncertain'
             ? '操作结果未确认；请检查当前状态，不自动重试。'
             : run.status === 'cancelled'
-              ? '工作流已取消，已执行的操作不会自动回滚。'
-              : '工作流已在失败步骤停止。';
+              ? '场景操作已取消，已执行的操作不会自动回滚。'
+              : '场景操作已在失败步骤停止。';
       if (this.active === active) this.active = undefined;
       this.changed();
     }

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { TestController, type TestHost, type TestRun } from '../src/testing/controller';
 import { validateTestDocument, bindJsonTemplate, bindTestMock, type TestCase } from '../src/testing/model';
 import { TestStore } from '../src/testing/store';
-import { validateWorkflowDocument } from '../src/workflows/model';
+import { validateSceneDocument } from '../src/scene-model';
 import type { HistoryEntry } from '../src/model';
 import type { WsMessage } from '../src/ws/model';
 import type { TestMock } from '../src/testing/mock-model';
@@ -16,39 +16,49 @@ afterEach(async () => {
   for (const controller of controllers.splice(0)) await controller.dispose();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
-const workflows = () =>
-  validateWorkflowDocument({
+const scenes = () =>
+  validateSceneDocument({
     version: 1,
-    workflows: [
+    activeSceneId: null,
+    scenes: [
       {
-        id: 'order',
-        name: '提交订单',
-        inputs: { price: { required: true }, quantity: { default: '2' }, password: { secret: true } },
+        id: 'common',
+        name: '公共操作',
+        httpRules: [],
+        wsRules: [],
         targets: {
           price: { key: 'price' },
           quantity: { key: 'quantity' },
           confirm: { key: 'confirm' },
           pending: { key: 'pending' },
+          account: { key: 'account' },
+          password: { key: 'password' },
         },
-        steps: [
-          { id: 'price', type: 'enter_text', target: 'price', text: '${inputs.price}' },
-          { id: 'quantity', type: 'enter_text', target: 'quantity', text: '${inputs.quantity}' },
-          { id: 'confirm', type: 'tap', target: 'confirm' },
-        ],
-      },
-      {
-        id: 'login',
-        name: '登录',
-        inputs: { account: { required: true }, password: { secret: true, default: 'setup-secret' } },
-        targets: { account: { key: 'account' }, password: { key: 'password' } },
-        steps: [
-          { id: 'password', type: 'enter_text', target: 'password', text: '${inputs.password}' },
+        actions: [
           {
-            id: 'account',
-            type: 'wait_for_widget',
-            target: 'account',
-            state: 'text_equals',
-            text: '${inputs.account}',
+            id: 'order',
+            name: '提交订单',
+            inputs: { price: { required: true }, quantity: { default: '2' }, password: { secret: true } },
+            steps: [
+              { id: 'price', type: 'enter_text', target: 'price', text: '${inputs.price}' },
+              { id: 'quantity', type: 'enter_text', target: 'quantity', text: '${inputs.quantity}' },
+              { id: 'confirm', type: 'tap', target: 'confirm' },
+            ],
+          },
+          {
+            id: 'login',
+            name: '登录',
+            inputs: { account: { required: true }, password: { secret: true, default: 'setup-secret' } },
+            steps: [
+              { id: 'password', type: 'enter_text', target: 'password', text: '${inputs.password}' },
+              {
+                id: 'account',
+                type: 'wait_for_widget',
+                target: 'account',
+                state: 'text_equals',
+                text: '${inputs.account}',
+              },
+            ],
           },
         ],
       },
@@ -57,7 +67,7 @@ const workflows = () =>
 const definition = (): TestCase => ({
   id: 'pending',
   name: '关联本轮订单',
-  workflowId: 'order',
+  action: { sceneId: 'common', actionId: 'order' },
   inputs: { price: '100.00', quantity: '2' },
   timeoutMs: 3000,
   expect: {
@@ -160,9 +170,9 @@ async function fixture(
   const form: Record<string, string> = {};
   let account = '';
   let owner = '';
-  const flows = workflows();
+  const flows = scenes();
   if (options.waitPending)
-    flows.workflows[0].steps.push({
+    flows.scenes[0].actions![0].steps.push({
       id: 'pending',
       type: 'wait_for_widget',
       target: 'pending',
@@ -178,7 +188,7 @@ async function fixture(
       log.push('release');
     }),
     changed: vi.fn(),
-    loadWorkflows: vi.fn(async () => flows),
+    loadScenes: vi.fn(async () => flows),
     prepare: vi.fn(async () => {
       log.push('prepare');
     }),
@@ -240,7 +250,7 @@ async function fixture(
     {
       directory: '',
       file: 'tests.json',
-      read: async () => validateTestDocument({ version: 1, tests: [value] }),
+      read: async () => validateTestDocument({ version: 2, tests: [value] }),
     } as TestStore,
     host,
   );
@@ -267,6 +277,36 @@ async function terminal(controller: TestController, runId: string): Promise<Test
 }
 
 describe('test case execution and network correlation', () => {
+  it('keeps the Mock environment independent from the Scene that defines the operation', async () => {
+    const test = definition();
+    test.sceneId = 'insufficient_balance';
+    const { controller, host, flows } = await fixture(test);
+    flows.scenes.push({
+      id: 'insufficient_balance',
+      name: '余额不足',
+      httpRules: [],
+      wsRules: [],
+    });
+    const run = await terminal(controller, (await controller.start('pending')).runId);
+    expect(run.status).toBe('passed');
+    expect(run.action).toEqual({ sceneId: 'common', actionId: 'order' });
+    expect(run.sceneId).toBe('insufficient_balance');
+    expect(run.mockSceneId).toBe('insufficient_balance');
+    expect(host.prepare).toHaveBeenCalledWith(run.runId, 'insufficient_balance', undefined, {
+      http: true,
+      ws: true,
+    });
+    expect(run.steps.every((step) => step.sceneId === 'common')).toBe(true);
+  });
+  it('leaves the current Mock selection to the host when no environment is specified', async () => {
+    const { controller, host } = await fixture();
+    host.mockSceneId = () => 'currently-active';
+    const run = await terminal(controller, (await controller.start('pending')).runId);
+    expect(run.status).toBe('passed');
+    expect(run.mockSceneId).toBe('currently-active');
+    expect(host.prepare).toHaveBeenCalledWith(run.runId, undefined, undefined, { http: true, ws: true });
+    expect(run.sceneId).toBeUndefined();
+  });
   it('observes before confirm, extracts the actual order and validates its exact row', async () => {
     const { controller, host, log } = await fixture(definition(), { waitPending: true });
     const result = await controller.start('pending');
@@ -391,7 +431,7 @@ describe('test case execution and network correlation', () => {
   });
   it('runs setup through the same kernel and verifies the target account before submitting', async () => {
     const test = definition();
-    test.setup = [{ workflowId: 'login', inputs: { account: 'expected-user' } }];
+    test.setup = [{ action: { sceneId: 'common', actionId: 'login' }, inputs: { account: 'expected-user' } }];
     const { controller, host, log, setAccount } = await fixture(test);
     setAccount('other-user');
     const failed = await terminal(controller, (await controller.start('pending')).runId);
@@ -409,9 +449,48 @@ describe('test case execution and network correlation', () => {
     );
     expect(JSON.stringify(passed)).not.toContain('setup-secret');
   });
+  it('uses explicit setup input mappings across Scenes and one configuration snapshot', async () => {
+    const test = definition();
+    test.setup = [
+      {
+        action: { sceneId: 'authentication', actionId: 'login' },
+        inputs: { account: '${inputs.price}' },
+      },
+    ];
+    const { controller, host, flows, setAccount, log } = await fixture(test);
+    const shared = flows.scenes[0];
+    const login = shared.actions!.splice(1, 1)[0];
+    flows.scenes.push({
+      id: 'authentication',
+      name: '登录操作',
+      httpRules: [],
+      wsRules: [],
+      targets: { account: shared.targets!.account, password: shared.targets!.password },
+      actions: [login],
+    });
+    setAccount('100.00');
+    vi.mocked(host.prepare).mockImplementation(async () => {
+      log.push('prepare');
+      shared.actions![0].steps = [{ id: 'unexpected', type: 'tap', target: 'account' }];
+      login.steps = [{ id: 'unexpected', type: 'tap', target: 'account' }];
+    });
+    const run = await terminal(controller, (await controller.start('pending')).runId);
+    expect(run.status).toBe('passed');
+    expect(host.loadScenes).toHaveBeenCalledTimes(1);
+    expect(run.steps.map((step) => step.sceneId)).toEqual([
+      'authentication',
+      'authentication',
+      'common',
+      'common',
+      'common',
+    ]);
+    expect(log).toContain('wait_for_widget:account');
+    expect(log).toContain('tap:confirm');
+    expect(log).not.toContain('tap:account');
+  });
   it('waits for setup-created connections before establishing the main baseline', async () => {
     const test = definition();
-    test.setup = [{ workflowId: 'login', inputs: { account: 'expected-user' } }];
+    test.setup = [{ action: { sceneId: 'common', actionId: 'login' }, inputs: { account: 'expected-user' } }];
     const { controller, host, log, setAccount } = await fixture(test);
     setAccount('expected-user');
     let release!: () => void;
@@ -437,7 +516,7 @@ describe('test case execution and network correlation', () => {
   });
   it('cleans up when post-setup readiness fails without executing the main workflow', async () => {
     const test = definition();
-    test.setup = [{ workflowId: 'login', inputs: { account: 'expected-user' } }];
+    test.setup = [{ action: { sceneId: 'common', actionId: 'login' }, inputs: { account: 'expected-user' } }];
     const { controller, host, log, setAccount } = await fixture(test);
     setAccount('expected-user');
     host.ready = vi.fn(async () => {
@@ -668,6 +747,13 @@ describe('test cancellation, failures and cleanup', () => {
 
 describe('test preflight and safe definitions', () => {
   it.each([
+    { version: 1, tests: [{ ...definition(), workflowId: 'order' }] },
+    { version: 2, tests: [{ ...definition(), workflowId: 'order' }] },
+    { version: 2, tests: [{ ...definition(), setup: [{ workflowId: 'login' }] }] },
+  ])('rejects old Workflow references with a specific format error', (document) => {
+    expect(() => validateTestDocument(document)).toThrow(/version: 2.*action.*sceneId.*actionId/);
+  });
+  it.each([
     (test: TestCase) => {
       test.expect = {};
     },
@@ -696,7 +782,16 @@ describe('test preflight and safe definitions', () => {
       test.expect.http![0].requestJson = { '/price': '${process.exit()}' };
     },
     (test: TestCase) => {
-      test.workflowId = 'missing';
+      test.action.actionId = 'missing';
+    },
+    (test: TestCase) => {
+      test.action.sceneId = 'missing';
+    },
+    (test: TestCase) => {
+      test.setup = [{ action: { sceneId: 'common', actionId: 'missing' } }];
+    },
+    (test: TestCase) => {
+      test.setup = [{ action: { sceneId: 'common', actionId: 'login' } }];
     },
     (test: TestCase) => {
       test.events![0].url = 'wss://';
@@ -840,11 +935,11 @@ describe('test preflight and safe definitions', () => {
     const root = await mkdtemp(join(tmpdir(), 'pilot-tests-'));
     roots.push(root);
     const missing = new TestStore(join(root, 'missing'));
-    expect(await missing.read()).toEqual({ version: 1, tests: [] });
+    expect(await missing.read()).toEqual({ version: 2, tests: [] });
     const directory = join(root, 'project');
     await mkdir(directory);
     const store = new TestStore(directory);
-    await writeFile(store.file, JSON.stringify({ version: 1, tests: [definition()] }));
+    await writeFile(store.file, JSON.stringify({ version: 2, tests: [definition()] }));
     expect((await store.read()).tests).toHaveLength(1);
     await symlink(store.file, join(directory, 'link.json'));
     await rm(store.file);

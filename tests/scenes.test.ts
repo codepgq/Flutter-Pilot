@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SceneStore } from '../src/scenes';
+import { cloneScenes, SceneStore } from '../src/scenes';
 import { validateSceneDocument, type SceneDocument } from '../src/scene-model';
 import { SceneController, type SceneHost } from '../src/scene-controller';
 import type { Rule } from '../src/model';
@@ -83,6 +83,71 @@ async function fixture(connected = true) {
 }
 
 describe('scene documents and project store', () => {
+  it('copies cross-Scene calls into each imported group without sharing definitions or identifiers', () => {
+    const source: SceneDocument = {
+      version: 1,
+      activeSceneId: null,
+      scenes: [
+        {
+          id: 'caller',
+          name: '入口',
+          httpRules: [structuredClone(http)],
+          wsRules: [structuredClone(ws)],
+          actions: [
+            {
+              id: 'submit',
+              name: '提交',
+              steps: [{ id: 'common', type: 'call', sceneId: 'common', actionId: 'confirm' }],
+            },
+          ],
+        },
+        {
+          id: 'common',
+          name: '公共操作',
+          httpRules: [],
+          wsRules: [],
+          targets: { button: { key: 'confirm' } },
+          actions: [{ id: 'confirm', name: '确认', steps: [{ id: 'tap', type: 'tap', target: 'button' }] }],
+        },
+      ],
+    };
+    const first = cloneScenes(source.scenes),
+      second = cloneScenes(source.scenes);
+    expect(() => validateSceneDocument({ ...source, scenes: [...first, ...second] })).not.toThrow();
+    for (const group of [first, second]) {
+      expect(group[0].actions![0].steps[0]).toMatchObject({ sceneId: group[1].id, actionId: 'confirm' });
+      expect(group[0].id).not.toBe('caller');
+      expect(group[0].httpRules[0].id).not.toBe(http.id);
+      expect(group[0].wsRules[0].id).not.toBe(ws.id);
+    }
+    expect(first[0].id).not.toBe(second[0].id);
+    first[1].targets!.button.key = 'edited';
+    expect(second[1].targets!.button.key).toBe('confirm');
+    expect(source.scenes[1].targets!.button.key).toBe('confirm');
+    expect(source.scenes[0].actions![0].steps[0]).toMatchObject({ sceneId: 'common' });
+  });
+  it('remaps explicit local calls while preserving implicit calls and references outside the copied group', () => {
+    const source = document().scenes[0];
+    source.targets = { button: { key: 'confirm' } };
+    source.actions = [
+      { id: 'confirm', name: '确认', steps: [{ id: 'tap', type: 'tap', target: 'button' }] },
+      {
+        id: 'local',
+        name: '本场景',
+        steps: [
+          { id: 'implicit', type: 'call', actionId: 'confirm' },
+          { id: 'explicit', type: 'call', sceneId: source.id, actionId: 'confirm' },
+          { id: 'external', type: 'call', sceneId: 'external', actionId: 'confirm' },
+        ],
+      },
+    ];
+    const copy = cloneScenes([source])[0];
+    expect(copy.actions![1].steps).toEqual([
+      { id: 'implicit', type: 'call', actionId: 'confirm' },
+      { id: 'explicit', type: 'call', sceneId: copy.id, actionId: 'confirm' },
+      { id: 'external', type: 'call', sceneId: 'external', actionId: 'confirm' },
+    ]);
+  });
   it('ships valid complete scene examples in the guide and resource', async () => {
     expect(validateSceneDocument(sceneExample).activeSceneId).toBeNull();
     const example = JSON.parse(await readFile(join(process.cwd(), 'resources/example.scenes.json'), 'utf8'));
@@ -215,6 +280,24 @@ describe('scene activation lifecycle', () => {
     await controller.saveHttp([{ ...copy.httpRules[0], name: 'copy edited' }]);
     expect(controller.active?.httpRules[0].name).toBe(http.name);
     expect(controller.document.activeSceneId).toBe('one');
+  });
+  it('copies explicit calls to local actions onto the new Scene', async () => {
+    const { controller } = await fixture();
+    await controller.change((doc) => {
+      doc.scenes[0].targets = { button: { key: 'confirm' } };
+      doc.scenes[0].actions = [
+        { id: 'confirm', name: '确认', steps: [{ id: 'tap', type: 'tap', target: 'button' }] },
+        {
+          id: 'submit',
+          name: '提交',
+          steps: [{ id: 'confirm', type: 'call', sceneId: 'one', actionId: 'confirm' }],
+        },
+      ];
+    });
+    await controller.create('操作副本', controller.document.scenes[0]);
+    const copy = controller.selected!;
+    expect(copy.actions![1].steps[0]).toMatchObject({ sceneId: copy.id, actionId: 'confirm' });
+    expect(controller.document.scenes[0].actions![1].steps[0]).toMatchObject({ sceneId: 'one' });
   });
   it('persists offline selection, restores after reconnection and IDE reopen', async () => {
     const { controller, host, state } = await fixture(false);

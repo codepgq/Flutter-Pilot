@@ -3,12 +3,26 @@ import { link, lstat, mkdir, readFile, rename, unlink, writeFile } from 'node:fs
 import { join } from 'node:path';
 import { validateRuleDocument } from './model';
 import { validateWsRuleDocument } from './ws/model';
-import { validateSceneDocument, type SceneDocument } from './scene-model';
+import { validateSceneDocument, type Scene, type SceneDocument } from './scene-model';
 
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';
 const maxBytes = 64 * 1024 * 1024;
 
-/** Single project-owned source for HTTP and WS scenes. Legacy files are read only once. */
+/** Copy a scene group while keeping explicit calls inside the copied group. */
+export function cloneScenes(scenes: Scene[]): Scene[] {
+  const sceneIds = new Map(scenes.map((scene) => [scene.id, randomUUID()]));
+  return structuredClone(scenes).map((scene) => {
+    scene.id = sceneIds.get(scene.id)!;
+    for (const rule of [...scene.httpRules, ...scene.wsRules]) rule.id = randomUUID();
+    for (const action of scene.actions ?? [])
+      for (const step of action.steps)
+        if (step.type === 'call' && step.sceneId !== undefined && sceneIds.has(step.sceneId))
+          step.sceneId = sceneIds.get(step.sceneId)!;
+    return scene;
+  });
+}
+
+/** Single project-owned source for Mock rules and Scene actions. Legacy network rules are read only once. */
 export class SceneStore {
   readonly file: string;
   private operations: Promise<unknown> = Promise.resolve();

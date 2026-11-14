@@ -3093,3 +3093,11 @@ footer {
   justify-content: space-between;
   gap: 8px;
 }
+
+.scene-operation-panel {
+  min-width: 0;
+}
+.scene-operation-panel p,
+.scene-operation-panel h3 {
+  overflow-wrap: anywhere;
+}
