@@ -82,7 +82,7 @@ test('默认展示场景列表，浏览详情与激活分开', async ({ page }) 
   await expect(page.getByRole('region', { name: '场景详情' })).toHaveCount(0);
   await page.getByRole('button', { name: '查看场景 默认场景' }).click();
   await expect(page.getByRole('heading', { name: /HTTP 规则/ })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'WS 消息规则' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /^WS 消息规则/ })).toBeVisible();
   await expect(page.getByRole('region', { name: '场景运行状态' })).toContainText('尚未全部应用');
   await page.getByRole('button', { name: '查看场景 下单失败' }).click();
   expect(await messages(page)).toContainEqual({ action: 'scenes.select', payload: { id: 'other' } });
@@ -191,6 +191,144 @@ test('规则保存携带目标场景，失败保留 HTTP 草稿', async ({ page 
       rule: expect.objectContaining({ name: '新事件' }),
     },
   });
+});
+
+for (const width of [1280, 390])
+  test(`HTTP 规则 ${width}px 折叠保留筛选与模板状态，收起时新建仍能编辑`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const selected = {
+      ...scene,
+      httpRules: [http, { ...http, id: 'balance', name: '账户余额', match: { path: '/balance' } }],
+    };
+    const scenes = { ...fixture.scenes, scenes: [selected, fixture.scenes.scenes[1]] };
+    await open(page, { scenes });
+    await page.getByRole('button', { name: '查看场景 默认场景' }).click();
+    const rules = page.getByRole('region', { name: 'HTTP 规则区域', exact: true });
+    const toggle = rules.getByRole('button', { name: /HTTP 规则/ });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await rules.getByLabel('搜索规则').fill('订单');
+    await expect(rules.getByRole('switch', { name: '启用 订单列表' })).toBeVisible();
+    await expect(rules.getByRole('switch', { name: '启用 账户余额' })).toHaveCount(0);
+    await rules.getByText('规则模板与说明', { exact: true }).click();
+    await expect(rules.getByText('按原始请求匹配，每阶段执行优先级最高的首条规则。')).toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(rules.getByRole('heading', { name: /HTTP 规则.*2/ })).toBeVisible();
+    await expect(rules.getByLabel('搜索规则')).toBeHidden();
+    await expect(rules.getByRole('switch', { name: '启用 订单列表', includeHidden: true })).toBeHidden();
+    await state(page, { scenes, sceneRuntime: { ...fixture.sceneRuntime, revision: 2 } });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await toggle.focus();
+    await toggle.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(rules.getByLabel('搜索规则')).toHaveValue('订单');
+    await expect(rules.getByText('按原始请求匹配，每阶段执行优先级最高的首条规则。')).toBeVisible();
+    await toggle.press('Space');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await rules.getByRole('button', { name: '新建规则', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: '规则编辑器' })).toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await page.getByLabel('规则名称', { exact: true }).fill('折叠后的新草稿');
+    await state(page, { scenes });
+    await expect(page.getByLabel('规则名称', { exact: true })).toHaveValue('折叠后的新草稿');
+    await page.getByRole('button', { name: '关闭编辑器' }).click();
+    await expect(rules.getByLabel('搜索规则')).toHaveValue('订单');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: `artifacts/scene-http-collapsed-${width}.png`, fullPage: true });
+  });
+
+test('场景辅助操作与 WS 规则独立折叠，参数和编辑草稿不丢失', async ({ page }) => {
+  const selected = {
+    ...scene,
+    targets: { price: { key: 'order.price' } },
+    actions: [
+      {
+        id: 'fill',
+        name: '填写价格',
+        inputs: { price: { required: true } },
+        steps: [{ id: 'fillPrice', type: 'enter_text', target: 'price', text: '${inputs.price}' }],
+      },
+    ],
+  };
+  const scenes = { ...fixture.scenes, scenes: [selected] };
+  await open(page, { scenes });
+  await page.getByRole('button', { name: '查看场景 默认场景' }).click();
+  const operations = page.getByRole('region', { name: '场景辅助操作', exact: true });
+  const operationToggle = operations.getByRole('button', { name: /UI 操作/ });
+  await operations.getByLabel('选择场景操作').selectOption('fill');
+  await operations.getByLabel('操作参数 price').fill('0.0012300');
+  await operationToggle.click();
+  await expect(operationToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(operations.getByText('操作来源：默认场景 · 当前 Mock：默认场景')).toBeVisible();
+  await expect(operations.getByLabel('选择场景操作')).toBeHidden();
+  await state(page, { scenes });
+  await expect(operationToggle).toHaveAttribute('aria-expanded', 'false');
+  await operationToggle.click();
+  await expect(operations.getByLabel('选择场景操作')).toHaveValue('fill');
+  await expect(operations.getByLabel('操作参数 price')).toHaveValue('0.0012300');
+  const rules = page.getByRole('region', { name: 'WS 消息规则区域', exact: true });
+  const ruleToggle = rules.getByRole('button', { name: /WS 消息规则/ });
+  await rules.getByRole('button', { name: '编辑', exact: true }).click();
+  await rules.getByLabel('WS 规则名称').fill('保留中的事件草稿');
+  await ruleToggle.click();
+  await expect(ruleToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(rules.getByRole('heading', { name: /WS 消息规则.*1/ })).toBeVisible();
+  await expect(rules.getByLabel('WS 规则名称')).toBeHidden();
+  await state(page, { scenes });
+  await expect(ruleToggle).toHaveAttribute('aria-expanded', 'false');
+  await ruleToggle.focus();
+  await ruleToggle.press('Enter');
+  await expect(rules.getByLabel('WS 规则名称')).toHaveValue('保留中的事件草稿');
+  await rules.getByRole('button', { name: '取消编辑', exact: true }).click();
+  await ruleToggle.click();
+  await rules.getByRole('button', { name: '新建 WS 规则', exact: true }).click();
+  await expect(ruleToggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(rules.getByLabel('WS 规则名称')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('运行状态、场景列表和详情均可独立折叠，浏览与折叠不切换 Mock', async ({ page }) => {
+  await open(page);
+  const runtime = page.getByRole('region', { name: '场景运行状态', exact: true });
+  const runtimeToggle = runtime.getByRole('button', { name: /场景运行状态/ });
+  const list = page.getByRole('region', { name: '场景列表', exact: true });
+  const listToggle = list.getByRole('button', { name: /场景列表/ });
+  const initialMessages = await messages(page);
+  await runtimeToggle.click();
+  await expect(runtimeToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(runtime.getByText('当前激活：默认场景')).toBeVisible();
+  await expect(runtime.getByText('尚未全部应用')).toBeVisible();
+  await expect(
+    runtime.getByText('激活状态会保存，重连或重开 IDE 后自动恢复。实际命中请查看新请求和消息。'),
+  ).toBeHidden();
+  await listToggle.click();
+  await expect(listToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(list.getByRole('button', { name: '查看场景 默认场景', includeHidden: true })).toBeHidden();
+  await expect(list.getByRole('heading', { name: /场景列表.*2/ })).toBeVisible();
+  await state(page, { sceneRuntime: { ...fixture.sceneRuntime, revision: 2 } });
+  await expect(runtimeToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(listToggle).toHaveAttribute('aria-expanded', 'false');
+  await listToggle.focus();
+  await listToggle.press('Space');
+  await expect(listToggle).toHaveAttribute('aria-expanded', 'true');
+  expect(await messages(page)).toEqual(initialMessages);
+  await list.getByRole('button', { name: '查看场景 默认场景' }).click();
+  const detail = page.getByRole('region', { name: '场景详情', exact: true });
+  const detailToggle = detail.getByRole('button', { name: /^默认场景/ });
+  await detail.getByLabel('场景名称').fill('未保存的场景名称');
+  await detailToggle.click();
+  await expect(detailToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(detail.getByLabel('场景名称')).toBeHidden();
+  await expect(detail.getByRole('button', { name: '关闭场景详情' })).toBeVisible();
+  await detailToggle.click();
+  await expect(detail.getByLabel('场景名称')).toHaveValue('未保存的场景名称');
+  await detailToggle.click();
+  await detail.getByRole('button', { name: '关闭场景详情' }).click();
+  await expect(detail).toHaveCount(0);
+  expect(await messages(page)).not.toContainEqual({ action: 'scenes.activate', payload: { id: 'default' } });
 });
 
 test('连接与 WebSocket 页面统一跳转场景，保留采集', async ({ page }) => {

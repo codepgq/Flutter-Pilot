@@ -4,6 +4,7 @@ import type { Scene } from '../src/scene-model';
 import type { WorkflowStep } from '../src/workflows/model';
 import type { WorkflowStepResult } from '../src/workflows/controller';
 import type { WaitDiagnostics } from '../src/automation/model';
+import { CollapsibleSection } from './collapsible-section';
 
 const statuses: Record<string, string> = {
   running: '运行中',
@@ -167,16 +168,21 @@ export function SceneActionsPanel({
       ([key, spec]) => spec.required && spec.default === undefined && !inputs[key],
     );
   return (
-    <section className="card scene-operation-panel" aria-label="场景辅助操作">
-      <div className="mcp-heading">
-        <h3>UI 操作（Workflow）</h3>
+    <CollapsibleSection
+      title="UI 操作（Workflow）"
+      label="场景辅助操作"
+      className="card scene-operation-panel"
+      actions={
         <span className="badge">
           {actions.length} 个操作 · {Object.keys(scene.targets ?? {}).length} 个目标
         </span>
-      </div>
-      <p className="muted">
-        操作来源：{scene.name} · 当前 Mock：{sceneName(state, state.scenes?.activeSceneId)}
-      </p>
+      }
+      summary={
+        <p className="muted">
+          操作来源：{scene.name} · 当前 Mock：{sceneName(state, state.scenes?.activeSceneId)}
+        </p>
+      }
+    >
       <p className="muted">
         选择已保存的操作，填写参数后手动运行；Agent 也可执行同一操作。执行时保留当前 Mock。
       </p>
@@ -296,89 +302,111 @@ export function SceneActionsPanel({
           </button>
         </>
       )}
-    </section>
+    </CollapsibleSection>
   );
 }
 
 export function SceneActionRunPanel({ state, send }: { state: WorkbenchState; send: Send }) {
   const data = state.sceneActions;
   const run = data?.run;
+  const [collapsedRunId, setCollapsedRunId] = useState<string>();
   if (!run) return null;
+  const expanded = collapsedRunId !== run.runId;
   const failedStepIndex = run.steps.findIndex((step) => step.failure);
   const failedStep = run.steps[failedStepIndex];
   return (
     <section className="card scene-operation-panel" aria-label="场景操作运行结果" aria-live="polite">
-      <div className="mcp-heading">
-        <h3>{run.name}</h3>
-        <span className="badge">{statuses[run.status] ?? run.status}</span>
-      </div>
-      <p className="muted">
-        操作来源：{sceneName(state, run.sceneId)} · 本轮 Mock：{sceneName(state, run.mockSceneId)}
-      </p>
-      <p>{run.message}</p>
       {data?.running && (
-        <button
-          disabled={run.cancelRequested}
-          onClick={() => send('scenes.actions.cancel', { runId: run.runId })}
-        >
-          {run.cancelRequested ? '正在取消…' : '取消操作'}
-        </button>
-      )}
-      <p className="muted">
-        已完成 {run.metrics.stepsCompleted}/{run.steps.length} 步 · 总耗时 {milliseconds(run.metrics.totalMs)}{' '}
-        · 定位 {milliseconds(run.metrics.resolveMs)} · 输入 {milliseconds(run.metrics.inputMs)} ·
-        等待（含定位） {milliseconds(run.metrics.waitMs)}
-      </p>
-      {run.failure && (
-        <div role="alert" className="scene-run-failure">
-          {failedStep && (
-            <strong>
-              第 {failedStepIndex + 1} 步
-              {failedStep.status === 'uncertain'
-                ? '结果未确认'
-                : failedStep.status === 'cancelled'
-                  ? '已取消'
-                  : '失败'}
-              ：{runStepSummary(failedStep)}
-            </strong>
-          )}
-          <p>
-            {run.failure.code} · {run.failure.message}
-          </p>
-          {failedStep && <RunStepLocator step={failedStep} />}
-          {run.failure.diagnostics && <WaitObservation diagnostics={run.failure.diagnostics} />}
-          {run.failure.code === 'WAIT_TIMEOUT' && (
-            <p>检查当前页面是否满足操作前提，并核对目标 Key 和等待状态；确认后再决定是否重新运行。</p>
-          )}
-          <button onClick={() => send('scenes.open')}>打开场景配置</button>
+        <div className="scene-run-controls">
+          <button
+            disabled={run.cancelRequested}
+            onClick={() => send('scenes.actions.cancel', { runId: run.runId })}
+          >
+            {run.cancelRequested ? '正在取消…' : '取消操作'}
+          </button>
         </div>
       )}
-      {run.status === 'uncertain' && (
-        <p className="notice">操作可能已经发生。请先检查页面和网络记录，再决定下一步。</p>
-      )}
-      <ol className="workflow-steps" aria-label="运行步骤">
-        {run.steps.map((step) => (
-          <li key={step.path}>
-            <div>
-              <strong>{runStepSummary(step)}</strong>
-              <span>
-                {statuses[step.status] ?? step.status}
-                {step.durationMs !== undefined ? ` · ${milliseconds(step.durationMs)}` : ''}
-              </span>
+      <details
+        key={run.runId}
+        className="scene-action-result"
+        open={expanded}
+        onToggle={(event) => {
+          if (event.target === event.currentTarget)
+            setCollapsedRunId(event.currentTarget.open ? undefined : run.runId);
+        }}
+      >
+        <summary className="scene-run-summary">
+          <div className="scene-run-summary-content">
+            <div className="mcp-heading">
+              <h3>{run.name}</h3>
+              <span className="badge">{statuses[run.status] ?? run.status}</span>
             </div>
-            <RunStepLocator step={step} />
-            <details className="scene-run-path">
-              <summary>步骤：{step.id}</summary>
-              <small className="muted">调用路径：{step.path}</small>
-            </details>
-            {step.failure && (
-              <p>
-                {step.failure.code} · {step.failure.message}
-              </p>
+            <span className="muted scene-run-source">
+              操作来源：{sceneName(state, run.sceneId)} · 本轮 Mock：{sceneName(state, run.mockSceneId)}
+            </span>
+          </div>
+          <span className="muted scene-run-disclosure">
+            <span className="scene-run-expand">展开详情</span>
+            <span className="scene-run-collapse">收起详情</span>
+          </span>
+        </summary>
+        <p>{run.message}</p>
+        <p className="muted">
+          已完成 {run.metrics.stepsCompleted}/{run.steps.length} 步 · 总耗时{' '}
+          {milliseconds(run.metrics.totalMs)} · 定位 {milliseconds(run.metrics.resolveMs)} · 输入{' '}
+          {milliseconds(run.metrics.inputMs)} · 等待（含定位） {milliseconds(run.metrics.waitMs)}
+        </p>
+        {run.failure && (
+          <div role="alert" className="scene-run-failure">
+            {failedStep && (
+              <strong>
+                第 {failedStepIndex + 1} 步
+                {failedStep.status === 'uncertain'
+                  ? '结果未确认'
+                  : failedStep.status === 'cancelled'
+                    ? '已取消'
+                    : '失败'}
+                ：{runStepSummary(failedStep)}
+              </strong>
             )}
-          </li>
-        ))}
-      </ol>
+            <p>
+              {run.failure.code} · {run.failure.message}
+            </p>
+            {failedStep && <RunStepLocator step={failedStep} />}
+            {run.failure.diagnostics && <WaitObservation diagnostics={run.failure.diagnostics} />}
+            {run.failure.code === 'WAIT_TIMEOUT' && (
+              <p>检查当前页面是否满足操作前提，并核对目标 Key 和等待状态；确认后再决定是否重新运行。</p>
+            )}
+            <button onClick={() => send('scenes.open')}>打开场景配置</button>
+          </div>
+        )}
+        {run.status === 'uncertain' && (
+          <p className="notice">操作可能已经发生。请先检查页面和网络记录，再决定下一步。</p>
+        )}
+        <ol className="workflow-steps" aria-label="运行步骤">
+          {run.steps.map((step) => (
+            <li key={step.path}>
+              <div>
+                <strong>{runStepSummary(step)}</strong>
+                <span>
+                  {statuses[step.status] ?? step.status}
+                  {step.durationMs !== undefined ? ` · ${milliseconds(step.durationMs)}` : ''}
+                </span>
+              </div>
+              <RunStepLocator step={step} />
+              <details className="scene-run-path">
+                <summary>步骤：{step.id}</summary>
+                <small className="muted">调用路径：{step.path}</small>
+              </details>
+              {step.failure && (
+                <p>
+                  {step.failure.code} · {step.failure.message}
+                </p>
+              )}
+            </li>
+          ))}
+        </ol>
+      </details>
     </section>
   );
 }

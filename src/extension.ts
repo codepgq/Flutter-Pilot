@@ -1660,6 +1660,7 @@ class Workbench {
   }
   private clientMatches(agent: McpAgentId, name: string) {
     if (agent === 'claude') return /claude/i.test(name);
+    if (agent === 'cursor') return /^cursor-vscode$/i.test(name);
     if (agent === 'codex-app') return /^codex[-_ ](?:app|desktop|vscode)$/i.test(name);
     return /^codex[-_ ]cli$/i.test(name);
   }
@@ -2071,7 +2072,7 @@ class Workbench {
           break;
         case 'mcp.adapt': {
           const agent = String(payload.agent) as McpAgentId;
-          if (!['claude', 'codex-cli', 'codex-app'].includes(agent)) throw new Error('未知 Agent');
+          if (!['claude', 'codex-cli', 'codex-app', 'cursor'].includes(agent)) throw new Error('未知 Agent');
           const scope = payload.scope === 'global' ? 'global' : 'project';
           if (!this.mcpState.enabled) await this.setMcpEnabled(true);
           const current = await this.adapters().inspect(agent, scope);
@@ -2089,7 +2090,7 @@ class Workbench {
         }
         case 'mcp.remove': {
           const agent = String(payload.agent) as McpAgentId;
-          if (!['claude', 'codex-cli', 'codex-app'].includes(agent)) throw new Error('未知 Agent');
+          if (!['claude', 'codex-cli', 'codex-app', 'cursor'].includes(agent)) throw new Error('未知 Agent');
           const scope = payload.scope === 'global' ? 'global' : 'project';
           const result = await this.adapters().remove(agent, scope);
           this.mcpState.notice = result.message;
@@ -2098,7 +2099,7 @@ class Workbench {
         }
         case 'mcp.config.open': {
           const agent = String(payload.agent) as McpAgentId;
-          if (!['claude', 'codex-cli', 'codex-app'].includes(agent)) throw new Error('未知 Agent');
+          if (!['claude', 'codex-cli', 'codex-app', 'cursor'].includes(agent)) throw new Error('未知 Agent');
           const path = this.adapters().configPath(agent, payload.scope === 'global' ? 'global' : 'project');
           await vscode.window.showTextDocument(vscode.Uri.file(path), { preview: false });
           break;

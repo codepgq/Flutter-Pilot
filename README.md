@@ -6,7 +6,9 @@
 
 配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key、文字或语义定位页面，通过 VM 或设备输入操作，减少逐步截图识别的耗时与 token 消耗。
 
-当前版本为 **0.0.20**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+当前版本为 **0.0.21**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+
+**0.0.21 更新**：新增 Cursor MCP 一键适配、项目 / 全局配置和连接状态；Mock 场景页各主要区块及操作运行结果支持独立展开与收起，保留搜索、参数和草稿。
 
 **0.0.20 更新**：完善 MCP 功能与任务引导，新增截图专用 Prompt / 指南，并更新插件、活动栏、工作台和 MCP 服务图标。
 
@@ -102,6 +104,8 @@
 
 MCP 服务名称和客户端配置项名称均为 **`flutter-pilot`**；插件显示名称是 **Flutter Pilot**。服务使用标准 MCP stdio 传输，支持工具、资源和提示模板；桥接进程通过本机私有 Unix socket 访问插件会话。它复用 Flutter Debug VM，无需向应用添加 Driver 或 helper。
 
+工作台 MCP → Agent 适配支持 Claude Code CLI、Codex CLI、Codex App 和 Cursor。Cursor 可一键配置当前项目的 `.cursor/mcp.json` 或全局 `~/.cursor/mcp.json`，保留其他 MCP；在 Cursor MCP 设置中确认 `flutter-pilot` 已启用，连接后单独显示实际握手状态。配置路径、冲突修复及维护说明见 [MCP 指南](docs/mcp.md)。
+
 1. 在受信任的本地 Flutter 工作区启动 Debug 应用，并在工作台的 **连接与诊断** 中确认 VM 已连接。
 2. 在 **MCP** Tab 开启服务，选择目标 Agent 和 **当前项目**（默认）或全局范围，点击 **一键适配**。需要本机 Node.js 20+。
 3. 按客户端提示加载配置、信任或批准项目 MCP；必要时重连或新建会话。**已配置不代表客户端已连接**，实际握手状态在工作台显示。
@@ -171,7 +175,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 
 ### 从 VSIX 安装
 
-1. 获取 `flutter-pilot-0.0.20.vsix`。从源码构建见下方步骤。
+1. 获取 `flutter-pilot-0.0.21.vsix`。从源码构建见下方步骤。
 2. 在 VS Code 或 Cursor 扩展面板右上角菜单选择 **Install from VSIX… / 从 VSIX 安装…**。
 3. 选择安装包，按 IDE 提示重新加载窗口。
 4. 打开包含 `pubspec.yaml` 的 Flutter 项目根目录，并信任工作区。
@@ -181,7 +185,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 安装当前 Flutter Pilot 包，例如：
 
 ```sh
-cursor --install-extension artifacts/flutter-pilot-0.0.20.vsix --force
+cursor --install-extension artifacts/flutter-pilot-0.0.21.vsix --force
 # VS Code 使用 code --install-extension 同一文件 --force
 ```
 
@@ -204,7 +208,7 @@ npm test
 npm run package
 ```
 
-产物为 `artifacts/flutter-pilot-0.0.20.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
+产物为 `artifacts/flutter-pilot-0.0.21.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
 
 ### 使用已有引擎
 
@@ -806,7 +810,7 @@ python3 tool/device_smoke.py --mitmdump /absolute/path/to/mitmdump --ios YOUR_SI
 
 ```sh
 npm run package
-shasum -a 256 artifacts/flutter-pilot-0.0.20.vsix
+shasum -a 256 artifacts/flutter-pilot-0.0.21.vsix
 ```
 
 VSIX 包含扩展构建产物、VM 注入模板、代理 addon、引擎清单及文档，不包含 Node 开发依赖、Flutter 示例构建结果或真实证书。首次引擎下载单独发生。源码中的 README 修改后，应重新打包，安装包内的文档才会更新。

@@ -1,4 +1,4 @@
-export type McpAgentId = 'claude' | 'codex-cli' | 'codex-app';
+export type McpAgentId = 'claude' | 'codex-cli' | 'codex-app' | 'cursor';
 export type McpScope = 'project' | 'global';
 
 export interface McpAgentState {

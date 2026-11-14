@@ -63,6 +63,19 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
   overview: {
     title: '什么时候使用 Flutter Pilot MCP',
     capabilityRoutes,
+    agentAdapters: {
+      clients: ['Claude Code CLI', 'Codex CLI', 'Codex App', 'Cursor'],
+      entry: '工作台 MCP → Agent 适配，选择当前项目或全局，再点击目标客户端的一键适配。',
+      cursor: {
+        project: '<workspace>/.cursor/mcp.json',
+        global: '~/.cursor/mcp.json',
+        server: 'mcpServers.flutter-pilot',
+        transport: 'stdio',
+        loading: '在 Cursor MCP 设置中确认 flutter-pilot 已启用，必要时重新连接；同名冲突需显式修复。',
+      },
+      verification:
+        '配置写入、桥接自检与目标客户端实际握手分别报告；只读查阅不写入配置、不启动客户端或运行 App。',
+    },
     promptDiscovery: {
       protocol:
         'prompts/list 查看名称和能力说明；prompts/get({name,arguments:{task?}}) 读取。task 是可选提示参数，不是工具参数。读取不执行操作，也无需 IDE 或 sessionId。',

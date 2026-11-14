@@ -186,12 +186,85 @@ test('running action locks environment controls but browsing and cancellation st
   await page.getByRole('button', { name: '查看场景 余额不足' }).click();
   const result = page.getByRole('region', { name: '场景操作运行结果' });
   await expect(result.getByText('操作来源：公共操作 · 本轮 Mock：余额不足')).toBeVisible();
+  const details = result.locator('details.scene-action-result').first();
+  await details.locator(':scope > summary').click();
+  await expect(details).toHaveJSProperty('open', false);
   await result.getByRole('button', { name: '取消操作', exact: true }).click();
   expect(await messages(page)).toContainEqual({
     action: 'scenes.actions.cancel',
     payload: { runId: 'action-active' },
   });
 });
+
+for (const width of [1280, 390]) {
+  test(`Scene action results collapse independently and retain their state at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const run = {
+      runId: 'collapsible-1',
+      sceneId: 'common',
+      actionId: 'submit',
+      mockSceneId: 'insufficient',
+      name: '提交订单',
+      status: 'completed',
+      message: '场景操作完成，尚未执行此轮业务断言。',
+      metrics: { totalMs: 20, resolveMs: 2, inputMs: 3, waitMs: 5, stepsCompleted: 1 },
+      steps: [
+        {
+          id: 'submit',
+          path: 'entry/submit/common/submit/tap_submit',
+          sceneId: 'common',
+          actionId: 'submit',
+          target: 'submit',
+          tool: 'tap',
+          status: 'completed',
+          durationMs: 20,
+        },
+      ],
+    };
+    await openActions(page, { sceneActions: { ...base.sceneActions, run } });
+    const result = page.getByRole('region', { name: '场景操作运行结果' });
+    const details = result.locator('details.scene-action-result').first();
+    const summary = details.locator(':scope > summary');
+    const steps = result.getByRole('list', { name: '运行步骤' });
+    await expect(details).toHaveJSProperty('open', true);
+    await expect(summary.getByText('收起详情', { exact: true })).toBeVisible();
+    await expect(steps).toBeVisible();
+    await result.getByText('步骤：submit', { exact: true }).click();
+    await expect(result.getByText('调用路径：entry/submit/common/submit/tap_submit')).toBeVisible();
+    await expect(details).toHaveJSProperty('open', true);
+    await summary.click();
+    await expect(details).toHaveJSProperty('open', false);
+    await expect(summary.getByText('展开详情', { exact: true })).toBeVisible();
+    await expect(summary.getByRole('heading', { name: '提交订单', exact: true })).toBeVisible();
+    await expect(summary.getByText('操作完成', { exact: true })).toBeVisible();
+    await expect(summary.getByText('操作来源：公共操作 · 本轮 Mock：余额不足')).toBeVisible();
+    await expect(steps).not.toBeVisible();
+    await expect(result.getByText(/已完成 1\/1 步/)).not.toBeVisible();
+    await page.screenshot({ path: `artifacts/scene-run-collapsed-${width}.png`, fullPage: true });
+
+    await update(page, {
+      sceneActions: {
+        ...base.sceneActions,
+        run: { ...run, metrics: { ...run.metrics, totalMs: 42 } },
+      },
+    });
+    await expect(details).toHaveJSProperty('open', false);
+    await summary.focus();
+    await summary.press('Enter');
+    await expect(details).toHaveJSProperty('open', true);
+    await expect(summary.getByText('收起详情', { exact: true })).toBeVisible();
+    await expect(result.getByText(/总耗时 42 ms/)).toBeVisible();
+    await summary.press('Space');
+    await expect(details).toHaveJSProperty('open', false);
+    await update(page, { sceneActions: { ...base.sceneActions, run: { ...run, runId: 'collapsible-2' } } });
+    await expect(details).toHaveJSProperty('open', true);
+    await expect(steps).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: `artifacts/scene-run-expanded-${width}.png`, fullPage: true });
+  });
+}
 
 test('action completion differs from business test success, and uncertain tests expose evidence', async ({
   page,

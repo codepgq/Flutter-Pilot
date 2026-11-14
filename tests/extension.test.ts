@@ -7,6 +7,9 @@ import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import type { Scene, SceneDocument } from '../src/scene-model';
 import { discoverSessions, requestSession } from '../src/mcp/server';
+import { AgentAdapterManager } from '../src/mcp/adapters';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 const fake = vi.hoisted(() => ({
   commands: new Map<string, () => Promise<unknown>>(),
   executedCommands: [] as string[],
@@ -1204,6 +1207,73 @@ describe('扩展与工作台整合', () => {
     await message('mcp.enable', { enabled: false });
     await vi.waitFor(async () => expect(await discoverSessions(registry, fake.workspace)).toHaveLength(0));
   });
+  it.each(['project', 'global'] as const)(
+    'Cursor %s setup routes through the extension and recognizes only its actual SDK handshake',
+    async (scope) => {
+      const root = await realpath(directory);
+      const isolated = new AgentAdapterManager({
+        workspace: join(root, 'project'),
+        bridgeRoot: join(root, 'bridge'),
+        home: join(root, 'home'),
+        codexHome: join(root, 'codex'),
+      });
+      const configPath = AgentAdapterManager.prototype.configPath;
+      const pathSpy = vi
+        .spyOn(AgentAdapterManager.prototype, 'configPath')
+        .mockImplementation((agent, selectedScope) => configPath.call(isolated, agent, selectedScope));
+      const path = configPath.call(isolated, 'cursor', scope);
+      try {
+        await open();
+        await message('mcp.adapt', { agent: 'cursor', scope });
+        const cursor = () => latest().state.mcp.agents.find((agent: any) => agent.agent === 'cursor');
+        await vi.waitFor(() => expect(cursor()).toMatchObject({ configured: true, connected: false }));
+        await vi.waitFor(() => expect(latest().state.busy).toBe(false));
+        expect(latest().state.mcp.notice).toContain('桥接握手自检通过');
+        expect(latest().state.mcp.clients).toEqual([]);
+        expect(JSON.parse(await readFile(path, 'utf8')).mcpServers['flutter-pilot']).toMatchObject({
+          type: 'stdio',
+          command: expect.any(String),
+        });
+        await message('mcp.config.open', { agent: 'cursor', scope });
+        await vi.waitFor(() => expect(fake.shownDocuments).toContain(path));
+        for (const [name, clientScope, connected] of [
+          ['codex-vscode', scope, false],
+          ['cursor-helper', scope, false],
+          ['cursor-vscode', scope === 'project' ? 'global' : 'project', false],
+          ['cursor-vscode', scope, true],
+        ] as const) {
+          const client = new Client({ name, version: '1.0.0' });
+          try {
+            await client.connect(
+              new StdioClientTransport({
+                command: process.execPath,
+                args: [
+                  join(directory, 'bridge', 'bridge.cjs'),
+                  '--registry',
+                  join(directory, 'bridge', 'sessions'),
+                  ...(clientScope === 'project' ? ['--workspace', fake.workspace] : []),
+                ],
+                stderr: 'pipe',
+              }),
+            );
+            await vi.waitFor(() =>
+              expect(latest().state.mcp.clients.some((item: any) => item.name === name)).toBe(true),
+            );
+            expect(cursor().connected).toBe(connected);
+          } finally {
+            await client.close();
+          }
+          await vi.waitFor(() => expect(cursor().connected).toBe(false));
+        }
+        await message('mcp.remove', { agent: 'cursor', scope });
+        await vi.waitFor(() => expect(cursor()).toMatchObject({ configured: false, connected: false }));
+        expect(JSON.parse(await readFile(path, 'utf8')).mcpServers).toEqual({});
+      } finally {
+        await vi.waitFor(() => expect(latest().state.busy).toBe(false));
+        pathSpy.mockRestore();
+      }
+    },
+  );
   it('打开Flutter项目后无面板自动启动，手动停止后重开面板不恢复监听', async () => {
     const engine = fake.engines[0];
     expect(fake.panels).toHaveLength(0);

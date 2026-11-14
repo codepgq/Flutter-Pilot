@@ -17,6 +17,7 @@ import { WebSocketPanel } from './websocket';
 import { McpPanel } from './mcp';
 import { SceneActionsPanel, SceneActionRunPanel } from './scene-actions';
 import { TestPanel } from './tests';
+import { CollapsibleSection } from './collapsible-section';
 import type { WsRule } from '../src/ws/model';
 import type { Scene } from '../src/scene-model';
 
@@ -1590,34 +1591,44 @@ function Scenes({
           <Button action="scenes.open">打开场景配置</Button>
         </div>
       </div>
-      <section className="card scene-runtime" aria-label="场景运行状态">
-        <strong>{active ? `当前激活：${active.name}` : '当前未激活场景'}</strong>
-        {active && <span className="tag">{applied ? '已应用 · 待业务验证' : '尚未全部应用'}</span>}
-        {runtime &&
-          (['http', 'ws'] as const).map((domain) => (
-            <span key={domain} title={runtime[domain].message}>
-              {domain.toUpperCase()}：{sceneStatusLabels[runtime[domain].status]}{' '}
-              {['pending', 'error', 'unsupported', 'paused'].includes(runtime[domain].status) &&
-                runtime[domain].message}
-            </span>
-          ))}
-        {active && (
-          <>
-            <Button disabled={environmentBusy} onClick={() => send('scenes.activate', { id: active.id })}>
-              重新应用
-            </Button>
+      <CollapsibleSection
+        title="场景运行状态"
+        label="场景运行状态"
+        className="card"
+        summary={
+          <div className="scene-runtime-summary">
+            <strong>{active ? `当前激活：${active.name}` : '当前未激活场景'}</strong>
+            {active && <span className="tag">{applied ? '已应用 · 待业务验证' : '尚未全部应用'}</span>}
+            {runtime &&
+              (['http', 'ws'] as const).map((domain) => (
+                <span key={domain} title={runtime[domain].message}>
+                  {domain.toUpperCase()}：{sceneStatusLabels[runtime[domain].status]}{' '}
+                  {['pending', 'error', 'unsupported', 'paused'].includes(runtime[domain].status) &&
+                    runtime[domain].message}
+                </span>
+              ))}
+          </div>
+        }
+      >
+        <div className="scene-runtime">
+          {active && (
+            <>
+              <Button disabled={environmentBusy} onClick={() => send('scenes.activate', { id: active.id })}>
+                重新应用
+              </Button>
+              <Button disabled={environmentBusy} action="scenes.deactivate">
+                停用场景
+              </Button>
+            </>
+          )}
+          {!active && runtime && [runtime.http, runtime.ws].some((domain) => domain.status === 'error') && (
             <Button disabled={environmentBusy} action="scenes.deactivate">
-              停用场景
+              重试停用
             </Button>
-          </>
-        )}
-        {!active && runtime && [runtime.http, runtime.ws].some((domain) => domain.status === 'error') && (
-          <Button disabled={environmentBusy} action="scenes.deactivate">
-            重试停用
-          </Button>
-        )}
-        <small>激活状态会保存，重连或重开 IDE 后自动恢复。实际命中请查看新请求和消息。</small>
-      </section>
+          )}
+          <small>激活状态会保存，重连或重开 IDE 后自动恢复。实际命中请查看新请求和消息。</small>
+        </div>
+      </CollapsibleSection>
       {state.lastError && (
         <div className="notice" role="alert">
           {state.lastError}
@@ -1625,10 +1636,15 @@ function Scenes({
       )}
       <SceneActionRunPanel state={state} send={send} />
       <div className={`scene-layout ${selected ? 'has-detail' : ''}`}>
-        <section className="scene-list" aria-label="场景列表">
-          <div className="scene-list-heading">
-            场景列表 <span className="count">{scenes.length}</span>
-          </div>
+        <CollapsibleSection
+          className="scene-list"
+          label="场景列表"
+          title={
+            <>
+              场景列表 <span className="count">{scenes.length}</span>
+            </>
+          }
+        >
           {scenes.map((scene) => (
             <div className={`scene-row ${selected?.id === scene.id ? 'selected' : ''}`} key={scene.id}>
               <button
@@ -1674,11 +1690,14 @@ function Scenes({
               description="场景可保存 HTTP / WebSocket Mock、稳定目标和命名操作。"
             />
           )}
-        </section>
+        </CollapsibleSection>
         {selected && (
-          <section className="scene-detail" aria-label="场景详情">
-            <div className="scene-detail-heading">
-              <strong title={selected.name}>{selected.name}</strong>
+          <CollapsibleSection
+            key={selected.id}
+            className="scene-detail"
+            label="场景详情"
+            title={selected.name}
+            actions={
               <button
                 aria-label="关闭场景详情"
                 title="关闭详情，返回列表"
@@ -1690,7 +1709,8 @@ function Scenes({
               >
                 <Icon name="close" size={16} />
               </button>
-            </div>
+            }
+          >
             <div className="scene-actions">
               <input
                 aria-label="场景名称"
@@ -1763,7 +1783,7 @@ function Scenes({
                 send(action, { ...((payload as object) ?? {}), sceneId: selected.id })
               }
             />
-          </section>
+          </CollapsibleSection>
         )}
       </div>
     </div>
@@ -1781,129 +1801,144 @@ function Rules({
   setEdit: (r: Rule | undefined) => void;
 }) {
   const [search, setSearch] = useState('');
+  const [expanded, setExpanded] = useState(true);
   const send = (action: string, payload = {}) =>
     vscode?.postMessage({ action, payload: { ...payload, sceneId: scene?.id } });
   return (
-    <div className="rules-page">
-      <div className="page-title compact">
-        <div>
-          <h2>
+    <>
+      <CollapsibleSection
+        className="rules-page"
+        label="HTTP 规则区域"
+        headingLevel={2}
+        title={
+          <>
             HTTP 规则 <span className="count">{state.rules.length}</span>
-          </h2>
-        </div>
-        <div className="toolbar-actions">
-          <details className="workspace-menu">
-            <summary>更多操作</summary>
-            <div className="workspace-menu-panel">
-              <Button action="rules.import">导入</Button>
-              <Button action="rules.export">导出</Button>
-            </div>
-          </details>
-          <Button primary onClick={() => setEdit(newRule('mock'))}>
-            <Icon name="plus" size={15} />
-            新建规则
-          </Button>
-        </div>
-      </div>
-      <details className="compact-disclosure rule-presets">
-        <summary>规则模板与说明</summary>
-        <p>按原始请求匹配，每阶段执行优先级最高的首条规则。</p>
-        <div className="rule-templates">
-          {Object.entries(kindLabels).map(([kind, label]) => (
-            <button key={kind} onClick={() => setEdit(newRule(kind))}>
-              <Icon
-                name={
-                  kind === 'mock'
-                    ? 'box'
-                    : kind === 'breakpoint'
-                      ? 'pause'
-                      : kind === 'redirect'
-                        ? 'arrowRight'
-                        : 'rules'
-                }
-                size={18}
-              />
-              <span>{label}</span>
-              <Icon name="plus" size={14} />
-            </button>
-          ))}
-        </div>
-      </details>
-      <div className="search-field rule-search">
-        <Icon name="search" size={16} />
-        <input
-          aria-label="搜索规则"
-          placeholder="查找规则名称或 API 路径…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      </div>
-      {state.rules.length ? (
-        <div className="rule-list">
-          {state.rules
-            .filter((r) =>
-              `${r.name} ${r.match.path} ${r.match.host}`.toLowerCase().includes(search.toLowerCase()),
-            )
-            .map((r, i) => (
-              <div className={`rule-card ${r.enabled ? 'enabled' : 'inactive'}`} key={r.id}>
-                <button
-                  type="button"
-                  className="rule-switch"
-                  role="switch"
-                  aria-checked={r.enabled}
-                  aria-label={`启用 ${r.name}`}
-                  title={r.enabled ? '点击停用此规则' : '点击启用此规则'}
-                  disabled={state.busy}
-                  onClick={() => send('rules.toggle', { id: r.id })}
-                >
-                  <span className="rule-switch-track" aria-hidden="true">
-                    <span className="rule-switch-thumb" />
-                  </span>
-                </button>
-                <div className="rule-card-content">
-                  <div>
-                    <strong title={r.name}>{r.name}</strong>
-                    <span className="tag">{kindLabels[kindOf(r)]}</span>
-                    <span className="priority">优先级 {r.priority}</span>
-                    {r.breakpoint && (r.breakpoint.request || r.breakpoint.response) && (
-                      <span className="tag warm">断点</span>
-                    )}
-                  </div>
-                  <code title={`${r.match.method || 'ANY'} ${r.match.host || '*'}${r.match.path || '/*'}`}>
-                    <Method method={r.match.method || 'ANY'} /> {r.match.host || '*'}
-                    {r.match.path || '/*'}
-                  </code>
-                </div>
-                <div className="rule-card-actions">
-                  <Button
-                    disabled={i === 0}
-                    title="同优先级时提前"
-                    onClick={() => send('rules.move', { id: r.id, direction: 'up' })}
-                  >
-                    ↑
-                  </Button>
-                  <Button onClick={() => send('rules.move', { id: r.id, direction: 'down' })}>↓</Button>
-                  <Button onClick={() => setEdit(JSON.parse(JSON.stringify(r)))}>编辑</Button>
-                  <Button onClick={() => send('rules.duplicate', { id: r.id })}>复制</Button>
-                  <Button danger onClick={() => send('rules.delete', { id: r.id })}>
-                    删除
-                  </Button>
-                </div>
+          </>
+        }
+        expanded={expanded}
+        onExpandedChange={setExpanded}
+        actions={
+          <div className="toolbar-actions">
+            <details className="workspace-menu">
+              <summary>更多操作</summary>
+              <div className="workspace-menu-panel">
+                <Button action="rules.import">导入</Button>
+                <Button action="rules.export">导出</Button>
               </div>
+            </details>
+            <Button
+              primary
+              onClick={() => {
+                setExpanded(true);
+                setEdit(newRule('mock'));
+              }}
+            >
+              <Icon name="plus" size={15} />
+              新建规则
+            </Button>
+          </div>
+        }
+      >
+        <details className="compact-disclosure rule-presets">
+          <summary>规则模板与说明</summary>
+          <p>按原始请求匹配，每阶段执行优先级最高的首条规则。</p>
+          <div className="rule-templates">
+            {Object.entries(kindLabels).map(([kind, label]) => (
+              <button key={kind} onClick={() => setEdit(newRule(kind))}>
+                <Icon
+                  name={
+                    kind === 'mock'
+                      ? 'box'
+                      : kind === 'breakpoint'
+                        ? 'pause'
+                        : kind === 'redirect'
+                          ? 'arrowRight'
+                          : 'rules'
+                  }
+                  size={18}
+                />
+                <span>{label}</span>
+                <Icon name="plus" size={14} />
+              </button>
             ))}
+          </div>
+        </details>
+        <div className="search-field rule-search">
+          <Icon name="search" size={16} />
+          <input
+            aria-label="搜索规则"
+            placeholder="查找规则名称或 API 路径…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
-      ) : (
-        <Empty
-          icon="rules"
-          title="为此场景添加 HTTP 规则"
-          description="模拟空数据、异常状态、边界情况，或将线上接口转发到本地。也可从请求历史生成规则。"
-        >
-          <Button primary onClick={() => setEdit(newRule('mock'))}>
-            <Icon name="plus" size={15} />
-            创建第一条 Mock
-          </Button>
-        </Empty>
-      )}
+        {state.rules.length ? (
+          <div className="rule-list">
+            {state.rules
+              .filter((r) =>
+                `${r.name} ${r.match.path} ${r.match.host}`.toLowerCase().includes(search.toLowerCase()),
+              )
+              .map((r, i) => (
+                <div className={`rule-card ${r.enabled ? 'enabled' : 'inactive'}`} key={r.id}>
+                  <button
+                    type="button"
+                    className="rule-switch"
+                    role="switch"
+                    aria-checked={r.enabled}
+                    aria-label={`启用 ${r.name}`}
+                    title={r.enabled ? '点击停用此规则' : '点击启用此规则'}
+                    disabled={state.busy}
+                    onClick={() => send('rules.toggle', { id: r.id })}
+                  >
+                    <span className="rule-switch-track" aria-hidden="true">
+                      <span className="rule-switch-thumb" />
+                    </span>
+                  </button>
+                  <div className="rule-card-content">
+                    <div>
+                      <strong title={r.name}>{r.name}</strong>
+                      <span className="tag">{kindLabels[kindOf(r)]}</span>
+                      <span className="priority">优先级 {r.priority}</span>
+                      {r.breakpoint && (r.breakpoint.request || r.breakpoint.response) && (
+                        <span className="tag warm">断点</span>
+                      )}
+                    </div>
+                    <code title={`${r.match.method || 'ANY'} ${r.match.host || '*'}${r.match.path || '/*'}`}>
+                      <Method method={r.match.method || 'ANY'} /> {r.match.host || '*'}
+                      {r.match.path || '/*'}
+                    </code>
+                  </div>
+                  <div className="rule-card-actions">
+                    <Button
+                      disabled={i === 0}
+                      title="同优先级时提前"
+                      onClick={() => send('rules.move', { id: r.id, direction: 'up' })}
+                    >
+                      ↑
+                    </Button>
+                    <Button onClick={() => send('rules.move', { id: r.id, direction: 'down' })}>↓</Button>
+                    <Button onClick={() => setEdit(JSON.parse(JSON.stringify(r)))}>编辑</Button>
+                    <Button onClick={() => send('rules.duplicate', { id: r.id })}>复制</Button>
+                    <Button danger onClick={() => send('rules.delete', { id: r.id })}>
+                      删除
+                    </Button>
+                  </div>
+                </div>
+              ))}
+          </div>
+        ) : (
+          <Empty
+            icon="rules"
+            title="为此场景添加 HTTP 规则"
+            description="模拟空数据、异常状态、边界情况，或将线上接口转发到本地。也可从请求历史生成规则。"
+          >
+            <Button primary onClick={() => setEdit(newRule('mock'))}>
+              <Icon name="plus" size={15} />
+              创建第一条 Mock
+            </Button>
+          </Empty>
+        )}
+      </CollapsibleSection>
       {edit && (
         <RuleEditor
           key={`${scene?.id}:${edit.id}`}
@@ -1914,7 +1949,7 @@ function Rules({
           busy={state.busy}
         />
       )}
-    </div>
+    </>
   );
 }
 function parseMap(text: string, nullable = true): Record<string, string | null> {

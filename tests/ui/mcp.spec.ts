@@ -6,14 +6,19 @@ const mcp = {
   scope: 'project',
   clients: [],
   ui: { supported: false, reason: '尚未探测' },
-  agents: ['claude', 'codex-cli', 'codex-app'].map((agent) => ({
+  agents: ['claude', 'codex-cli', 'codex-app', 'cursor'].map((agent) => ({
     agent,
     scope: 'project',
     status: 'not-configured',
     configured: false,
     clientDetected: true,
-    shared: agent !== 'claude',
-    configPath: agent === 'claude' ? '/project/.mcp.json' : '/project/.codex/config.toml',
+    shared: agent === 'codex-cli' || agent === 'codex-app',
+    configPath:
+      agent === 'claude'
+        ? '/project/.mcp.json'
+        : agent === 'cursor'
+          ? '/project/.cursor/mcp.json'
+          : '/project/.codex/config.toml',
   })),
 };
 async function load(page: any, override = {}) {
@@ -76,6 +81,84 @@ test('MCP defaults to project scope and emits explicit adapter/enable controls',
     payload: { scope: 'global' },
   });
 });
+test('Cursor has independent project/global setup and maintenance controls', async ({ page }) => {
+  await load(page);
+  const cursor = page.getByRole('article', { name: 'Cursor', exact: true });
+  await expect(page.getByRole('region', { name: 'Agent 适配' }).getByRole('article')).toHaveCount(4);
+  await expect(cursor).toContainText('未配置');
+  await expect(cursor).toContainText('Cursor 的 MCP 设置');
+  await cursor.getByRole('button', { name: '一键适配', exact: true }).click();
+  expect(await page.evaluate(() => (window as any).__messages)).toContainEqual({
+    action: 'mcp.adapt',
+    payload: { agent: 'cursor', scope: 'project' },
+  });
+  await cursor.getByText('配置与维护', { exact: true }).click();
+  await expect(cursor).toContainText('/project/.cursor/mcp.json');
+  await expect(cursor).not.toContainText('Codex CLI 与 App 共用');
+  await cursor.getByRole('button', { name: '查看配置' }).click();
+  expect(await page.evaluate(() => (window as any).__messages)).toContainEqual({
+    action: 'mcp.config.open',
+    payload: { agent: 'cursor', scope: 'project' },
+  });
+  await page.getByLabel('适配范围').selectOption('global');
+  await cursor.getByRole('button', { name: '一键适配', exact: true }).click();
+  expect(await page.evaluate(() => (window as any).__messages)).toContainEqual({
+    action: 'mcp.adapt',
+    payload: { agent: 'cursor', scope: 'global' },
+  });
+});
+
+test('Cursor configuration, conflicts and actual connection have separate states', async ({ page }) => {
+  const agents = mcp.agents.map((agent) =>
+    agent.agent === 'cursor' ? { ...agent, status: 'configured', configured: true, connected: false } : agent,
+  );
+  await load(page, { mcp: { ...mcp, agents } });
+  const cursor = page.getByRole('article', { name: 'Cursor', exact: true });
+  await expect(cursor).toContainText('已配置，待客户端连接');
+  await expect(cursor.getByRole('button', { name: '一键适配', exact: true })).toHaveCount(0);
+  await cursor.getByText('配置与维护', { exact: true }).click();
+  await cursor.getByRole('button', { name: '移除适配' }).click();
+  expect(await page.evaluate(() => (window as any).__messages)).toContainEqual({
+    action: 'mcp.remove',
+    payload: { agent: 'cursor', scope: 'project' },
+  });
+  for (const connected of [false, true]) {
+    await load(page, {
+      mcp: {
+        ...mcp,
+        agents: mcp.agents.map((agent) =>
+          agent.agent === 'cursor'
+            ? { ...agent, status: connected ? 'configured' : 'conflict', configured: connected, connected }
+            : agent,
+        ),
+      },
+    });
+    if (connected) await expect(cursor).toContainText('已连接 · MCP 握手通过');
+    else {
+      await expect(cursor).toContainText('同名配置冲突');
+      await cursor.getByRole('button', { name: '修复本插件配置' }).click();
+      expect(await page.evaluate(() => (window as any).__messages)).toContainEqual({
+        action: 'mcp.adapt',
+        payload: { agent: 'cursor', scope: 'project', repair: true },
+      });
+    }
+  }
+});
+
+for (const width of [1280, 390]) {
+  test(`all four adapter cards remain usable at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await load(page, { busy: true });
+    for (const name of ['Claude Code CLI', 'Codex CLI', 'Codex App', 'Cursor']) {
+      const card = page.getByRole('article', { name, exact: true });
+      await expect(card).toBeVisible();
+      await expect(card.getByRole('button', { name: '一键适配', exact: true })).toBeDisabled();
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: `artifacts/mcp-cursor-${width}.png`, fullPage: true });
+  });
+}
+
 test('device automation prepares explicitly and connects only an identified app and device', async ({
   page,
 }) => {

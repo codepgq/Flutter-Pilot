@@ -4,7 +4,7 @@ Flutter Pilot 的 MCP 服务名和客户端配置键均为 `flutter-pilot`，指
 
 MCP 初始化会随服务信息返回专用的连接图标，PNG 以内嵌 data URI 提供，桥接离线时也可读取，无需访问网络或查找安装目录。客户端决定是否展示该图标；图标源文件位于 `resources/icons/mcp.svg`，发布图片位于 `resources/icons/mcp.png`。
 
-MCP 让 Claude Code CLI、Codex CLI 和 Codex App 复用插件已经连接的 Dart VM，在 Flutter Debug 应用中按 Key 定位、点击、输入和滚动，并读取 HTTP／WebSocket 记录验证结果。接入无需在应用中添加 Driver、测试入口或 helper。插件仍需在受信任的 macOS 本地 Cursor／VS Code 工作区中运行。
+MCP 让 Claude Code CLI、Codex CLI、Codex App 和 Cursor 复用插件已经连接的 Dart VM，在 Flutter Debug 应用中按 Key 定位、点击、输入和滚动，并读取 HTTP／WebSocket 记录验证结果。接入无需在应用中添加 Driver、测试入口或 helper。插件仍需在受信任的 macOS 本地 Cursor／VS Code 工作区中运行。
 
 主要用于开发联调和多业务状态验证：API Mock 构造下单成功、失败、余额不足或不同资产数据，WS Mock 与主动消息驱动订单/资产事件，再通过 Key 精确操作目标组件。结构化快照和 Key 避免日常交互反复截图识别，减少耗时与 token；视觉样式与布局验收仍应补充截图。多状态任务按场景逐个切换并分别验证，防止规则和页面状态互相干扰。
 
@@ -13,7 +13,7 @@ MCP 让 Claude Code CLI、Codex CLI 和 Codex App 复用插件已经连接的 Da
 1. 需要 Flutter 运行时操作时，用项目原来的入口启动 Debug 应用，在 **连接与诊断** 确认 VM 已连接；能力和指南可离线查阅。
 2. 打开工作台 **MCP** Tab，开启 MCP。服务默认关闭，开关按当前工作区保存在 IDE 私有存储中。
 3. 在目标 Agent 卡片中选择 **当前项目** 或 **全局**，默认当前项目，点击 **一键适配**。未开启服务时适配会同时开启当前工作区 MCP。
-4. 按卡片提示在客户端加载配置。Claude Code 可能需要批准项目 MCP；Codex 可能需要信任项目、重新加载 MCP 或新建会话。插件不会跳过这些客户端步骤。
+4. 按卡片提示在客户端加载配置。Claude Code 可能需要批准项目 MCP；Codex 可能需要信任项目、重新加载 MCP 或新建会话；Cursor 在 MCP 设置中确认 `flutter-pilot` 已启用，必要时重新连接。插件不会跳过这些客户端步骤。
 5. 让 Agent 调用 `list_sessions`，确认项目与会话，然后执行后续工具。
 
 适配需要本机可用的 Node.js 20+；插件检测并保存其绝对路径，不自动安装运行时。桥接脚本存放在用户私有的稳定路径，升级插件后无需因为扩展安装目录变化重新配置 Agent。
@@ -27,8 +27,13 @@ MCP 让 Claude Code CLI、Codex CLI 和 Codex App 复用插件已经连接的 Da
 | Claude Code CLI | 项目 `.mcp.json`            | 用户级 Claude MCP 配置                                |
 | Codex CLI       | 项目 `.codex/config.toml`   | `CODEX_HOME/config.toml`，默认 `~/.codex/config.toml` |
 | Codex App       | 其实际加载的项目 Codex 配置 | 其实际加载的用户 Codex 配置                           |
+| Cursor          | 项目 `.cursor/mcp.json`     | `~/.cursor/mcp.json`                                  |
 
 Codex CLI 与 App 可能共用配置；卡片会显示共享来源，配置不会重复写入。是否支持项目配置以目标客户端实测为准。项目适配仅能访问绑定工作区，全局适配可以发现本机已开启 MCP 的工作区；全局适配不会为其他项目自动开启服务。所有有目标的操作均需传入明确的 `sessionId`。
+
+Cursor 使用独立的 JSON 配置（兼容注释与尾逗号），在 `mcpServers.flutter-pilot` 下保存 `type:"stdio"`、Node 绝对路径和稳定桥接参数，保留其他服务及设置。项目与全局都有同名条目时，提示它们可能分别加载，不将任一范围标记为已覆盖；可在对应范围查看或移除本插件配置。客户端检测只检查 `cursor` 命令或 macOS 应用位置，不启动 IDE。当前已核对的 Cursor MCP 客户端名为 `cursor-vscode`，仅对应范围的实际握手会使卡片显示已连接；其他未知名称仍在客户端列表中展示。
+
+路径及 stdio 字段依据 [Cursor 官方 MCP 文档](https://cursor.com/docs/mcp)。本机 Cursor 3.29.15 安装实现另确认客户端名及项目 / 用户配置独立标识；不将源码检查或合成 SDK 握手作为真实 Cursor Agent 业务验收。离线 `overview.agentAdapters`、`capabilities` 和 `get_usage_guide` 同名 Prompt 也可查阅接入入口。
 
 已有其他 MCP 配置会保留。同名配置不匹配时显示冲突，点击 **修复本插件配置** 才替换该条目；**移除适配** 只移除确认属于本插件的配置。关闭 MCP 保留客户端配置，重新开启即可恢复。关闭工作台不停止后台服务；退出 IDE 或关闭工作区后会话不可用。
 

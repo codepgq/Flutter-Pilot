@@ -1,5 +1,34 @@
 # 实现与验证结论
 
+## 0.0.21 发布、Cursor 安装与推送（2026-11-14）
+
+- 按用户默认发布约定交付 Cursor MCP 适配与 Mock 场景全部主要区块 / 操作运行结果折叠。发布前远端 main、本地 HEAD / 最新标签与 Cursor 安装版均为 0.0.20，补丁递增至 0.0.21；manifest、lockfile、README、CHANGELOG 和 VSIX 输出路径同步。下方“源码未发布”章节保留发布前实现与验证历史。
+- 本轮 777 项 Vitest / 46 文件、99 项 Playwright、TypeScript / Webview 类型、全仓格式、构建与 diff 检查通过；独立只读审核无 P0 / P1 / P2 问题。日志为 `artifacts/v0.0.21-{unit,ui,typecheck,format,build}.log`。Python 代理及真实设备逻辑未改动，本轮不重复设备、IDE GUI 或实际 Cursor Agent 端到端验收。
+- 安装包 `artifacts/flutter-pilot-0.0.21.vsix` 使用 Cursor CLI `--force` 安装；分发文件与当前源码 / 构建及安装目录逐项一致。构建、安装及固定 bridge 均经真实 MCP SDK stdio 离线核验 0.0.21、51 工具、59 Prompts 和 6 份指南，包含 Cursor 适配导航及指南资源 / 工具一致性；安装构建含场景折叠与准确 Cursor 客户端握手。核验报告为 `artifacts/v0.0.21-install-report.json`。
+- main 提交和附注标签 v0.0.21 常规推送，远端引用与提交信息记录于 `artifacts/v0.0.21-release-report.json`。本地 `.flutter-pilot/` 状态保留且不进入提交或安装包；不修改真实 Agent 配置，不自动重载活动 Cursor 窗口或重启已有 MCP 客户端，用户方便时重载并重连生效。
+
+## Mock 场景页全部区块折叠（2026-11-14，源码未发布）
+
+- 用户确认范围为 Mock 场景页。新增共享 `CollapsibleSection`，为运行状态、场景列表、场景详情、UI 操作、HTTP 规则、WS 规则提供独立标题开关；运行结果沿用前轮已有折叠。默认展开，按钮支持鼠标 / Enter / Space，并通过 aria-expanded / aria-controls 关联内容。
+- 折叠通过 hidden 隐藏而不卸载子内容，保留搜索、模板展开、操作参数、场景名称和 WS 草稿；同场景状态刷新保持选择。标题保留数量与来源，运行状态的激活信息及 HTTP / WS 错误摘要仍可见。标题操作与折叠分开，新建 HTTP / WS 规则自动展开；非场景的 WS 页面沿用原有结构。
+- 全量 99 项 Playwright、TypeScript / Webview 类型、全仓格式、构建及 diff 检查通过；其中两份场景测试 32 项通过。日志为 `artifacts/scene-panels-collapse-{ui,typecheck,format,build}.log` 及 `artifacts/scene-panels-collapse-related-ui.log`。已目视检查 `artifacts/scene-http-collapsed-{1280,390}.png`，并通过宽窄布局、滚动、独立折叠、键盘、草稿与新建自动展开回归；独立只读审查无待修复项。
+- 本轮只改展示层，折叠不触发业务消息。保留此前 Cursor 适配及运行结果折叠，版本保持 0.0.20，未提交、发布或安装，未启动真实 IDE GUI 或业务 App / 设备。
+
+## 场景操作运行结果展开与收起（2026-11-14，源码未发布）
+
+- 运行结果标题改为原生 details / summary，保留名称、状态、操作来源和本轮 Mock；点击或 Enter / Space 控制消息、耗时、诊断与步骤详情。新运行默认展开，同一 runId 的刷新保留用户选择；步骤调用路径的嵌套展开独立处理。
+- 运行中取消按钮放在折叠区域外，收起后仍可取消；状态提示文字直接随 details 的 open 属性显示，避免切换瞬间文字滞后。仅改变展示，不发送运行、重放或环境变更消息。
+- 16 项 Scene 工作台 Playwright、类型检查、全仓格式、构建与 diff 检查通过；覆盖 1280 / 390px、鼠标 / 键盘、刷新、新运行和取消。已目视检查合成截图 `artifacts/scene-run-{collapsed,expanded}-{1280,390}.png`；日志位于 `artifacts/scene-run-collapse-{ui,typecheck,format,build}.log`。独立只读审查无待修复项。
+- 保留此前未提交的 Cursor 适配改动；版本保持 0.0.20，未提交、发布或安装，也未启动 IDE GUI 或业务设备。
+
+## Cursor MCP 适配（2026-11-14，源码未发布）
+
+- 为 MCP Agent 适配增加 Cursor 卡片、项目 / 全局配置与增删改查消息。配置写入 `.cursor/mcp.json` 的 `mcpServers.flutter-pilot`，使用显式 stdio、Node.js 20+ 与固定桥接路径；保留其他服务和设置，支持 JSONC 注释 / 尾逗号及已有省略 stdio type 的兼容条目。冲突须显式修复，删除只允许本插件管理的服务，沿用原子写入与符号链接保护。
+- 核对本机 Cursor 3.29.15 的 MCP 实现：SDK 客户端名为 `cursor-vscode`；项目与全局同名 stdio 配置可分别加载。适配状态不套用 Codex 的 shadow 规则，两个范围存在时提示可能重复；实际连接须匹配准确客户端名及配置范围，桥接自检不制造实际客户端连接状态。
+- 工作台宽屏采用四卡片 2 × 2 布局，窄面板堆叠，增加 Cursor 启用 / 重连提示。README、MCP 文档、离线 `overview.agentAdapters`、`capabilities` 和同名 `get_usage_guide` Prompt 同步使用路径；工具 / Prompt / 指南数量仍为 51 / 59 / 6。
+- 最终 777 项 Vitest / 46 文件通过，含 JSONC 最后修正后的 4 文件 147 项相关回归；93 项 Playwright、TypeScript / Webview 类型、全仓格式和构建通过。日志为 `artifacts/cursor-adapter-{unit,ui,typecheck,format,build}.log` 与 `artifacts/cursor-adapter-final-related.log`。已目视检查 `artifacts/mcp-cursor-1280.png`、`artifacts/mcp-cursor-390.png` 合成截图，四卡片可见且无水平溢出；独立只读审查未发现遗留问题。
+- 扩展集成测试使用隔离 home / workspace、真实 MCP SDK stdio 与桥接，覆盖一键适配、打开配置、移除、自检与实际客户端的区分、准确客户端名、错误范围拒绝和断连状态清理；没有修改真实用户 Agent 配置、启动 IDE GUI、调用真实 Cursor Agent 或操作业务 App / 设备。本轮保持 0.0.20，未提交、发布或安装，已安装的 0.0.20 不包含本次源码改动。
+
 ## 0.0.20 发布、Cursor 安装与推送（2026-11-14）
 
 - 根据默认发布约定交付当前 MCP 功能引导与品牌图标改动。远端 main、本地 HEAD / 最新标签和 Cursor 活动安装版均为 0.0.19，补丁递增至 0.0.20；manifest、lockfile、README、CHANGELOG 和 VSIX 输出路径同步。

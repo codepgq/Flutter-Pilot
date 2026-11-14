@@ -18,6 +18,7 @@ export const capabilityPromptTemplates = {
     referenceOnly: true,
     steps: [
       '本 Prompt 用于查阅能力，不执行 UI、不启动 App、不修改 Mock，无需 list_sessions、sessionId 或在线 IDE。下方工具清单由实际注册表生成，每个工具均可通过同名 prompts/get 查阅步骤与生产参数 schema。',
+      '接入客户端可在工作台 MCP → Agent 适配中选择 Claude Code CLI、Codex CLI、Codex App 或 Cursor，再选择项目 / 全局并一键适配。Cursor 使用独立的 .cursor/mcp.json，在 Cursor MCP 设置中确认 flutter-pilot 已启用；详细路径见 overview.agentAdapters。配置成功和桥接自检不代表目标客户端已连接，实际握手单独显示；读取本 Prompt 不会写入配置。',
       `用户任务 → 功能 → 工具与前提：\n${describeCapabilityRoutes()}`,
       '截图、截屏、screenshot、长截图或布局验收的目标是当前 Flutter App 时，优先读取 app_screenshot 并使用 take_screenshot；普通截图不需要 Key、Scene、Mock 或 Appium。',
       '已有登录、填表或导航操作：读取 scene_action_quick_run。它覆盖复用或 start_app 启动已有 Debug 配置、发现 actions、准备 Mock、后台执行、查询/取消及最终 UI 和本轮网络验证。工作台 Scene 详情的「UI 操作（Workflow）」也支持参数、通道、步骤 Key 预览、手动运行和取消。',

@@ -77,6 +77,7 @@ export const toolPromptPlans = {
     topics: ['overview'],
     steps: [
       '按任务选择 overview/screenshot/http/ws/ui/workflow 主题调用 get_usage_guide；无需 sessionId 或在线 IDE。读取指南后再决定是否执行运行时操作。',
+      '配置客户端接入时读取 overview.agentAdapters：工作台支持 Claude Code CLI、Codex CLI、Codex App 与 Cursor 的项目 / 全局适配；Cursor 需确认 MCP 设置中的 flutter-pilot 已启用。配置写入、自检与实际客户端握手分开验证，读取指南不修改配置。',
     ],
   },
   list_sessions: {

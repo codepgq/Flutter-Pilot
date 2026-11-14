@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { WsConnection, WsDirection, WsMessage, WsRule, WsState } from '../src/ws/model';
 import type { Scene } from '../src/scene-model';
 import { inspectJson } from './body';
+import { CollapsibleSection } from './collapsible-section';
 
 const emptyState: WsState = {
   captureEnabled: false,
@@ -20,6 +21,54 @@ const time = (value: number) => new Date(value).toLocaleTimeString('zh-CN', { ho
 const byteSize = (value: string) => new TextEncoder().encode(value).byteLength;
 const PAGE_SIZE = 30;
 type Send = (action: string, payload?: unknown) => void;
+
+function RulesSection({
+  collapsible,
+  count,
+  expanded,
+  onExpandedChange,
+  actions,
+  children,
+}: {
+  collapsible: boolean;
+  count: number;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  actions: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const description = <p>按原始文本匹配，执行最高优先级的首条规则；同优先级按列表顺序。</p>;
+  if (collapsible)
+    return (
+      <CollapsibleSection
+        title={
+          <>
+            WS 消息规则 <span className="count">{count}</span>
+          </>
+        }
+        label="WS 消息规则区域"
+        className="ws-rules"
+        expanded={expanded}
+        onExpandedChange={onExpandedChange}
+        actions={actions}
+      >
+        {description}
+        {children}
+      </CollapsibleSection>
+    );
+  return (
+    <section className="ws-rules">
+      <div className="ws-section-heading">
+        <div>
+          <h3>WS 消息规则</h3>
+          {description}
+        </div>
+        {actions}
+      </div>
+      {children}
+    </section>
+  );
+}
 
 function Content({ value, binary, label }: { value: string; binary: boolean; label: string }) {
   const [raw, setRaw] = useState(false);
@@ -94,6 +143,7 @@ export function WebSocketPanel({
   const selectedId = useRef<string | undefined>(undefined);
   const [pushText, setPushText] = useState('');
   const [draft, setDraft] = useState<WsRule | undefined>(initialDraft);
+  const [rulesExpanded, setRulesExpanded] = useState(true);
   const pendingRule = useRef<WsRule | undefined>(undefined);
   const sortedRules = useMemo(() => [...state.rules].sort((a, b) => b.priority - a.priority), [state.rules]);
   const [pushError, setPushError] = useState('');
@@ -164,6 +214,7 @@ export function WebSocketPanel({
       return;
     }
     setDraft(rule);
+    setRulesExpanded(true);
     setSection('rules');
   };
   const changeConnection = (id?: string) => {
@@ -500,19 +551,20 @@ export function WebSocketPanel({
           </div>
         </>
       ) : (
-        <section className="ws-rules">
-          <div className="ws-section-heading">
-            <div>
-              <h3>WS 消息规则</h3>
-              <p>按原始文本匹配，执行最高优先级的首条规则；同优先级按列表顺序。</p>
-            </div>
+        <RulesSection
+          collapsible={rulesOnly}
+          count={state.rules.length}
+          expanded={rulesExpanded}
+          onExpandedChange={setRulesExpanded}
+          actions={
             <div className="ws-inline-actions">
               <button onClick={() => send('ws.rules.open')}>打开 WS 规则文件</button>
               <button className="primary" disabled={busy} onClick={newRule}>
                 新建 WS 规则
               </button>
             </div>
-          </div>
+          }
+        >
           {!state.mockEnabled && (
             <div className="notice">规则可独立保存；激活所属场景后执行。二进制与控制帧保持直通。</div>
           )}
@@ -602,7 +654,7 @@ export function WebSocketPanel({
               </div>
             </article>
           ))}
-        </section>
+        </RulesSection>
       )}
     </div>
   );

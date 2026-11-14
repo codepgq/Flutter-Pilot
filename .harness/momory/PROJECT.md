@@ -10,11 +10,20 @@
 
 ## 当前发布版本（2026-11-14）
 
-- 最新发布为 0.0.20，包含 MCP 十类任务引导、截图专用 Prompt / 指南及插件 / MCP 图标；51 个工具、59 个 Prompts、6 份离线指南。发布、安装、验证与远端引用证据见 `IMPLEMENTATION.md` 同版本条目。
+- 最新发布为 0.0.21，包含 Cursor MCP 项目 / 全局适配、离线导航，以及 Mock 场景各区块和运行结果的展开 / 收起；51 个工具、59 个 Prompts、6 份离线指南。发布、Cursor 安装、验证与远端引用证据见 `IMPLEMENTATION.md` 同版本条目。
 - 当前仓库自动生成的 `.flutter-pilot/` 是本地项目状态，保留但不提交、不进入 VSIX；可复用分发示例仍位于 `resources/`。
+
+## Cursor MCP 适配（2026-11-14，0.0.21 已发布）
+
+- MCP 的 Agent 适配新增第四个 Cursor 卡片，与 Claude Code CLI、Codex CLI、Codex App 并列。项目配置为 `<workspace>/.cursor/mcp.json`，全局为 `~/.cursor/mcp.json`，使用 `mcpServers.flutter-pilot` 的 stdio 服务；兼容 JSONC 注释和尾逗号，保留其他配置。沿用显式冲突修复、原子写入、符号链接保护及仅移除自有条目。
+- Cursor 的项目与全局同名 stdio 服务可能分别加载，不套用 Codex 的配置覆盖关系；两个范围均存在时提示检查重复。配置写入、桥接自检与实际客户端握手分别显示；Cursor 实际连接仅认 `cursor-vscode`，并须与当前选择范围一致。客户端启用、批准和策略仍由 Cursor 决定。
+- 使用入口为工作台 MCP → Agent 适配；在 Cursor MCP 设置中确认 `flutter-pilot` 已启用，必要时重新连接。离线 `overview.agentAdapters`、`capabilities` 与同名 `get_usage_guide` Prompt 提供相同导航，读取不写配置、不启动客户端或 App。
+- 本功能随 0.0.21 发布并安装到 Cursor，活动窗口在用户方便时重载后加载。验证采用隔离配置、SDK stdio 与合成工作台，不修改真实用户 Agent 配置、不启动 IDE GUI 或业务设备，不将测试握手等同真实 Cursor Agent 验收。
 
 ## 当前 Scene 与操作约束（2026-11-14）
 
+- Mock 场景页所有主要区块（运行状态、列表、详情、UI 操作、HTTP / WS 规则）均支持独立展开与收起，默认展开；折叠保持子内容挂载及搜索、参数、草稿。标题保留数量和状态摘要，新建规则自动展开；只改变展示，不激活场景或触发操作。
+- 场景操作运行结果支持点击标题或 Enter / Space 展开、收起；收起保留名称、状态、操作来源与本轮 Mock，运行中取消始终可用。同一 runId 的刷新保持折叠状态，新运行默认展开；仅为工作台展示行为，不影响执行。
 - 最新规范入口为根 `AGENTS.md`；快速联调见 [scene-authoring](../../docs/scene-authoring.md)，可复用操作见 [动作目录](../../docs/scene-actions-catalogue.md)。本节覆盖历史独立 Workflow 配置的描述；发布任务授权按上方“默认发布流程”，普通实现任务不自动发布。
 - `scenes.json` v1 是业务项目唯一 Mock / targets / actions 来源，`workflows.json` 不再读取或创建。公共操作放同文件纯操作 Scene，入口通过 `call` 显式传参；当前 Mock 与操作来源独立，激活、重载、重连和 IDE 恢复不执行 UI。Test Case 使用 v2 引用 Scene action。
 - 后续类似任务先发现已有会话和动作，仅缺失或失效时探索。`target` 引用真实 Key，运行器自动匹配当前挂载控件；不要求 Agent 每步重新截图或 `find_widget`。键盘改变布局时确认收起，再等待按钮可操作。

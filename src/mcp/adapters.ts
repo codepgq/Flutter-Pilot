@@ -7,7 +7,7 @@ import { applyEdits, modify, parse as parseJson, type ParseError } from 'jsonc-p
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { readConfig, writeConfig, type ConfigSnapshot } from './config-file';
 
-export type AgentId = 'claude' | 'codex-cli' | 'codex-app';
+export type AgentId = 'claude' | 'codex-cli' | 'codex-app' | 'cursor';
 export type AdapterScope = 'project' | 'global';
 export const MCP_SERVER_NAME = 'flutter-pilot';
 export interface AgentAdapterState {
@@ -35,11 +35,14 @@ export interface AgentAdapterOptions {
   codexHome?: string;
   env?: NodeJS.ProcessEnv;
   detectClient?: (agent: AgentId) => Promise<boolean>;
+  applicationDirectories?: string[];
 }
 const execute = promisify(execFile);
 const object = (value: unknown): value is Record<string, any> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const usesToml = (agent: AgentId) => agent === 'codex-cli' || agent === 'codex-app';
+const serversKey = (agent: AgentId) => (usesToml(agent) ? 'mcp_servers' : 'mcpServers');
 
 async function executable(name: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
   for (const directory of (env.PATH ?? '').split(delimiter).filter(Boolean)) {
@@ -71,7 +74,7 @@ export async function detectNodeRuntime(
   }
 }
 
-function parseDocument(text: string, toml: boolean): Record<string, any> {
+function parseDocument(text: string, toml: boolean, jsonc = false): Record<string, any> {
   if (!text.trim()) return {};
   if (toml) {
     const document = parseToml(text);
@@ -79,7 +82,7 @@ function parseDocument(text: string, toml: boolean): Record<string, any> {
     return document;
   }
   const errors: ParseError[] = [];
-  const value = parseJson(text, errors, { disallowComments: true, allowTrailingComma: false });
+  const value = parseJson(text, errors, { disallowComments: !jsonc, allowTrailingComma: jsonc });
   if (errors.length || !object(value)) throw new Error('配置不是有效 JSON 对象');
   return value;
 }
@@ -207,6 +210,7 @@ function editDocument(
   before: ConfigSnapshot,
   toml: boolean,
   entry: Record<string, unknown> | undefined,
+  jsonc = false,
 ): string {
   if (!toml) {
     const text = before.text.trim() ? before.text : '{}\n';
@@ -214,7 +218,7 @@ function editDocument(
       formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' },
     });
     const output = applyEdits(text, edits);
-    parseDocument(output, false);
+    parseDocument(output, false, jsonc);
     return output.endsWith('\n') ? output : output + '\n';
   }
   return editToml(before.text, entry);
@@ -233,6 +237,8 @@ export class AgentAdapterManager {
       return scope === 'project'
         ? join(this.options.workspace, '.mcp.json')
         : join(this.options.env?.CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR ?? home, '.claude.json');
+    if (agent === 'cursor')
+      return join(scope === 'project' ? this.options.workspace : home, '.cursor', 'mcp.json');
     return scope === 'project'
       ? join(this.options.workspace, '.codex', 'config.toml')
       : join(
@@ -246,16 +252,22 @@ export class AgentAdapterManager {
   private async detected(agent: AgentId): Promise<boolean> {
     if (this.options.detectClient) return this.options.detectClient(agent);
     const env = this.options.env ?? process.env;
-    if (agent !== 'codex-app') return !!(await executable(agent === 'claude' ? 'claude' : 'codex', env));
+    if (agent !== 'codex-app') {
+      if (await executable(agent === 'claude' ? 'claude' : agent === 'cursor' ? 'cursor' : 'codex', env))
+        return true;
+      if (agent !== 'cursor') return false;
+    }
     const home = this.options.home ?? homedir();
-    for (const app of ['Codex.app']) {
-      for (const directory of ['/Applications', join(home, 'Applications')]) {
-        try {
-          await access(join(directory, app));
-          return true;
-        } catch {
-          /* Next application. */
-        }
+    const app = agent === 'cursor' ? 'Cursor.app' : 'Codex.app';
+    for (const directory of this.options.applicationDirectories ?? [
+      '/Applications',
+      join(home, 'Applications'),
+    ]) {
+      try {
+        await access(join(directory, app));
+        return true;
+      } catch {
+        /* Next application. */
       }
     }
     return false;
@@ -281,7 +293,7 @@ export class AgentAdapterManager {
       entry.args[2] === join(this.options.bridgeRoot, 'sessions')
     );
   }
-  /** Determine file-layer precedence only; client trust, policies and loaded state remain unknown. */
+  /** Report file-layer candidates; client trust, policies and loaded state remain unknown. */
   private async effective(
     agent: AgentId,
     scope: AdapterScope,
@@ -291,18 +303,31 @@ export class AgentAdapterManager {
     let project: Record<string, any>, global: Record<string, any>;
     try {
       // Keep only existence of the named service; no credential values escape this method.
-      project = parseDocument((await readConfig(projectPath)).text, agent !== 'claude');
-      global = parseDocument((await readConfig(globalPath)).text, agent !== 'claude');
+      project = parseDocument((await readConfig(projectPath)).text, usesToml(agent), agent === 'cursor');
+      global = parseDocument((await readConfig(globalPath)).text, usesToml(agent), agent === 'cursor');
     } catch {
       return {
         effectiveMessage: '其他配置层无法读取或解析，无法确认覆盖关系；客户端信任、批准及策略状态未知。',
       };
     }
-    const serversKey = agent === 'claude' ? 'mcpServers' : 'mcp_servers';
+    const key = serversKey(agent);
     const exists = (document: unknown): boolean =>
-      object(document) &&
-      object(document[serversKey]) &&
-      Object.hasOwn(document[serversKey], MCP_SERVER_NAME);
+      object(document) && object(document[key]) && Object.hasOwn(document[key], MCP_SERVER_NAME);
+    if (agent === 'cursor') {
+      const selectedExists = scope === 'project' ? exists(project) : exists(global);
+      return {
+        effectiveScope: selectedExists ? scope : undefined,
+        effectivePath: selectedExists ? (scope === 'project' ? projectPath : globalPath) : undefined,
+        shadowed: false,
+        effectiveMessage:
+          (exists(project) && exists(global)
+            ? '项目与全局均有同名 Cursor MCP 配置，可能分别加载；如需避免重复，请检查另一范围。'
+            : selectedExists
+              ? '当前范围的 Cursor MCP 配置已存在。'
+              : '当前范围未发现此服务的 Cursor MCP 配置。') +
+          '客户端启用、批准及策略状态未知，实际加载以对应范围的握手为准。',
+      };
+    }
     const local =
       agent === 'claude' && object(global.projects) ? global.projects[this.options.workspace] : undefined;
     const effectiveScope = exists(local)
@@ -337,14 +362,14 @@ export class AgentAdapterManager {
       configured: false,
       managed: false,
       clientDetected,
-      shared: agent !== 'claude',
+      shared: usesToml(agent),
       message: '',
       nodePath: expected?.command as string | undefined,
     };
     try {
       const snapshot = await readConfig(path);
-      const document = parseDocument(snapshot.text, agent !== 'claude');
-      const servers = document[agent === 'claude' ? 'mcpServers' : 'mcp_servers'];
+      const document = parseDocument(snapshot.text, usesToml(agent), agent === 'cursor');
+      const servers = document[serversKey(agent)];
       if (servers !== undefined && !object(servers)) throw new Error('MCP 配置必须是对象');
       const entry = servers?.[MCP_SERVER_NAME];
       if (entry !== undefined) {
@@ -384,7 +409,7 @@ export class AgentAdapterManager {
   }
   async all(scope: AdapterScope = 'project'): Promise<AgentAdapterState[]> {
     return Promise.all(
-      (['claude', 'codex-cli', 'codex-app'] as const).map((agent) => this.inspect(agent, scope)),
+      (['claude', 'codex-cli', 'codex-app', 'cursor'] as const).map((agent) => this.inspect(agent, scope)),
     );
   }
   async adapt(agent: AgentId, scope: AdapterScope = 'project', repair = false): Promise<AgentAdapterState> {
@@ -395,21 +420,21 @@ export class AgentAdapterManager {
     const expected = await this.expected(scope);
     if (!expected) throw new Error('未找到 Node.js 20+');
     const before = await readConfig(state.path);
-    const document = parseDocument(before.text, agent !== 'claude');
-    const existing = document[agent === 'claude' ? 'mcpServers' : 'mcp_servers']?.[MCP_SERVER_NAME];
+    const document = parseDocument(before.text, usesToml(agent), agent === 'cursor');
+    const existing = document[serversKey(agent)]?.[MCP_SERVER_NAME];
     if (existing !== undefined && !repair) throw new Error('配置已变化，请重新检测后重试');
-    const entry = agent === 'claude' ? { type: 'stdio', ...expected } : expected;
-    await writeConfig(state.path, before, editDocument(before, agent !== 'claude', entry));
+    const entry = usesToml(agent) ? expected : { type: 'stdio', ...expected };
+    await writeConfig(state.path, before, editDocument(before, usesToml(agent), entry, agent === 'cursor'));
     return this.inspect(agent, scope);
   }
   async remove(agent: AgentId, scope: AdapterScope = 'project'): Promise<AgentAdapterState> {
     const path = this.configPath(agent, scope);
     const before = await readConfig(path);
-    const document = parseDocument(before.text, agent !== 'claude');
-    const entry = document[agent === 'claude' ? 'mcpServers' : 'mcp_servers']?.[MCP_SERVER_NAME];
+    const document = parseDocument(before.text, usesToml(agent), agent === 'cursor');
+    const entry = document[serversKey(agent)]?.[MCP_SERVER_NAME];
     if (entry === undefined) return this.inspect(agent, scope);
     if (!this.managed(entry)) throw new Error('此同名 MCP 不是本插件管理的配置，未执行删除');
-    await writeConfig(path, before, editDocument(before, agent !== 'claude', undefined));
+    await writeConfig(path, before, editDocument(before, usesToml(agent), undefined, agent === 'cursor'));
     return this.inspect(agent, scope);
   }
 }

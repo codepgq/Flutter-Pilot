@@ -7,6 +7,7 @@ const agents: { id: McpAgentId; label: string }[] = [
   { id: 'claude', label: 'Claude Code CLI' },
   { id: 'codex-cli', label: 'Codex CLI' },
   { id: 'codex-app', label: 'Codex App' },
+  { id: 'cursor', label: 'Cursor' },
 ];
 const statuses: Record<string, string> = {
   unavailable: '未检测到客户端',
@@ -123,6 +124,9 @@ export function McpPanel({
                 </span>
               </div>
               {item?.message && <p>{item.message}</p>}
+              {id === 'cursor' && (
+                <p className="muted">在 Cursor 的 MCP 设置中确认 flutter-pilot 已启用，必要时重新连接。</p>
+              )}
               {item?.difference && item.status === 'conflict' && (
                 <p className="muted">
                   配置差异：启动程序{item.difference.commandMatches ? '一致' : '不同'}，启动参数

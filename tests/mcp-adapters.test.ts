@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile, realpath } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
+import { parse as parseJson } from 'jsonc-parser';
 import { AgentAdapterManager, detectNodeRuntime } from '../src/mcp/adapters';
 import { readConfig, writeConfig } from '../src/mcp/config-file';
 
@@ -64,6 +65,86 @@ describe('MCP Agent configuration adapters', () => {
     ).not.toContain('--workspace');
   });
 
+  it('lists Cursor separately with its own project and global configuration paths', async () => {
+    const states = await manager.all();
+    expect(states.map((state) => state.agent)).toEqual(['claude', 'codex-cli', 'codex-app', 'cursor']);
+    expect(states.find((state) => state.agent === 'cursor')).toMatchObject({
+      scope: 'project',
+      path: join(options.workspace, '.cursor', 'mcp.json'),
+      status: 'not-configured',
+      shared: false,
+    });
+    expect(manager.configPath('cursor', 'global')).toBe(join(options.home!, '.cursor', 'mcp.json'));
+    expect(manager.configPath('cursor')).not.toBe(manager.configPath('codex-app'));
+  });
+
+  it('preserves Cursor JSON comments and trailing commas while keeping Claude JSON strict', async () => {
+    const path = manager.configPath('cursor');
+    await mkdir(dirname(path), { recursive: true });
+    const original =
+      '// personal servers\n{\n  "mcpServers": {\n    "other": {"command":"keep",}, // keep this server\n  },\n  /* unrelated preference */\n  "custom": [1,2,],\n}\n';
+    await writeFile(path, original);
+    expect((await manager.adapt('cursor')).configured).toBe(true);
+    const output = await readFile(path, 'utf8');
+    expect(output).toContain('// personal servers');
+    expect(output).toContain('// keep this server');
+    expect(output).toContain('/* unrelated preference */');
+    expect(parseJson(output).mcpServers.other).toEqual({ command: 'keep' });
+    await manager.remove('cursor');
+    expect(parseJson(await readFile(path, 'utf8'))).toEqual(parseJson(original));
+    await writeFile(manager.configPath('claude'), original);
+    expect((await manager.inspect('claude')).status).toBe('invalid');
+  });
+
+  it('recognizes an existing Cursor stdio entry without an explicit type and leaves it intact', async () => {
+    const state = await manager.adapt('cursor');
+    const document = JSON.parse(await readFile(state.path, 'utf8'));
+    delete document.mcpServers['flutter-pilot'].type;
+    const legacy = JSON.stringify(document);
+    await writeFile(state.path, legacy);
+    expect((await manager.adapt('cursor')).configured).toBe(true);
+    expect(await readFile(state.path, 'utf8')).toBe(legacy);
+  });
+
+  it.each(['project', 'global'] as const)(
+    'writes only the Cursor %s service and preserves unrelated settings on adapt and remove',
+    async (scope) => {
+      const path = manager.configPath('cursor', scope);
+      await mkdir(dirname(path), { recursive: true });
+      const original =
+        '{\n  "custom": {"token": "synthetic-secret"},\n  "mcpServers": {"other": {"command": "other", "env": {"TOKEN": "keep"}}}\n}\n';
+      await writeFile(path, original);
+      const state = await manager.adapt('cursor', scope);
+      expect(state).toMatchObject({ agent: 'cursor', scope, status: 'configured', shared: false });
+      expect(JSON.stringify(state)).not.toContain('synthetic-secret');
+      const output = await readFile(path, 'utf8');
+      expect(output).toContain('"custom": {"token": "synthetic-secret"}');
+      const document = JSON.parse(output);
+      expect(document.mcp_servers).toBeUndefined();
+      expect(document.mcpServers['flutter-pilot']).toEqual({
+        type: 'stdio',
+        command: process.execPath,
+        args: [
+          join(options.bridgeRoot, 'bridge.cjs'),
+          '--registry',
+          join(options.bridgeRoot, 'sessions'),
+          ...(scope === 'project' ? ['--workspace', options.workspace] : []),
+        ],
+      });
+      await manager.adapt('cursor', scope);
+      expect(await readFile(path, 'utf8')).toBe(output);
+      await expect(
+        readFile(manager.configPath('cursor', scope === 'project' ? 'global' : 'project')),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(readFile(manager.configPath('claude', scope))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(readFile(manager.configPath('codex-app', scope))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+      await manager.remove('cursor', scope);
+      expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(JSON.parse(original));
+    },
+  );
+
   it('preserves TOML comments, unrelated sections and multiline strings when adding and removing', async () => {
     const path = manager.configPath('codex-cli');
     await mkdir(dirname(path), { recursive: true });
@@ -77,19 +158,23 @@ describe('MCP Agent configuration adapters', () => {
     expect(await readFile(path, 'utf8')).toContain('# keep');
   });
 
-  it('does not overwrite a conflict until repair and never deletes an unowned entry', async () => {
-    const path = manager.configPath('claude');
-    const original = JSON.stringify({ mcpServers: { 'flutter-pilot': { command: 'custom' } } });
-    await writeFile(path, original);
-    expect((await manager.inspect('claude')).status).toBe('conflict');
-    await expect(manager.adapt('claude')).rejects.toThrow('修复');
-    await expect(manager.remove('claude')).rejects.toThrow('不是本插件');
-    expect(await readFile(path, 'utf8')).toBe(original);
-    await manager.adapt('claude', 'project', true);
-    expect((await manager.inspect('claude')).configured).toBe(true);
-    await manager.remove('claude');
-    expect(JSON.parse(await readFile(path, 'utf8')).mcpServers).toEqual({});
-  });
+  it.each(['claude', 'cursor'] as const)(
+    'does not overwrite a %s conflict until repair and never deletes an unowned entry',
+    async (agent) => {
+      const path = manager.configPath(agent);
+      await mkdir(dirname(path), { recursive: true });
+      const original = JSON.stringify({ mcpServers: { 'flutter-pilot': { command: 'custom' } } });
+      await writeFile(path, original);
+      expect((await manager.inspect(agent)).status).toBe('conflict');
+      await expect(manager.adapt(agent)).rejects.toThrow('修复');
+      await expect(manager.remove(agent)).rejects.toThrow('不是本插件');
+      expect(await readFile(path, 'utf8')).toBe(original);
+      await manager.adapt(agent, 'project', true);
+      expect((await manager.inspect(agent)).configured).toBe(true);
+      await manager.remove(agent);
+      expect(JSON.parse(await readFile(path, 'utf8')).mcpServers).toEqual({});
+    },
+  );
 
   it('repairs quoted TOML sections and removes nested owned sections only', async () => {
     const path = manager.configPath('codex-cli');
@@ -151,6 +236,19 @@ describe('MCP Agent configuration adapters', () => {
     }
   });
 
+  it('reports both Cursor scopes independently without claiming either configuration is shadowed', async () => {
+    await manager.adapt('cursor', 'global');
+    await manager.adapt('cursor', 'project');
+    for (const scope of ['project', 'global'] as const) {
+      const state = await manager.inspect('cursor', scope);
+      expect(state.configured).toBe(true);
+      expect(state.shadowed).toBe(false);
+      expect(state.effectiveScope).toBe(scope);
+      expect(state.effectivePath).toBe(manager.configPath('cursor', scope));
+      expect(state.effectiveMessage).toContain('可能分别加载');
+    }
+  });
+
   it('reports Claude local overrides without returning credentials or command values', async () => {
     await manager.adapt('claude', 'project');
     const path = manager.configPath('claude', 'global');
@@ -189,7 +287,7 @@ describe('MCP Agent configuration adapters', () => {
   });
 
   it('rejects invalid files without changing their contents', async () => {
-    for (const agent of ['claude', 'codex-cli'] as const) {
+    for (const agent of ['claude', 'codex-cli', 'cursor'] as const) {
       const path = manager.configPath(agent);
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, 'invalid {{{');
@@ -225,4 +323,41 @@ describe('MCP Agent configuration adapters', () => {
     expect(state.clientDetected).toBe(false);
     expect(state.message).toContain('未检测到客户端');
   });
+
+  it('rejects a symbolic-link Cursor configuration directory without touching its target', async () => {
+    const target = join(temporary, 'cursor-linked');
+    await mkdir(target);
+    await writeFile(join(target, 'mcp.json'), '{}');
+    await symlink(target, join(options.workspace, '.cursor'));
+    expect((await manager.inspect('cursor')).status).toBe('invalid');
+    await expect(manager.adapt('cursor')).rejects.toThrow('符号链接');
+    expect(await readFile(join(target, 'mcp.json'), 'utf8')).toBe('{}');
+  });
+
+  it.each(['cli', 'app', 'absent'] as const)(
+    'detects Cursor %s without executing the client',
+    async (source) => {
+      const bin = join(temporary, 'bin');
+      const applications = join(temporary, 'Applications');
+      await mkdir(bin);
+      await mkdir(applications);
+      const marker = join(temporary, 'cursor-was-executed');
+      if (source === 'cli') {
+        const cursor = join(bin, 'cursor');
+        await writeFile(cursor, `#!/bin/sh\ntouch '${marker}'\n`);
+        await chmod(cursor, 0o700);
+      } else if (source === 'app') await mkdir(join(applications, 'Cursor.app'));
+      manager = new AgentAdapterManager({
+        ...options,
+        detectClient: undefined,
+        env: { ...process.env, PATH: bin },
+        applicationDirectories: [applications],
+      });
+      const state = await manager.adapt('cursor');
+      expect(state.configured).toBe(true);
+      expect(state.clientDetected).toBe(source !== 'absent');
+      if (source === 'absent') expect(state.message).toContain('未检测到客户端');
+      await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+  );
 });

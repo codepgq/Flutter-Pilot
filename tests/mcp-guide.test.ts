@@ -9,6 +9,24 @@ import { validateWsRuleDocument } from '../src/ws/model';
 import { capabilityRoutes } from '../src/mcp/capabilities';
 
 describe('Agent usage guide contracts', () => {
+  it('discovers Cursor setup offline without treating configuration as a client handshake', () => {
+    const adapters = getUsageGuide('overview').agentAdapters as any;
+    expect(adapters.clients).toContain('Cursor');
+    expect(adapters.cursor).toMatchObject({
+      project: '<workspace>/.cursor/mcp.json',
+      global: '~/.cursor/mcp.json',
+      server: 'mcpServers.flutter-pilot',
+      transport: 'stdio',
+    });
+    expect(adapters.verification).toContain('不写入配置');
+    for (const name of ['capabilities', 'get_usage_guide']) {
+      const text = getMcpPrompt(name).messages[0].content.text;
+      expect(text).toContain('Cursor');
+      expect(text).toContain('overview.agentAdapters');
+      expect(text).toContain('握手');
+    }
+  });
+
   it('exposes a read-only capability prompt backed by every registered tool and scenario', () => {
     const result = getMcpPrompt('capabilities');
     const text = result.messages[0].content.text;
