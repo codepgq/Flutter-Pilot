@@ -1,0 +1,17 @@
+{
+  "id": "example-orders",
+  "name": "订单空数据",
+  "http": [
+    {
+      "id": "example-orders-empty",
+      "file": "564647cd-2390-5fa5-9730-86c7c77b362d.json"
+    }
+  ],
+  "ws": [
+    {
+      "id": "example-order-events",
+      "file": "90942db2-399d-53ad-85ef-21768ae2ca5d.json"
+    }
+  ],
+  "actions": []
+}

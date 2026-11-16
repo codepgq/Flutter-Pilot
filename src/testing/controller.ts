@@ -35,12 +35,16 @@ export interface NetworkBaseline {
   wsIds: string[];
 }
 export interface TestHost extends WorkflowHost {
-  loadScenes(): Promise<SceneDocument>;
+  loadScenes(
+    test?: TestCase,
+    resolveMock?: (actions: SceneDocument) => string | undefined,
+  ): Promise<SceneDocument>;
   prepare(
     runId: string,
     sceneId: string | undefined,
     mock: TestMock | undefined,
     requirements: { http: boolean; ws: boolean },
+    snapshot?: SceneDocument,
   ): Promise<void>;
   /** Resolve connections created by setup before the main observation window. */
   ready?(runId: string, signal: AbortSignal): Promise<void>;
@@ -108,6 +112,13 @@ interface Active {
 }
 const own = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
 const sensitive = (key: string) => /password|secret|token|authorization|cookie/i.test(key);
+function immutable<T>(value: T): T {
+  if (value && typeof value === 'object') {
+    Object.freeze(value);
+    for (const child of Object.values(value)) immutable(child);
+  }
+  return value;
+}
 const errorMessage = (value: unknown) =>
   typeof (value as { message?: unknown })?.message === 'string'
     ? (value as { message: string }).message
@@ -300,46 +311,52 @@ export class TestController {
     runId: string,
     backend: Backend,
   ): Promise<Prepared> {
-    const [document, scenes] = await Promise.all([this.store.read(), this.host.loadScenes()]);
+    const document = await this.store.read();
     const test = document.tests.find((item) => item.id === testId);
     if (!test) throw new TestError('TEST_NOT_FOUND', '指定测试不存在，请先调用 list_tests。');
-    validateSceneActions(scenes);
-    const root = scenes.scenes
-      .find((scene) => scene.id === test.action.sceneId)
-      ?.actions?.find((item) => item.id === test.action.actionId);
-    if (!root) throw new TestError('INVALID_TEST', '测试引用的 Scene 操作不存在。');
-    const inputNames = new Set(Object.keys(root.inputs ?? {}));
-    for (const value of Object.values(overrides))
-      if (typeof value !== 'string' || value.length > 16384)
-        throw new TestError('INVALID_TEST', '测试参数必须为字符串。');
-    validateTemplates(test.inputs, inputNames, new Set(), false);
-    const resolved: Record<string, string> = Object.create(null),
-      resolving = new Set<string>();
-    const resolveInput = (key: string): string => {
-      if (own(resolved, key)) return resolved[key];
-      if (own(overrides, key)) return (resolved[key] = overrides[key]);
-      if (resolving.has(key) || resolving.size >= 64)
-        throw new TestError('INVALID_TEST', '测试输入模板存在循环或依赖层数过多。');
-      if (!own(test.inputs ?? {}, key)) {
-        const value = root.inputs?.[key]?.default;
-        if (value === undefined) throw new TestError('INVALID_TEST', '测试输入模板引用了未提供值的参数。');
+    const bindMain = (scenes: SceneDocument) => {
+      const root = scenes.scenes
+        .find((scene) => scene.id === test.action.sceneId)
+        ?.actions?.find((item) => item.id === test.action.actionId);
+      if (!root) throw new TestError('INVALID_TEST', '测试引用的 Scene 操作不存在。');
+      const inputNames = new Set(Object.keys(root.inputs ?? {}));
+      for (const value of Object.values(overrides))
+        if (typeof value !== 'string' || value.length > 16384)
+          throw new TestError('INVALID_TEST', '测试参数必须为字符串。');
+      validateTemplates(test.inputs, inputNames, new Set(), false);
+      const resolved: Record<string, string> = Object.create(null),
+        resolving = new Set<string>();
+      const resolveInput = (key: string): string => {
+        if (own(resolved, key)) return resolved[key];
+        if (own(overrides, key)) return (resolved[key] = overrides[key]);
+        if (resolving.has(key) || resolving.size >= 64)
+          throw new TestError('INVALID_TEST', '测试输入模板存在循环或依赖层数过多。');
+        if (!own(test.inputs ?? {}, key)) {
+          const value = root.inputs?.[key]?.default;
+          if (value === undefined) throw new TestError('INVALID_TEST', '测试输入模板引用了未提供值的参数。');
+          return (resolved[key] = value);
+        }
+        resolving.add(key);
+        const value = test.inputs![key].replace(/\$\{([^}]*)\}/g, (_whole, expression: string) =>
+          expression === 'run.id' ? runId : resolveInput(expression.slice('inputs.'.length)),
+        );
+        resolving.delete(key);
         return (resolved[key] = value);
-      }
-      resolving.add(key);
-      const value = test.inputs![key].replace(/\$\{([^}]*)\}/g, (_whole, expression: string) =>
-        expression === 'run.id' ? runId : resolveInput(expression.slice('inputs.'.length)),
+      };
+      const bound = Object.fromEntries(Object.keys(test.inputs ?? {}).map((key) => [key, resolveInput(key)]));
+      return compileSceneAction(
+        scenes,
+        test.action.sceneId,
+        test.action.actionId,
+        { ...bound, ...overrides },
+        backend,
       );
-      resolving.delete(key);
-      return (resolved[key] = value);
     };
-    const bound = Object.fromEntries(Object.keys(test.inputs ?? {}).map((key) => [key, resolveInput(key)]));
-    const main = compileSceneAction(
-      scenes,
-      test.action.sceneId,
-      test.action.actionId,
-      { ...bound, ...overrides },
-      backend,
+    const scenes = await this.host.loadScenes(test, (actions) =>
+      bindTemplates(test.sceneId, bindMain(actions).inputs, runId),
     );
+    validateSceneActions(scenes);
+    const main = bindMain(scenes);
     const inputs = main.inputs,
       secrets = [...main.secrets];
     for (const [key, value] of Object.entries(inputs)) if (sensitive(key) && value) secrets.push(value);
@@ -416,7 +433,7 @@ export class TestController {
     }
     return {
       test: structuredClone(test),
-      scenes: structuredClone(scenes),
+      scenes: immutable(structuredClone(scenes)),
       inputs,
       secrets,
       mock,
@@ -810,6 +827,7 @@ export class TestController {
           http: !!prepared.test.expect.http?.length,
           ws: !!(prepared.test.expect.ws?.length || prepared.test.events?.length),
         },
+        prepared.scenes,
       );
       run.mockSceneId =
         this.host.mockSceneId?.() ?? bindTemplates(prepared.test.sceneId, prepared.inputs, run.runId) ?? null;

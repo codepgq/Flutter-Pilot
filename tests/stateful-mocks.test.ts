@@ -147,11 +147,10 @@ afterEach(async () => {
 async function sceneFixture() {
   const directory = await mkdtemp(join(tmpdir(), 'pilot-test-scenes-'));
   const store = new SceneStore(directory);
-  await writeFile(
-    store.file,
-    JSON.stringify({
-      version: 1,
-      activeSceneId: 'base',
+  await store.load();
+  await store.importPackage(
+    {
+      version: 2,
       scenes: [
         {
           id: 'base',
@@ -164,8 +163,10 @@ async function sceneFixture() {
         },
         { id: 'other', name: 'Other', httpRules: [rule('other')], wsRules: [] },
       ],
-    }),
+    },
+    false,
   );
+  await store.activate('base');
   const state = {
     key: 'vm-1',
     mode: 'vm' as 'vm' | 'proxy',
@@ -207,7 +208,7 @@ describe('ephemeral test scenes', () => {
   it('applies scoped overrides above extreme base priorities, then restores without writing disk', async () => {
     const { controller, store, projected, calls } = await sceneFixture();
     const before = await readFile(store.file, 'utf8');
-    const document = structuredClone(controller.document);
+    const document = { ...(await store.exportPackage()), activeSceneId: controller.activeSceneId };
     await controller.beginRun('run', undefined, [
       { ...rule('override-low'), priority: -100 },
       { ...rule('override-high'), priority: 20 },
@@ -221,7 +222,7 @@ describe('ephemeral test scenes', () => {
     expect(projected().http.every((item) => Number.isSafeInteger(item.priority))).toBe(true);
     expect(calls).toEqual(['off:http', 'off:ws', 'project', 'on:http']);
     expect(controller.summary().runtimeRunId).toBe('run');
-    expect(controller.document).toEqual(document);
+    expect({ ...(await store.exportPackage()), activeSceneId: controller.activeSceneId }).toEqual(document);
     expect(await readFile(store.file, 'utf8')).toBe(before);
     await controller.endRun('run');
     expect(controller.summary().runtimeRunId).toBeUndefined();
@@ -235,13 +236,17 @@ describe('ephemeral test scenes', () => {
     controller.select('base');
     expect(controller.active?.id).toBe('other');
     expect(controller.selected?.id).toBe('base');
-    expect(controller.document.activeSceneId).toBe('base');
+    expect(controller.activeSceneId).toBe('base');
     await controller.endRun('run');
     expect(controller.active?.id).toBe('base');
   });
   it('defers WS until setup and resumes it without detaching or reprojecting HTTP fixtures', async () => {
     const { controller, host, calls, state } = await sceneFixture();
-    await controller.saveWs([{ ...temporary, id: 'url-rule', match: { url: 'wss://api.test/orders' } }]);
+    await controller.saveResource(
+      { sceneId: 'base', kind: 'ws', id: 'url-rule' },
+      { ...temporary, id: 'url-rule', match: { url: 'wss://api.test/orders' } },
+      null,
+    );
     await controller.setCapture('ws', false);
     const http = compileTestMock(fixtureMock(), 'run');
     await controller.beginRun('run', undefined, http, { deferWs: true });
@@ -266,7 +271,11 @@ describe('ephemeral test scenes', () => {
   });
   it('keeps WS readiness failures owned and restores temporary state without retrying activation', async () => {
     const { controller, host, calls } = await sceneFixture();
-    await controller.saveWs([{ ...temporary, id: 'url-rule', match: { url: 'wss://api.test/orders' } }]);
+    await controller.saveResource(
+      { sceneId: 'base', kind: 'ws', id: 'url-rule' },
+      { ...temporary, id: 'url-rule', match: { url: 'wss://api.test/orders' } },
+      null,
+    );
     await controller.beginRun('run', undefined, [], { deferWs: true });
     const projects = vi.mocked(host.project).mock.calls.length;
     vi.mocked(host.enable).mockRejectedValueOnce(new Error('socket not attached'));
@@ -305,15 +314,12 @@ describe('ephemeral test scenes', () => {
     for (const operation of [
       () => controller.activate('other'),
       () => controller.reload(),
-      () => controller.saveHttp([]),
-      () => controller.saveWs([]),
+      () => controller.saveResource({ sceneId: 'base', kind: 'http', id: 'new' }, rule('new'), null),
+      () => controller.saveTemporary([]),
       () => controller.create('new'),
       () => controller.setCapture('http', false),
       () => controller.beginRun('foreign'),
-      () =>
-        controller.change((doc) => {
-          doc.scenes = [];
-        }),
+      () => controller.remove('base', 'stale'),
     ])
       await expect(operation()).rejects.toThrow('测试运行');
     await expect(controller.endRun('foreign')).rejects.toThrow('其他');
@@ -326,7 +332,7 @@ describe('ephemeral test scenes', () => {
   });
   it('restores paused domains and temporary WS rules, excluding connections that expired during a run', async () => {
     const { controller, projected } = await sceneFixture();
-    await controller.saveWs([temporary], 'base');
+    await controller.saveTemporary([temporary]);
     await controller.setCapture('http', false);
     expect(controller.runtime.http.status).toBe('paused');
     await controller.beginRun('run', 'other');

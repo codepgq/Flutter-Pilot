@@ -1,0 +1,20 @@
+{
+  "id": "common_operations",
+  "name": "公共操作（示例 Key 需替换）",
+  "http": [],
+  "ws": [],
+  "actions": [
+    {
+      "id": "login",
+      "file": "3eab133b-7b9f-58b0-ac10-33abb7c73e39.json"
+    },
+    {
+      "id": "submit_order",
+      "file": "975d757b-8b97-5993-b1ce-8a42e4141a85.json"
+    },
+    {
+      "id": "login_and_submit_order",
+      "file": "e3a36299-4e1d-544c-ba22-fa31098d028e.json"
+    }
+  ]
+}

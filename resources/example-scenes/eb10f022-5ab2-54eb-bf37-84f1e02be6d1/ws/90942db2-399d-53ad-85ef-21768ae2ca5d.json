@@ -1,0 +1,15 @@
+{
+  "id": "example-order-events",
+  "name": "订单事件替换",
+  "enabled": true,
+  "priority": 10,
+  "match": {
+    "url": "wss://api.example.com/orders*",
+    "direction": "inbound",
+    "contains": "order_status"
+  },
+  "action": {
+    "type": "replace",
+    "textFile": "bodies/f97527a2-6d81-5899-a899-ef6b73c4224e.txt"
+  }
+}

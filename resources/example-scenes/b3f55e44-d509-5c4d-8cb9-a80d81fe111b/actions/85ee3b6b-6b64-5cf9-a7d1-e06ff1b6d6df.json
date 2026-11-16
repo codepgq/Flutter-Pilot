@@ -1,0 +1,57 @@
+{
+  "id": "switch_account_login_to_home",
+  "name": "最近账号入口：切换账号后邮箱登录并进入主页",
+  "description": "起点为显示 Switch account 的最近账号登录页。仅选择符合当前页的入口；未知起点先检查界面，不失败后盲试另一个入口。邮箱、验证码显式传入，公共登录步骤跨 Scene 复用，不切换当前 Mock。示例 Key 需在目标 App 核验。",
+  "inputs": {
+    "email": {
+      "required": true
+    },
+    "code": {
+      "required": true,
+      "secret": true
+    }
+  },
+  "steps": [
+    {
+      "id": "wait_login_page",
+      "type": "wait_for_widget",
+      "target": "loginPage",
+      "timeoutMs": 30000,
+      "state": "visible"
+    },
+    {
+      "id": "ready_switchAccount",
+      "type": "wait_for_widget",
+      "target": "switchAccount",
+      "timeoutMs": 30000,
+      "state": "actionable"
+    },
+    {
+      "id": "switch_account",
+      "type": "tap",
+      "target": "switchAccount"
+    },
+    {
+      "id": "ready_emailMethod",
+      "type": "wait_for_widget",
+      "target": "emailMethod",
+      "timeoutMs": 30000,
+      "state": "actionable"
+    },
+    {
+      "id": "choose_email",
+      "type": "tap",
+      "target": "emailMethod"
+    },
+    {
+      "id": "complete_email_login_to_home",
+      "type": "call",
+      "sceneId": "email_operations",
+      "actionId": "complete_email_login_to_home",
+      "inputs": {
+        "email": "${inputs.email}",
+        "code": "${inputs.code}"
+      }
+    }
+  ]
+}

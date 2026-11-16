@@ -14,7 +14,7 @@ ${describeCapabilityRoutes()}
 首次运行时调用 list_sessions，按 workspace、设备和用户上下文选择 sessionId；所有有目标的工具都显式传 sessionId，不猜 ID。已有 App 直接复用；未运行且任务需要时才 start_app，启动 TIMEOUT 先查询会话和 IDE，不重复启动、不改设备、不清数据。只截图不重启 App、不导航页面、不切换 Mock；前提不满足时报告诊断，不自动换通道或改用其他工具截图。
 按需 get_usage_guide 读取 overview/screenshot/http/ws/ui/workflow；无需 sessionId 或在线 IDE。也可 resources/list → resources/read。prompts/list 仅列目录，prompts/get 按需读取完整模板；capabilities 查阅全部功能，app_screenshot 提供截图最短路径，scene_action_quick_run 复用操作，scene_action_authoring 编写归档。全部工具均有同名 Prompt 和生产 schema。初始化仅提供本说明，不自动读取所有 Prompt，也不执行任何运行时操作。
 重复操作先 list_scenes → list_scene_actions；targets 别名自动按当前挂载真实 Key 重新匹配，无需 Agent 每步 find_widget 或截图。缺少操作或定位失效时才 get_ui_snapshot / find_widget 探索，优先真实稳定 ValueKey；不得绕过禁用、遮挡或直接调用业务回调。输入影响布局时 hide_keyboard 确认稳定隐藏，再等待 actionable。等待失败读取 diagnostics / failure.diagnostics 的 selector、condition、timeoutMs、attempts、lastObservation，不用固定延时掩盖问题。
-Mock/targets/actions 唯一持久来源为 files.scenes 指向的 scenes.json v1；由 Agent 增量编辑并保留已有内容，修改后 reload_rules，需要 Mock 时才 activate_scene。公共操作放纯操作 Scene，call 显式映射 inputs，秘密参数逐层 secret:true；不保存临时 ref/坐标，不维护第二份运行配置。run_scene_action 不切换 Mock；激活、reload、重连或 IDE 恢复不执行 UI。
+Mock/targets/actions 唯一持久来源为 files.scenes 指向的 scenes/ 目录 v2；由 Agent 增量编辑并保留已有内容，修改后 reload_rules，需要 Mock 时才 activate_scene。公共操作放纯操作 Scene，call 显式映射 inputs，秘密参数逐层 secret:true；不保存临时 ref/坐标，不维护第二份运行配置。run_scene_action 不切换 Mock；激活、reload、重连或 IDE 恢复不执行 UI。
 HTTP/WS 按本任务所需域和 Dio 接入检查，无需等待无关域；触发前记录请求/消息基线，结束独立核验最终 UI 和本轮实际 Mock 命中。applied/completed/dispatched 不等于业务通过；测试只有 passed 表示通过。启动和惰性 Dio 首请求可能早于注入；401/refresh 循环先停止触发，补齐实际漏接口，区分预期失败 Mock 与漏 Mock，不伪造恢复或资金验收。
 动作和测试共享设备锁，运行期间不改环境、不插入 UI；失败即停。超时、取消、断线或 uncertain 先查终态与业务结果，不自动重放提交、消息或整个流程。hot_reload 保留状态，hot_restart 重跑入口，仅控制当前 VM 对应 IDE 会话，不代替 reload_rules。仅需原生/系统界面时按需准备设备通道；backend=flutter 无需 Appium。
 只在用户任务范围内操作；说明由 MCP 客户端决定如何提供给模型，不能替代用户授权、客户端审批或保证 Agent 一定遵循。`;
@@ -50,8 +50,7 @@ export const wsExample = {
   ],
 };
 export const sceneExample = {
-  version: 1,
-  activeSceneId: null,
+  version: 2,
   scenes: [
     { id: 'orders-empty-scene', name: '订单空数据', httpRules: httpExample.rules, wsRules: wsExample.rules },
   ],
@@ -59,8 +58,42 @@ export const sceneExample = {
 const step = (tool: string, args: Record<string, unknown> = {}) => ({ tool, arguments: args });
 const selected = { sessionId: '<从 list_sessions 选择的会话ID>' };
 
+export const sceneStorageGuide = {
+  version: 2,
+  root: '.flutter-pilot/scenes/index.json',
+  index: { version: 2, scenes: [{ id: 'example', directory: 'scene-directory' }] },
+  manifest: {
+    id: 'example',
+    name: '示例',
+    http: [{ id: 'rule', file: 'rule.json' }],
+    ws: [],
+    actions: [{ id: 'hide', file: 'action.json' }],
+  },
+  targets: {},
+  http: {
+    id: 'rule',
+    name: '示例规则',
+    enabled: false,
+    priority: 1,
+    match: { path: '/example' },
+    mock: { status: 200, headers: {}, bodyFile: 'bodies/response.txt' },
+  },
+  action: { id: 'hide', name: '收起键盘', steps: [{ id: 'hide', type: 'hide_keyboard' }] },
+  bodies: { 'bodies/response.txt': '{"data":[]}' },
+  rules: [
+    'list_scenes 使用 offset/limit/search；默认50、最多200。返回目录、清单路径、数量和健康状态，不读取正文。list_scene_actions 返回 targets 和 action 概要、准确文件路径，不加载 Mock 正文。',
+    'scene.json 清单只保存 ID/文件映射和顺序；每条 HTTP/WS 规则及 action 独立文件。名称、文件名与业务 ID 解耦，默认 UUID 文件名。tests.json 仍为独立 v2。',
+    'HTTP request/response/mock 的 bodyFile 与 body 互斥；WS action.textFile 与 text 互斥。引用只能为所属 Scene 的 bodies/<普通文件名>，UTF-8 原文，不允许越界和符号链接。空字符串允许内联。',
+    '编辑后 reload_rules。保存冲突需重新读取，不覆盖外部修改；坏 Scene 禁止新激活和运行，依赖动作阻塞，其余 Scene 可用。当前快照损坏保留最后有效运行状态并标记 stale，根清单损坏保留上版目录。',
+    '激活状态位于按工作区隔离的 IDE 私有存储；切换不会修改 Git 文件。摘要缓存也在私有目录，可删除重建。运行前收集所需操作、递归 call、targets 与 Mock 为不可变快照。',
+    '旧 scenes.json 必须显式迁移：IDE 命令 Flutter Pilot: 迁移 Scene v1 到 v2，或在源码仓执行 npm run scenes:migrate -- /path/to/.flutter-pilot --check，再 --apply。校验ID、顺序、正文和动作展开后发布，拒绝已有目标并保留旧文件；迁移报告保留旧激活ID，新工作区由用户首次选择。',
+    '导入导出是 version:2 自包含 JSON 交换包，正文内联；导出包含包外 call 依赖，追加导入重建 Scene/规则 ID 并重写组内 call，当前激活不变。事务冲突时保留日志和文件，处理后重读。',
+  ],
+};
+
 const guides: Record<GuideTopic, Record<string, unknown>> = {
   overview: {
+    sceneStorage: sceneStorageGuide,
     title: '什么时候使用 Flutter Pilot MCP',
     capabilityRoutes,
     agentAdapters: {
@@ -104,7 +137,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       '确认项目与前提后只调用任务所需能力。普通截图直接 take_screenshot；仅涉及 Mock/网络才查 get_network_status，重复业务操作才查 list_scenes/list_scene_actions。',
     ],
     files: {
-      scenes: '.flutter-pilot/scenes.json',
+      scenes: '.flutter-pilot/scenes/index.json',
       tests: '.flutter-pilot/tests.json',
     },
     boundaries: [
@@ -145,9 +178,9 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       'Flutter 长图最多32屏、30000像素高、2400万像素，MCP 图片传输上限32 MiB（含 Base64/JSON）；客户端调用超时建议至少90 秒。超限或恢复失败按真实结果说明，不能宣称完整成功；横向、反向、嵌套滚动和原生平台视图按实际支持边界报告。',
   },
   http: {
-    title: '编辑 .flutter-pilot/scenes.json：HTTP/Dio 规则',
+    title: '编辑 .flutter-pilot/scenes/index.json：HTTP/Dio 规则',
     preparation:
-      '先 get_network_status 取得 files.scenes 绝对路径，再读取文件并保留已有 scenes。JSON 顶层为 version:1、activeSceneId 和 scenes；每个场景含 id、name、httpRules 和 wsRules。修改目标场景的 httpRules，保留其他场景。exampleDocument 是完整场景示例，另附的规则片段用于编辑对应规则数组。',
+      '先 get_network_status 取得 files.scenes 根清单路径，用 list_scenes 定位 Scene 目录，再按 scene.json 的 http 映射编辑单条规则。正文可用 bodyFile 引用 bodies/ 文件；exampleDocument 是 v2 自包含交换包，导入会拆分落盘。',
     exampleDocument: sceneExample,
     httpRuleFragment: httpExample,
     businessScenarios: [
@@ -200,7 +233,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
   ws: {
     title: '业务 WebSocket 规则、模拟推送与真实连接发送',
     preparation:
-      '先 get_network_status 取得 files.scenes 绝对路径，读取并保留现有规则。此文件针对App业务WebSocket，不是Dart VM调试连接。顶层为version:1、activeSceneId和scenes；编辑目标场景的wsRules，保留其他场景。exampleDocument 是完整场景示例，另附的规则片段用于编辑对应规则数组。',
+      '先 get_network_status 取得 files.scenes 根清单路径，再按目标 Scene 的 scene.json/ws 映射编辑单条业务 WS 规则。action.textFile 可引用 bodies/ 文件，与 text 互斥；exampleDocument 是 v2 自包含交换包。',
     exampleDocument: sceneExample,
     wsRuleFragment: wsExample,
     fields: {
@@ -213,7 +246,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       action:
         '整条替换使用 {type:"replace",text:"..."}，text必须是字符串，JSON需序列化；丢弃使用 {type:"drop"}。',
       temporary:
-        'connectionId规则是当前激活场景内的内存临时规则，切换场景或连接失效时清除，不写入scenes.json；本MCP不提供临时规则CRUD。',
+        'connectionId规则是当前激活场景内的内存临时规则，切换场景或连接失效时清除，不写入scenes/ 目录；本MCP不提供临时规则CRUD。',
     },
     variants: { drop: { action: { type: 'drop' } } },
     workflow: [
@@ -309,12 +342,13 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       ],
     },
     reusable: {
+      storage: sceneStorageGuide,
       title: 'Agent 探索一次，保存 Scene 操作，插件确定性执行',
-      files: { scenes: '.flutter-pilot/scenes.json' },
+      files: { scenes: '.flutter-pilot/scenes/index.json' },
       exampleDocument: savedScenesExample,
       fields: {
         document:
-          '严格 JSON：{version:1,activeSceneId:null,scenes:[{id,name,httpRules:[],wsRules:[],targets?,actions?}]}；action 含 id/name/description?/inputs?/steps。支持纯 Mock、纯操作及 targets-only，没有自动执行字段。',
+          '交换包严格 JSON：{version:2,scenes:[{id,name,httpRules:[],wsRules:[],targets?,actions?}]}，正文内联；持久化使用 scenes/index.json 与独立资源。action 含 id/name/description?/inputs?/steps。支持纯 Mock、纯操作及 targets-only，没有自动执行字段。',
         inputs:
           '输入定义为 {参数名:{required?:boolean,default?:string,secret?:boolean}}；运行 inputs 为字符串字典。模板仅支持 ${inputs.name}，可用于 text、选择器字符串及子流程参数，不执行表达式。',
         targets:
@@ -330,7 +364,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
           '{id,type:"scroll",target,untilTarget?,direction?,distance?,durationMs?,maxSteps?,timeoutMs?}；target 为容器，untilTarget 为同一 targets 中的滚动查找目标。',
         call: '{id,type:"call",sceneId?,actionId,inputs?}；省略 sceneId 引用同 Scene。跨 Scene 仅复用操作，不切换 Mock；inputs 显式映射参数，如 {price:"${inputs.price}"}，预检引用、参数、循环和展开限额。',
         limits:
-          'Scene 文件最多64 MiB；每 Scene 最多200操作，每操作最多500步、整个文件最多5000定义步骤；嵌套最多16层，一次展开最多1000动作。timeoutMs 为100..30000，maxSteps 为1..30。',
+          'Scene 单资源最多16 MiB，每操作最多500步；无全库1000 Scene / 5000步骤限制；嵌套最多16层，一次展开最多1000动作。timeoutMs 为100..30000，maxSteps 为1..30。',
       },
       concepts: {
         scene: '统一保存可选 HTTP/WS Mock、共享 targets 和多个命名 actions。激活只应用 Mock，绝不执行操作。',
@@ -340,10 +374,10 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
           '独立组合 Mock Scene、Scene action、网络关联和业务断言；操作的 completed 只说明操作完成，不是测试 passed。使用 run_test 与本轮关联断言判断业务结果。',
       },
       authoring: [
-        '先 get_network_status 获取 files.scenes；list_scenes 读取概要，list_scene_actions(sceneId) 查询操作和参数。用 Agent 文件工具增量维护 scenes.json。停止读取或创建 workflows.json，不迁移或删除用户旧文件。',
+        '先 get_network_status 获取 files.scenes；list_scenes 读取概要，list_scene_actions(sceneId) 查询操作和参数。用 Agent 文件工具增量维护 scenes/ 目录。停止读取或创建 workflows.json，不迁移或删除用户旧文件。',
         '已有操作满足需求时直接复用；仅缺少操作或定义失效时在目标 App 探索并验证。优先真实稳定 Widget Key，缺 Key 时在任务授权范围补源码并 hot_reload 复验；无源码可改时再显式选择稳定语义或祖先，不使用未验证的示例 Key。',
-        '按 fields 和 exampleDocument 保存 version:1、scenes 数组；共享 targets 在 Scene 上，actions 含 id/name、可选 description/inputs 和 steps。输入值均为字符串，price/quantity 不转换为浮点数；可复用子流程。示例名称和 Key 仅为格式演示，需先确认实际控件。',
-        '把跨业务状态通用的登录、填表和导航保存为同一 scenes.json 的纯操作 Scene；业务入口用 call 和显式 inputs 复用，避免复制步骤。description 写明起始页面、账号要求和预期终点，秘密输入标记 secret。输入后需点按钮时，按实际遮挡加入 hide_keyboard；它确认稳定收起后继续。归档说明只索引 sceneId/actionId、参数和验证范围，不增加第二份动作配置。',
+        'exampleDocument 是 version:2 自包含交换包，导入后拆为目录资源；手工编写按 storage 中的清单保存；共享 targets 在 Scene 上，actions 含 id/name、可选 description/inputs 和 steps。输入值均为字符串，price/quantity 不转换为浮点数；可复用子流程。示例名称和 Key 仅为格式演示，需先确认实际控件。',
+        '把跨业务状态通用的登录、填表和导航保存为scenes/ 目录中的纯操作 Scene；业务入口用 call 和显式 inputs 复用，避免复制步骤。description 写明起始页面、账号要求和预期终点，秘密输入标记 secret。输入后需点按钮时，按实际遮挡加入 hide_keyboard；它确认稳定收起后继续。归档说明只索引 sceneId/actionId、参数和验证范围，不增加第二份动作配置。',
         '保存后 reload_rules 校验并更新已加载 Scene 快照。run_scene_action 使用该快照完整预检引用、输入及展开步骤；文件中途编辑不会改变本轮。激活、reload、重连和 IDE 恢复都不执行操作。',
       ],
       execution: [
@@ -373,7 +407,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
     },
     testing: {
       title: '复用 Scene 操作的 Test Case 与本轮关联断言',
-      files: { tests: '.flutter-pilot/tests.json', scenes: '.flutter-pilot/scenes.json' },
+      files: { tests: '.flutter-pilot/tests.json', scenes: '.flutter-pilot/scenes/index.json' },
       exampleDocument: testExample,
       authoring: [
         '先 list_tests 获取 files.tests 准确路径，list_scene_actions(sceneId) 确认 actionId。Agent 增量保存严格 JSON {version:2,tests:[...]}；缺文件返回空列表，读取不创建文件，保存后无需 reload_rules。',

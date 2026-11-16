@@ -11,8 +11,8 @@
 
 ## Scene 与操作
 
-- `.flutter-pilot/scenes.json` 是每个业务项目唯一的持久 Mock / targets / actions 来源，保持 `version:1`。不读取、创建或迁移 `workflows.json`，不为动作目录再建运行配置或独立 catalogue。
-- 公共操作保存在同一文件中的纯操作 Scene，业务入口使用 `call` 并显式映射参数。保持已有入口 ID 稳定；调用公共操作不激活或切换 Mock。Test Case 仍独立使用 v2 引用 Scene action。
+- `.flutter-pilot/scenes/` 是每个业务项目唯一的持久 Mock / targets / actions 来源，根 `index.json` 使用 `version:2`，每个 Scene、规则和 action 独立资源，正文位于所属 Scene 的 `bodies/`。旧 `scenes.json` 仅由显式迁移工具读取；详见 [目录存储](docs/scene-storage.md)。不读取、创建或迁移 `workflows.json`，不为动作目录再建运行配置或独立 catalogue。
+- 公共操作保存在同一目录库中的纯操作 Scene，业务入口使用 `call` 并显式映射参数。保持已有入口 ID 稳定；调用公共操作不激活或切换 Mock。Test Case 仍独立使用 v2 引用 Scene action。
 - Flutter 重复操作优先使用经过实际验证的 `ValueKey<String/int>`，显式 `source:flutter`。`target` 是 `targets` 别名；运行器按 Key 重新匹配当前挂载控件，不要求 Agent 每步截图或 `find_widget`。缺 Key 时在已授权源码范围补稳定 Key；不把文字、坐标或临时 ref 当作自动回退。
 - Key 放在真实可见、唯一且对应实际交互区域的控件上。保持实际指针输入、禁用和遮挡检查；不能为了让 `actionable` 成功直接调用业务回调。`wait_for_widget` 等待状态，不是模型探索或固定延时。
 - 起始页不同就保存不同入口；描述前提、参数、终点及 Mock 要求。复用公共步骤，避免复制完整动作；秘密参数声明 `secret:true`，逐层调用保持脱敏。输入影响布局时显式 `hide_keyboard`，确认后再等待和点击。

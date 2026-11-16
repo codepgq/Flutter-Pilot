@@ -1,6 +1,5 @@
 {
-  "version": 1,
-  "activeSceneId": null,
+  "version": 2,
   "scenes": [
     {
       "id": "example-orders",

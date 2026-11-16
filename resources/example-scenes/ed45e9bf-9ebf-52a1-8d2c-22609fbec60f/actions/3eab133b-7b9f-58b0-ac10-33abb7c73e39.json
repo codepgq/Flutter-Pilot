@@ -1,0 +1,47 @@
+{
+  "id": "login",
+  "name": "登录并确认账号（替换为实际 Key）",
+  "inputs": {
+    "username": {
+      "required": true
+    },
+    "password": {
+      "required": true,
+      "secret": true
+    }
+  },
+  "steps": [
+    {
+      "id": "waitLogin",
+      "type": "wait_for_widget",
+      "target": "loginPage",
+      "state": "visible"
+    },
+    {
+      "id": "fillUsername",
+      "type": "enter_text",
+      "target": "usernameInput",
+      "text": "${inputs.username}"
+    },
+    {
+      "id": "fillPassword",
+      "type": "enter_text",
+      "target": "passwordInput",
+      "text": "${inputs.password}"
+    },
+    {
+      "id": "submitLogin",
+      "type": "tap",
+      "target": "loginSubmitButton"
+    },
+    {
+      "id": "waitAccountIdentity",
+      "type": "wait_for_widget",
+      "target": "accountLabel",
+      "state": "text_equals",
+      "text": "${inputs.username}",
+      "timeoutMs": 10000
+    }
+  ],
+  "description": "仅执行操作，不切换当前 Mock；执行前确认起始页面。"
+}

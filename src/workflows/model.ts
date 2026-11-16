@@ -62,7 +62,7 @@ const step = z.discriminatedUnion('type', [
     })
     .strict(),
 ]);
-const action = z
+export const sceneActionSchema = z
   .object({
     id: name,
     name: z.string().trim().min(1).max(256),
@@ -77,7 +77,7 @@ const action = z
 const sceneOperations = z
   .object({
     targets: z.record(name, selector).optional(),
-    actions: z.array(action).max(200).optional(),
+    actions: z.array(sceneActionSchema).optional(),
   })
   .strict();
 
@@ -85,7 +85,7 @@ export interface ActionReference {
   sceneId: string;
   actionId: string;
 }
-export type SceneAction = z.infer<typeof action>;
+export type SceneAction = z.infer<typeof sceneActionSchema>;
 export type WorkflowStep = z.infer<typeof step>;
 export type WorkflowInput = z.infer<typeof input>;
 export type WorkflowTool = 'tap' | 'enter_text' | 'hide_keyboard' | 'wait_for_widget' | 'scroll';
@@ -166,7 +166,6 @@ interface LocatedAction {
 export function validateSceneActions(doc: SceneDocument): SceneDocument {
   const normalized = { ...doc, scenes: doc.scenes.map((scene) => ({ ...scene })) };
   const all = new Map<string, LocatedAction>();
-  let stepCount = 0;
   for (const scene of normalized.scenes) {
     const parsed = sceneOperations.safeParse({
       ...(scene.targets !== undefined ? { targets: scene.targets } : {}),
@@ -184,8 +183,6 @@ export function validateSceneActions(doc: SceneDocument): SceneDocument {
       const key = referenceKey(scene.id, value.id);
       if (all.has(key)) invalid(`操作 ID 重复：${scene.id}/${value.id}`);
       all.set(key, { scene, action: value });
-      stepCount += value.steps.length;
-      if (stepCount > 5000) invalid('场景文件最多包含 5000 个操作步骤。');
       const ids = new Set<string>();
       for (const item of value.steps) {
         if (ids.has(item.id)) invalid(`步骤 ID 重复：${scene.id}/${value.id}/${item.id}`);

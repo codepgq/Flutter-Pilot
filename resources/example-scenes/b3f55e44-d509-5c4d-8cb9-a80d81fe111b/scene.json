@@ -1,0 +1,16 @@
+{
+  "id": "email_entrypoints",
+  "name": "邮箱登录入口（示例 Key 需核验）",
+  "http": [],
+  "ws": [],
+  "actions": [
+    {
+      "id": "email_login_to_home",
+      "file": "492a7795-12de-5e4c-8063-6fa40fe15831.json"
+    },
+    {
+      "id": "switch_account_login_to_home",
+      "file": "85ee3b6b-6b64-5cf9-a7d1-e06ff1b6d6df.json"
+    }
+  ]
+}

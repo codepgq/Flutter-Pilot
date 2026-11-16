@@ -1,0 +1,18 @@
+{
+  "id": "example-orders-empty",
+  "name": "示例：订单列表空数据",
+  "enabled": true,
+  "priority": 10,
+  "match": {
+    "method": "GET",
+    "host": "api.example.com",
+    "path": "/v1/orders"
+  },
+  "mock": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "bodyFile": "bodies/33214f09-ca46-5729-a984-d4625a15a8e7.txt"
+  }
+}

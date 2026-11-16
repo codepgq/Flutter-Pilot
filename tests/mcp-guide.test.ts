@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { getUsageGuide, guideTopics, httpExample, wsExample } from '../src/mcp/guide';
+import { getUsageGuide, guideTopics, httpExample, wsExample, sceneStorageGuide } from '../src/mcp/guide';
+import { indexSchema, manifestSchema } from '../src/scene-storage-model';
+import { sceneActionSchema } from '../src/workflows/model';
 import { mcpTools, parseTool } from '../src/mcp/tools';
 import { getMcpPrompt, mcpPrompts, toolPromptPlans } from '../src/mcp/prompts';
 import { agentInstructions } from '../src/mcp/guide';
@@ -7,8 +9,47 @@ import { z } from 'zod';
 import { validateRuleDocument } from '../src/model';
 import { validateWsRuleDocument } from '../src/ws/model';
 import { capabilityRoutes } from '../src/mcp/capabilities';
+import { readFile } from 'node:fs/promises';
+import { validateScenePackage } from '../src/scenes';
 
 describe('Agent usage guide contracts', () => {
+  it('keeps every README Scene exchange example importable by the v2 production validator', async () => {
+    const readme = await readFile('README.md', 'utf8');
+    let count = 0;
+    for (const match of readme.matchAll(/```json\n([\s\S]*?)```/g)) {
+      const value = JSON.parse(match[1]);
+      if (Array.isArray(value.scenes)) {
+        expect(() => validateScenePackage(value)).not.toThrow();
+        count++;
+      }
+    }
+    expect(count).toBeGreaterThan(0);
+  });
+  it('validates offline v2 directory examples with the production schemas and paginated tool input', () => {
+    expect(indexSchema.parse(sceneStorageGuide.index).version).toBe(2);
+    expect(manifestSchema.parse(sceneStorageGuide.manifest).id).toBe('example');
+    expect(sceneActionSchema.parse(sceneStorageGuide.action).id).toBe('hide');
+    const stored = sceneStorageGuide.http;
+    const { bodyFile, ...mock } = stored.mock;
+    expect(
+      validateRuleDocument({
+        version: 1,
+        rules: [
+          {
+            ...stored,
+            mock: {
+              ...mock,
+              body: sceneStorageGuide.bodies[bodyFile as keyof typeof sceneStorageGuide.bodies],
+            },
+          },
+        ],
+      }).rules,
+    ).toHaveLength(1);
+    expect(
+      parseTool('list_scenes', { sessionId: 'fixture', offset: 50, limit: 200, search: '中文' }),
+    ).toMatchObject({ offset: 50, limit: 200, search: '中文' });
+    expect(() => parseTool('list_scenes', { sessionId: 'fixture', limit: 201 })).toThrow();
+  });
   it('discovers Cursor setup offline without treating configuration as a client handshake', () => {
     const adapters = getUsageGuide('overview').agentAdapters as any;
     expect(adapters.clients).toContain('Cursor');
@@ -181,7 +222,7 @@ describe('Agent usage guide contracts', () => {
       expect(run).toContain(requirement);
     const authoring = getMcpPrompt('scene_action_authoring').messages[0].content.text;
     for (const requirement of [
-      'version:1',
+      '根清单保持 version:2',
       'steps[].target',
       '真实 Widget Key',
       'hide_keyboard',

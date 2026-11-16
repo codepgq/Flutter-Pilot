@@ -6,7 +6,8 @@ import { compileSceneAction, WorkflowError, type CompiledWorkflow, type Compiled
 import type { SceneDocument } from '../scene-model';
 
 export interface SceneActionSource {
-  read(): Promise<SceneDocument>;
+  read(sceneId?: string, actionId?: string): Promise<SceneDocument>;
+  list?(sceneId: string): Promise<any>;
 }
 
 export interface WorkflowHost {
@@ -166,7 +167,8 @@ export class WorkflowController {
     };
   }
   async list(sceneId: string) {
-    const doc = structuredClone(await this.store.read());
+    if (this.store.list) return this.store.list(sceneId);
+    const doc = structuredClone(await this.store.read(sceneId));
     const scene = doc.scenes.find((item) => item.id === sceneId);
     if (!scene) throw new WorkflowError('SCENE_NOT_FOUND', '指定场景不存在，请先调用 list_scenes。');
     return {
@@ -204,7 +206,7 @@ export class WorkflowController {
       throw new WorkflowError('WORKFLOW_BUSY', '已有场景操作正在执行，请先查询或取消该运行。');
     this.starting = true;
     try {
-      const doc = structuredClone(await this.store.read());
+      const doc = await this.store.read(sceneId, actionId);
       const compiled = compileSceneAction(doc, sceneId, actionId, inputs, backend);
       if (this.disposed) throw new WorkflowError('SESSION_INVALIDATED', '场景操作会话已关闭。');
       const owner = randomUUID();

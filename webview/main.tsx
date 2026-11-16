@@ -1,3 +1,15 @@
+import {
+  acceptDetail,
+  acceptPage,
+  closeScene,
+  queryScenes,
+  acceptResource,
+  detailScene,
+  pageScenes,
+  requestResource,
+  resourceHash,
+  selectScene,
+} from './scene-resources';
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
@@ -353,7 +365,13 @@ function App() {
     const listener = (event: MessageEvent) => {
       const m = event.data;
       if (m.type === 'state') {
-        setState(m.state);
+        setState((previous) => ({
+          ...m.state,
+          scenes: m.state.scenes ?? previous.scenes,
+          scenePage: previous.scenePage,
+          sceneDetail: previous.sceneDetail,
+          loadedSceneAction: previous.loadedSceneAction,
+        }));
         if (
           'selected' in m &&
           (!m.selected ||
@@ -363,6 +381,35 @@ function App() {
           setSelected(m.selected ?? undefined);
         if ('preview' in m) setPreview(m.preview ?? undefined);
       }
+      if (m.type === 'scene.page')
+        setState((previous) =>
+          !acceptPage(m, previous)
+            ? previous
+            : {
+                ...previous,
+                scenePage: m.page,
+                scenes: {
+                  version: 1,
+                  activeSceneId: m.page.activeSceneId ?? null,
+                  scenes: pageScenes(m.page),
+                },
+              },
+        );
+      if (m.type === 'scene.detail')
+        setState((previous) =>
+          acceptDetail(m, previous)
+            ? { ...previous, sceneDetail: m.detail ?? undefined, loadedSceneAction: undefined }
+            : previous,
+        );
+      if (m.type === 'scene.resource')
+        setState((previous) => {
+          if (!acceptResource(m, previous)) return previous;
+          if (m.resource.address.kind === 'http') setEdit(m.resource.value);
+          if (m.resource.address.kind === 'ws') setWsDraft(m.resource.value);
+          return m.resource.address.kind === 'actions'
+            ? { ...previous, loadedSceneAction: m.resource.value }
+            : previous;
+        });
       if (m.type === 'showScenes') {
         setTab('rules');
       }
@@ -379,7 +426,12 @@ function App() {
     { id: 'connection', label: '连接与诊断', icon: 'plug' },
     { id: 'apis', label: 'API 请求', icon: 'radar', count: state.history.total },
     { id: 'websocket', label: 'WebSocket', icon: 'radar', count: state.ws?.messages.total ?? 0 },
-    { id: 'rules', label: 'Mock 场景', icon: 'rules', count: state.scenes?.scenes.length ?? 0 },
+    {
+      id: 'rules',
+      label: 'Mock 场景',
+      icon: 'rules',
+      count: state.scenePage?.total ?? state.scenes?.scenes.length ?? 0,
+    },
     { id: 'tests', label: '业务测试', icon: 'play', count: state.tests?.catalogue?.tests.length ?? 0 },
     { id: 'breakpoints', label: '断点队列', icon: 'pause', count: state.pending.length },
     { id: 'mcp', label: 'MCP', icon: 'mcp' },
@@ -541,6 +593,7 @@ function App() {
         </div>
         {tab === 'websocket' && (
           <WebSocketPanel
+            ruleNames={state.ruleNames}
             state={state.ws}
             connected={state.vm?.status === 'connected'}
             vmMode={vmMode}
@@ -1089,7 +1142,9 @@ function HttpRequests({
     () => [...state.history.items].sort((a, b) => b.startedAt - a.startedAt),
     [state.history.items],
   );
-  const historyRules = state.scenes?.scenes.flatMap((scene) => scene.httpRules) ?? state.rules;
+  const historyRules = state.scenePage
+    ? Object.entries(state.ruleNames ?? {}).map(([id, info]) => ({ id, name: info.name }))
+    : (state.scenes?.scenes.flatMap((scene) => scene.httpRules) ?? state.rules);
   function update(p: Partial<HistoryQuery>) {
     setQuery((q) => ({ ...q, ...p }));
     setOffset(0);
@@ -1438,17 +1493,19 @@ function RequestDetails({
               <dd>{selected.duration} ms</dd>
               <dt>请求规则</dt>
               <dd>
-                {(state.scenes?.scenes.flatMap((scene) => scene.httpRules) ?? state.rules).find(
-                  (r) => r.id === selected.requestRuleId,
-                )?.name ??
+                {state.ruleNames?.[selected.requestRuleId ?? '']?.name ??
+                  (state.scenes?.scenes.flatMap((scene) => scene.httpRules) ?? state.rules).find(
+                    (r) => r.id === selected.requestRuleId,
+                  )?.name ??
                   selected.requestRuleId ??
                   '未命中'}
               </dd>
               <dt>响应规则</dt>
               <dd>
-                {(state.scenes?.scenes.flatMap((scene) => scene.httpRules) ?? state.rules).find(
-                  (r) => r.id === selected.responseRuleId,
-                )?.name ??
+                {state.ruleNames?.[selected.responseRuleId ?? '']?.name ??
+                  (state.scenes?.scenes.flatMap((scene) => scene.httpRules) ?? state.rules).find(
+                    (r) => r.id === selected.responseRuleId,
+                  )?.name ??
                   selected.responseRuleId ??
                   '未命中'}
               </dd>
@@ -1554,15 +1611,27 @@ function Scenes({
     }
     previousSelectedId.current = state.selectedSceneId;
   }, [state.selectedSceneId]);
-  const selected = scenes.find((scene) => scene.id === openId);
-  const active = scenes.find((scene) => scene.id === state.scenes?.activeSceneId);
+  const selected = state.scenePage
+    ? state.sceneDetail && state.sceneDetail.id === openId
+      ? detailScene(state.sceneDetail!, state.loadedSceneAction)
+      : undefined
+    : scenes.find((scene) => scene.id === openId);
+  const active =
+    scenes.find((scene) => scene.id === state.scenes?.activeSceneId) ?? state.scenePage?.activeScene;
   const [name, setName] = useState('');
+  const [search, setSearch] = useState(state.scenePage?.search ?? '');
+  useEffect(() => {
+    if (!state.scenePage || search === state.scenePage.search) return;
+    const timer = window.setTimeout(() => queryScenes(send, { search, offset: 0 }), 200);
+    return () => window.clearTimeout(timer);
+  }, [search]);
   useLayoutEffect(() => setName(selected?.name ?? ''), [selected?.id, selected?.name]);
   const choose = (id: string) => {
     setEdit(undefined);
     clearWsDraft();
     setOpenId(id);
-    send('scenes.select', { id });
+    if (state.scenePage) selectScene(send, id);
+    else send('scenes.select', { id });
   };
   const environmentBusy = state.busy || !!state.sceneActions?.locked || !!state.tests?.locked;
   const runtime = state.sceneRuntime;
@@ -1572,7 +1641,7 @@ function Scenes({
     <div className="scenes-page">
       <div className="page-title compact">
         <h2>
-          Mock 场景 <span className="count">{scenes.length}</span>
+          Mock 场景 <span className="count">{state.scenePage?.total ?? scenes.length}</span>
         </h2>
         <div className="toolbar-actions">
           <Button
@@ -1641,10 +1710,50 @@ function Scenes({
           label="场景列表"
           title={
             <>
-              场景列表 <span className="count">{scenes.length}</span>
+              场景列表 <span className="count">{state.scenePage?.total ?? scenes.length}</span>
             </>
           }
         >
+          {state.scenePage && (
+            <div className="scene-pagination">
+              <input
+                aria-label="搜索场景"
+                placeholder="搜索场景、规则或操作"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <button
+                disabled={state.scenePage.offset === 0 || search !== state.scenePage.search}
+                onClick={() =>
+                  queryScenes(send, {
+                    search: state.scenePage!.search,
+                    offset: Math.max(0, state.scenePage!.offset - state.scenePage!.limit),
+                  })
+                }
+              >
+                上一页
+              </button>
+              <button
+                disabled={
+                  state.scenePage.offset + state.scenePage.limit >= state.scenePage.total ||
+                  search !== state.scenePage.search
+                }
+                onClick={() =>
+                  queryScenes(send, {
+                    search: state.scenePage!.search,
+                    offset: state.scenePage!.offset + state.scenePage!.limit,
+                  })
+                }
+              >
+                下一页
+              </button>
+            </div>
+          )}
+          {state.scenePage?.error && <p role="alert">{state.scenePage.error}</p>}
+          {state.scenePage?.warning && <p role="alert">{state.scenePage.warning}</p>}
+          {state.sceneRuntime?.stale && (
+            <p role="alert">当前配置已过期，保留最后有效快照：{state.sceneRuntime.stale}</p>
+          )}
           {scenes.map((scene) => (
             <div className={`scene-row ${selected?.id === scene.id ? 'selected' : ''}`} key={scene.id}>
               <button
@@ -1654,7 +1763,10 @@ function Scenes({
                 aria-label={`启用场景 ${scene.name}`}
                 aria-checked={active?.id === scene.id}
                 title={active?.id === scene.id ? '停用此场景' : '激活此场景'}
-                disabled={environmentBusy}
+                disabled={
+                  environmentBusy ||
+                  state.scenePage?.scenes.find((s) => s.id === scene.id)?.health === 'error'
+                }
                 onClick={() =>
                   active?.id === scene.id
                     ? send('scenes.deactivate')
@@ -1676,8 +1788,19 @@ function Scenes({
                 <strong title={scene.name}>{scene.name}</strong>
                 {active?.id === scene.id && <span className="tag scene-active">已激活</span>}
                 <span className="scene-counts">
-                  HTTP {scene.httpRules.length} / WS {scene.wsRules.length}
-                  {!!scene.actions?.length && ` / 操作 ${scene.actions.length}`}
+                  HTTP{' '}
+                  {state.scenePage?.scenes.find((s) => s.id === scene.id)?.httpRuleCount ??
+                    scene.httpRules.length}{' '}
+                  / WS{' '}
+                  {state.scenePage?.scenes.find((s) => s.id === scene.id)?.wsRuleCount ??
+                    scene.wsRules.length}
+                  {!!(
+                    state.scenePage?.scenes.find((s) => s.id === scene.id)?.actionCount ??
+                    scene.actions?.length
+                  ) &&
+                    ` / 操作 ${state.scenePage?.scenes.find((s) => s.id === scene.id)?.actionCount ?? scene.actions?.length}`}
+                  {state.scenePage?.scenes.find((s) => s.id === scene.id)?.health === 'error' &&
+                    ' · 配置错误'}
                 </span>
                 <span aria-hidden="true">›</span>
               </button>
@@ -1702,6 +1825,7 @@ function Scenes({
                 aria-label="关闭场景详情"
                 title="关闭详情，返回列表"
                 onClick={() => {
+                  closeScene();
                   setOpenId(undefined);
                   setEdit(undefined);
                   clearWsDraft();
@@ -1720,7 +1844,13 @@ function Scenes({
               />
               <Button
                 disabled={environmentBusy || !name.trim()}
-                onClick={() => send('scenes.rename', { id: selected.id, name: name.trim() })}
+                onClick={() =>
+                  send('scenes.rename', {
+                    id: selected.id,
+                    name: name.trim(),
+                    expectedHash: state.sceneDetail?.hash,
+                  })
+                }
               >
                 保存名称
               </Button>
@@ -1740,14 +1870,21 @@ function Scenes({
               <Button
                 danger
                 disabled={environmentBusy}
-                onClick={() => send('scenes.delete', { id: selected.id })}
+                onClick={() =>
+                  send('scenes.delete', { id: selected.id, expectedHash: state.sceneDetail?.hash })
+                }
               >
                 删除场景
               </Button>
             </div>
-            <SceneActionsPanel key={selected.id} scene={selected} state={state} send={send} />
+            {state.sceneDetail?.errors.map((error) => (
+              <p role="alert" key={error}>
+                {error}
+              </p>
+            ))}
+            <SceneActionsPanel key={`actions:${selected.id}`} scene={selected} state={state} send={send} />
             <Rules
-              key={selected.id}
+              key={`rules:${selected.id}`}
               scene={selected}
               state={{ ...state, busy: environmentBusy, rules: selected.httpRules }}
               edit={edit}
@@ -1756,6 +1893,7 @@ function Scenes({
             <WebSocketPanel
               key={`${selected.id}:${wsDraft?.id ?? ''}`}
               rulesOnly
+              resourceMode={!!state.scenePage}
               scenes={scenes}
               sceneId={selected.id}
               initialDraft={wsDraft}
@@ -1780,7 +1918,17 @@ function Scenes({
               vmMode={state.mode !== 'proxy'}
               busy={environmentBusy}
               send={(action, payload) =>
-                send(action, { ...((payload as object) ?? {}), sceneId: selected.id })
+                send(action, {
+                  ...((payload as object) ?? {}),
+                  sceneId: selected.id,
+                  ...(state.sceneDetail && action !== 'ws.rules.save' && (payload as { id?: string })?.id
+                    ? {
+                        expectedHash: state.sceneDetail.ws.find(
+                          (r) => r.id === (payload as { id: string }).id,
+                        )?.hash,
+                      }
+                    : {}),
+                })
               }
             />
           </CollapsibleSection>
@@ -1803,7 +1951,18 @@ function Rules({
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState(true);
   const send = (action: string, payload = {}) =>
-    vscode?.postMessage({ action, payload: { ...payload, sceneId: scene?.id } });
+    vscode?.postMessage({
+      action,
+      payload: {
+        ...payload,
+        sceneId: scene?.id,
+        ...(state.sceneDetail && 'id' in payload
+          ? {
+              expectedHash: state.sceneDetail.http.find((r) => r.id === (payload as { id: string }).id)?.hash,
+            }
+          : {}),
+      },
+    });
   return (
     <>
       <CollapsibleSection
@@ -1917,7 +2076,15 @@ function Rules({
                       ↑
                     </Button>
                     <Button onClick={() => send('rules.move', { id: r.id, direction: 'down' })}>↓</Button>
-                    <Button onClick={() => setEdit(JSON.parse(JSON.stringify(r)))}>编辑</Button>
+                    <Button
+                      onClick={() =>
+                        state.scenePage && scene
+                          ? requestResource(send, scene.id, 'http', r.id)
+                          : setEdit(JSON.parse(JSON.stringify(r)))
+                      }
+                    >
+                      编辑
+                    </Button>
                     <Button onClick={() => send('rules.duplicate', { id: r.id })}>复制</Button>
                     <Button danger onClick={() => send('rules.delete', { id: r.id })}>
                       删除
@@ -1977,8 +2144,10 @@ function RuleEditor({
   busy: boolean;
 }) {
   const [draft, setDraft] = useState<Rule>(rule);
+  const [expectedHash] = useState(() => resourceHash(sceneId, 'http', rule.id));
   const [targetSceneId, setTargetSceneId] = useState(sceneId);
-  const existingRule = scenes.some((scene) => scene.httpRules.some((item) => item.id === rule.id));
+  const existingRule =
+    !!expectedHash || scenes.some((scene) => scene.httpRules.some((item) => item.id === rule.id));
   const [kind, setKind] = useState(kindOf(rule));
   const [advanced, setAdvanced] = useState(false);
   const [raw, setRaw] = useState(JSON.stringify(rule, null, 2));
@@ -1992,6 +2161,12 @@ function RuleEditor({
   const [pendingSave, setPendingSave] = useState<Rule>();
   useEffect(() => {
     const listener = (event: MessageEvent) => {
+      if (
+        event.data?.type === 'scene.saved' &&
+        event.data.id === rule.id &&
+        event.data.sceneId === targetSceneId
+      )
+        onClose();
       const scene = event.data?.state?.scenes?.scenes.find((item: Scene) => item.id === targetSceneId);
       if (
         pendingSave &&
@@ -2377,7 +2552,12 @@ function RuleEditor({
               try {
                 const r = validateRuleDocument({ version: 1, rules: [assembled()] }).rules[0];
                 setPendingSave(r);
-                send('rules.save', { rule: r, sceneId, targetSceneId });
+                send('rules.save', {
+                  rule: r,
+                  sceneId,
+                  targetSceneId,
+                  ...(expectedHash ? { expectedHash } : {}),
+                });
               } catch (e) {
                 setError((e as Error).message);
               }

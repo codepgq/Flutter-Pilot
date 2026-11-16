@@ -16,10 +16,10 @@ import { readFile, mkdir, writeFile, rename, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { EngineManager } from './engine';
 import { RuntimeManager } from './runtime';
-import { SceneStore, cloneScenes } from './scenes';
+import { SceneStore } from './scenes';
+import type { SceneDocument } from './scene-model';
+import { migrateScenes } from './scene-migration';
 import { SceneController } from './scene-controller';
-import { validateSceneDocument } from './scene-model';
-import { sceneWorkbenchSnapshot } from './scene-view';
 import { isFlutterWorkspace } from './discovery';
 import { VmSession } from './vm/session';
 import { VmUiController } from './vm/ui';
@@ -154,6 +154,39 @@ export async function activate(context: vscode.ExtensionContext) {
       ),
     );
   command('flutterPilot.open', open);
+  command('flutterPilot.migrateScenes', async () => {
+    if (!vscode.workspace.isTrusted) throw new Error('请先信任当前工作区');
+    const folders = vscode.workspace.workspaceFolders?.filter((f) => f.uri.scheme === 'file') ?? [];
+    const folder =
+      folders.length === 1
+        ? folders[0]
+        : (
+            await vscode.window.showQuickPick(
+              folders.map((folder) => ({ label: folder.name, folder })),
+              { title: '选择待迁移的工作区' },
+            )
+          )?.folder;
+    if (!folder) return;
+    const directory = join(folder.uri.fsPath, '.flutter-pilot');
+    const report = await migrateScenes(directory, false);
+    const choice = await vscode.window.showQuickPick(
+      [
+        { label: '仅预检', apply: false },
+        { label: '正式转换', apply: true },
+      ],
+      {
+        title: `预检通过：${report.sceneCount} 个 Scene、${report.actionCount} 个操作、${report.bodyBytes} 字节正文`,
+      },
+    );
+    if (!choice) return;
+    const result = choice.apply ? await migrateScenes(directory, true) : report;
+    output.appendLine(JSON.stringify(result, null, 2));
+    await vscode.window.showInformationMessage(
+      choice.apply
+        ? 'Scene v2 转换完成；旧文件已保留，请重新打开工作台并手动选择激活场景。'
+        : 'Scene v2 预检通过，详情已写入 Flutter Pilot 输出。',
+    );
+  });
   command('flutterPilot.screenshot', async () => {
     const session = await open();
     await session?.screenshot();
@@ -301,6 +334,11 @@ class Workbench {
   private readonly runtime: RuntimeManager;
   private readonly store: SceneStore;
   private readonly scenes: SceneController;
+  private sceneQuery: { offset?: number; limit?: number; search?: string } = {};
+  private sceneQueryRequestId = 0;
+  private sceneRequestId = 0;
+  private sentScenePage?: string;
+  private sentSceneDetail?: string;
   private sceneTimer?: ReturnType<typeof setTimeout>;
   private vmEpoch = 0;
   private panel?: vscode.WebviewPanel;
@@ -351,7 +389,7 @@ class Workbench {
   ) {
     this.projectSettings = { ...project.config.settings };
     this.configuredPort = project.config.connection.configuredPort;
-    this.store = new SceneStore(project.rulesDirectory);
+    this.store = new SceneStore(project.rulesDirectory, storage);
     this.vm = new VmSession(
       this.storage,
       {
@@ -389,9 +427,30 @@ class Workbench {
       },
     );
     this.workflows = new WorkflowController(
-      { read: async () => structuredClone(this.scenes.document) },
       {
-        mockSceneId: () => this.scenes.document.activeSceneId,
+        read: async (sceneId, actionId) =>
+          this.store.prepareSnapshot(sceneId && actionId ? [{ sceneId, actionId }] : []),
+        list: async (sceneId) => {
+          const detail = this.store.getScene(sceneId);
+          return {
+            ok: true,
+            sceneId,
+            sceneName: detail.name,
+            id: sceneId,
+            name: detail.name,
+            file: detail.file,
+            directory: detail.directory,
+            targets: detail.targets,
+            actions: detail.actions,
+            health: detail.health,
+            errors: detail.errors,
+            mockSceneId: this.scenes.activeSceneId,
+            ...this.workflows.snapshot,
+          };
+        },
+      },
+      {
+        mockSceneId: () => this.scenes.activeSceneId,
         acquire: async (owner) => {
           if (
             this.workflowLaunch &&
@@ -529,8 +588,16 @@ class Workbench {
         if (this.workflowOwner === owner) this.workflowOwner = undefined;
       },
       changed: () => this.push(),
-      loadScenes: async () => structuredClone(this.scenes.document),
-      prepare: (runId, sceneId, mock, requirements) => this.prepareTest(runId, sceneId, mock, requirements),
+      loadScenes: async (test, resolveMock) => {
+        if (!test) throw new Error('测试快照需要明确操作引用');
+        return this.store.prepareSnapshot(
+          [test.action, ...(test.setup ?? []).map((s) => s.action)],
+          null,
+          (actions) => resolveMock?.(actions) ?? this.scenes.activeSceneId,
+        );
+      },
+      prepare: (runId, sceneId, mock, requirements, snapshot) =>
+        this.prepareTest(runId, sceneId, mock, requirements, snapshot),
       ready: (runId, signal) => this.prepareTestReady(runId, signal),
       cleanup: (runId) => this.cleanupTest(runId),
       baseline: () => this.testObserver.baseline(),
@@ -545,12 +612,12 @@ class Workbench {
     this.mcpNetwork = new McpNetworkController({
       scenesPath: this.store.file,
       testsPath: this.testStore.file,
-      listScenes: () => this.scenes.summary(),
+      listScenes: (query) => this.scenes.summary(query),
       activateScene: (id) => this.scenes.activate(id),
       reloadScenes: () => this.scenes.reload(),
       status: () => ({
         vmConnected: this.vm.state.status === 'connected',
-        scene: { activeSceneId: this.scenes.document.activeSceneId, runtime: this.scenes.runtime },
+        scene: { activeSceneId: this.scenes.activeSceneId, runtime: this.scenes.runtime },
         http: {
           captureEnabled: this.mode === 'proxy' ? this.proxyActive : !!this.vm.state.captureEnabled,
           mockEnabled:
@@ -871,7 +938,10 @@ class Workbench {
       mode: this.mode,
       vm: { ...this.vm.state },
       vmDiscovery: this.vmAuto.snapshot,
-      ws: { ...this.vm.websocket.state },
+      ws: {
+        ...this.vm.websocket.state,
+        rules: this.vm.websocket.state.rules.filter((r) => !!r.match.connectionId),
+      },
       mcp: this.mcpState,
       automation: this.automation.snapshot,
       sceneActions: {
@@ -889,8 +959,13 @@ class Workbench {
         error: this.testError,
         cleanupPending: [...this.testEnvironments.keys()].filter((id) => id !== activeTest),
       },
-      rules: this.rules,
-      scenes: sceneWorkbenchSnapshot(this.scenes.document),
+      rules: [],
+      ruleNames: this.store.ruleNames(
+        [...this.history.items, ...(this.selected ? [this.selected] : [])]
+          .flatMap((r) => [r.requestRuleId, r.responseRuleId].filter((id): id is string => !!id))
+          .concat(this.vm.websocket.state.messages.items.flatMap((r) => (r.ruleId ? [r.ruleId] : [])))
+          .concat(this.query.ruleId ? [this.query.ruleId] : []),
+      ),
       selectedSceneId: this.scenes.selected?.id,
       sceneRuntime: this.scenes.runtime,
       history: this.history,
@@ -934,6 +1009,30 @@ class Workbench {
       this.sentPreview = this.preview;
     }
     void this.panel.webview.postMessage(message);
+    const pageKey = JSON.stringify([
+      this.store.revision,
+      this.scenes.activeSceneId,
+      this.sceneQuery,
+      this.sceneQueryRequestId,
+    ]);
+    if (pageKey !== this.sentScenePage) {
+      this.sentScenePage = pageKey;
+      void this.panel.webview.postMessage({
+        type: 'scene.page',
+        page: this.scenes.summary(this.sceneQuery),
+        requestId: this.sceneQueryRequestId,
+      });
+    }
+    const detailKey = JSON.stringify([this.store.revision, this.scenes.selectedSceneId, this.sceneRequestId]);
+    if (detailKey !== this.sentSceneDetail) {
+      this.sentSceneDetail = detailKey;
+      void this.panel.webview.postMessage({
+        type: 'scene.detail',
+        detail: this.scenes.detail ?? null,
+        requestId: this.sceneRequestId,
+        version: this.store.revision,
+      });
+    }
   }
   initialize(): Promise<void> {
     if (!this.initialization)
@@ -1212,6 +1311,7 @@ class Workbench {
     sceneId: string | undefined,
     mock: TestMock | undefined,
     requirements: { http: boolean; ws: boolean } = { http: true, ws: false },
+    snapshot?: SceneDocument,
   ) {
     if (this.mode !== 'vm' || this.vm.state.status !== 'connected')
       throw new McpToolError(
@@ -1223,9 +1323,7 @@ class Workbench {
       ws: this.vm.websocket.state.captureEnabled,
       needsWs: requirements.ws,
     });
-    const source = sceneId
-      ? this.scenes.document.scenes.find((scene) => scene.id === sceneId)
-      : this.scenes.active;
+    const source = snapshot?.scenes.find((scene) => scene.id === (sceneId ?? snapshot.activeSceneId));
     const wsRules = (source?.wsRules ?? []).filter((rule) => rule.enabled);
     const sockets = this.vm.websocket.state.connections.filter(
       (connection) => connection.status === 'open' && connection.capture === 'attached',
@@ -1239,7 +1337,10 @@ class Workbench {
         ),
     );
     this.testEnvironments.get(runId)!.needsWs ||= wsRules.length > 0;
-    await this.scenes.beginRun(runId, sceneId, mock ? compileTestMock(mock, runId) : [], { deferWs });
+    await this.scenes.beginRun(runId, sceneId, mock ? compileTestMock(mock, runId) : [], {
+      deferWs,
+      snapshot,
+    });
     if (requirements.http) await this.vm.setCaptureEnabled(true);
     if (this.testEnvironments.get(runId)!.needsWs) {
       await this.vm.websocket.setCaptureEnabled(true);
@@ -1613,16 +1714,94 @@ class Workbench {
     }, 500);
     this.sceneTimer.unref?.();
   }
-  private async saveRules(rules: unknown, sceneId = this.scenes.selected?.id) {
-    const document = validateRuleDocument({ version: 1, rules });
-    await this.project.reload();
-    await this.scenes.saveHttp(document.rules, sceneId);
+  private async editRule(kind: 'http' | 'ws', action: string, payload: Record<string, any>) {
+    const sceneId = String(payload.targetSceneId ?? payload.sceneId ?? this.scenes.selectedSceneId ?? '');
+    const id = String(payload.id ?? payload.rule?.id ?? '');
+    const address = { sceneId, kind, id };
+    if (action === 'save') {
+      await this.scenes.saveResource(
+        address,
+        payload.rule,
+        typeof payload.expectedHash === 'string' ? payload.expectedHash : null,
+      );
+      void this.panel?.webview.postMessage({ type: 'scene.saved', sceneId, id });
+      return;
+    }
+    const resource = await this.store.getRule(sceneId, kind, id);
+    if (
+      payload.expectedHash &&
+      payload.expectedHash !== resource.files[resource.file.slice(this.store.directory.length + 1)]
+    )
+      throw new Error('规则已被修改，请重新读取');
+    if (action === 'delete') return this.scenes.deleteResource(address, resource.hash);
+    if (action === 'toggle')
+      return this.scenes.saveResource(
+        address,
+        { ...resource.value, enabled: !resource.value.enabled },
+        resource.hash,
+      );
+    if (action === 'duplicate') {
+      const newId = randomUUID();
+      return this.scenes.saveResource(
+        { ...address, id: newId },
+        { ...resource.value, id: newId, name: `${resource.value.name}（副本）`, enabled: false },
+        null,
+      );
+    }
+    if (action === 'move') {
+      const detail = this.store.getScene(sceneId),
+        rules = [...detail[kind]].sort((a, b) => b.priority - a.priority);
+      const index = rules.findIndex((r) => r.id === id),
+        next = index + (payload.direction === 'up' || payload.delta === -1 ? -1 : 1);
+      if (next < 0 || next >= rules.length) return;
+      const other = await this.store.getRule(sceneId, kind, rules[next].id);
+      await this.store.reorderRules(sceneId, kind, id, rules[next].id, resource, other);
+      await this.scenes.reload();
+    }
   }
-  private async saveWsRules(rules: unknown, sceneId = this.scenes.selected?.id) {
-    const document = validateWsRuleDocument({ version: 1, rules });
-    for (const rule of document.rules) {
+  private async editTemporaryWs(action: string, payload: Record<string, any>): Promise<boolean> {
+    const temporary = this.scenes.wsRules().filter((rule) => !!rule.match.connectionId);
+    const id = String(payload.id ?? payload.rule?.id ?? '');
+    const existing = temporary.find((rule) => rule.id === id);
+    if (!existing && !(action === 'save' && payload.rule?.match?.connectionId)) return false;
+    const sceneId = String(
+      payload.targetSceneId ??
+        payload.sceneId ??
+        (action === 'save' ? this.scenes.selectedSceneId : this.scenes.activeSceneId) ??
+        '',
+    );
+    if (!this.scenes.active || sceneId !== this.scenes.activeSceneId)
+      throw new Error('临时 WS 规则只能保存到当前激活场景');
+    let rules = structuredClone(temporary);
+    if (action === 'save') {
+      const rule = validateWsRuleDocument({ version: 1, rules: [payload.rule] }).rules[0];
+      if (!rule.match.connectionId) throw new Error('请新建 URL 规则，不能直接改变临时规则的归属');
+      if (!existing && this.scenes.active.wsRules.some((item) => item.id === id))
+        throw new Error('临时 WS 规则 ID 与持久规则重复');
+      rules = [...rules.filter((item) => item.id !== id), rule];
+    } else {
+      if (!existing) throw new Error('临时 WS 规则不存在');
+      if (action === 'delete') rules = rules.filter((rule) => rule.id !== id);
+      if (action === 'toggle')
+        rules = rules.map((rule) => (rule.id === id ? { ...rule, enabled: !rule.enabled } : rule));
+      if (action === 'duplicate')
+        rules.push({
+          ...structuredClone(existing),
+          id: randomUUID(),
+          name: `${existing.name}（副本）`,
+          enabled: false,
+        });
+      if (action === 'move') {
+        rules.sort((a, b) => b.priority - a.priority);
+        const index = rules.findIndex((rule) => rule.id === id);
+        const next = index + (payload.delta === -1 ? -1 : 1);
+        if (next < 0 || next >= rules.length) return true;
+        [rules[index], rules[next]] = [rules[next], rules[index]];
+        rules = rules.map((rule, position) => ({ ...rule, priority: rules.length - position }));
+      }
+    }
+    for (const rule of rules)
       if (
-        rule.match.connectionId &&
         !this.vm.websocket.state.connections.some(
           (connection) =>
             connection.id === rule.match.connectionId &&
@@ -1631,8 +1810,9 @@ class Workbench {
         )
       )
         throw new Error('临时 WS 规则只能绑定当前已接入的在线连接');
-    }
-    await this.scenes.saveWs(document.rules, sceneId);
+    await this.scenes.saveTemporary(rules, sceneId);
+    if (action === 'save') void this.panel?.webview.postMessage({ type: 'scene.saved', sceneId, id });
+    return true;
   }
   private adapters() {
     return new AgentAdapterManager({
@@ -1905,6 +2085,8 @@ class Workbench {
     const action = String(message.action ?? '');
     const payload = (message.payload ?? {}) as Record<string, unknown>;
     if (action === 'ready') {
+      this.sentScenePage = undefined;
+      this.sentSceneDetail = undefined;
       this.sentSelected = undefined;
       this.sentPreview = undefined;
       this.push();
@@ -1922,8 +2104,64 @@ class Workbench {
       this.workflows.cancel(String(payload.runId));
       return;
     }
+    if (action === 'scenes.query') {
+      this.sceneQueryRequestId = Number(payload.requestId ?? 0);
+      this.sceneQuery = {
+        offset: Number(payload.offset ?? 0),
+        limit: Number(payload.limit ?? 50),
+        search: String(payload.search ?? ''),
+      };
+      this.push();
+      return;
+    }
+    if (action === 'scenes.resource') {
+      const sceneId = String(payload.sceneId),
+        id = String(payload.id);
+      const resource =
+        payload.kind === 'actions'
+          ? await this.store.getAction(sceneId, id)
+          : await this.store.getRule(sceneId, payload.kind === 'ws' ? 'ws' : 'http', id);
+      const value = structuredClone(resource.value);
+      if (payload.kind === 'actions')
+        for (const spec of Object.values((value as import('./workflows/model').SceneAction).inputs ?? {}))
+          if (spec.secret && spec.default !== undefined) spec.default = '[REDACTED]';
+      void this.panel?.webview.postMessage({
+        type: 'scene.resource',
+        resource: { ...resource, value },
+        requestId: payload.requestId,
+      });
+      return;
+    }
+    if (action === 'scenes.migrate') {
+      const report = await migrateScenes(this.project.rulesDirectory, payload.apply === true);
+      if (payload.apply) await this.scenes.initialize();
+      void this.panel?.webview.postMessage({ type: 'scene.migration', report });
+      this.push();
+      return;
+    }
     if (action === 'scenes.open') {
-      await vscode.window.showTextDocument(vscode.Uri.file(this.store.file), { preview: false });
+      await vscode.window.showTextDocument(vscode.Uri.file(this.scenes.detail?.file ?? this.store.file), {
+        preview: false,
+      });
+      return;
+    }
+    if (action === 'tests.action') {
+      const sceneId = String(payload.sceneId),
+        actionId = String(payload.actionId);
+      let detail;
+      try {
+        detail = this.store.getScene(sceneId);
+      } catch {
+        /* Return a missing reference. */
+      }
+      void this.panel?.webview.postMessage({
+        type: 'test.action',
+        requestId: payload.requestId,
+        sceneId,
+        actionId,
+        sceneName: detail?.name,
+        action: detail?.actions.find((item) => item.id === actionId) ?? null,
+      });
       return;
     }
     if (action === 'tests.refresh') {
@@ -2006,6 +2244,7 @@ class Workbench {
         throw new Error('目标场景已切换，请重新打开规则编辑器');
       switch (action) {
         case 'scenes.select':
+          this.sceneRequestId = Number(payload.requestId ?? 0);
           this.scenes.select(String(payload.id));
           break;
         case 'scenes.activate':
@@ -2018,29 +2257,26 @@ class Workbench {
           await this.scenes.create(String(payload.name ?? '新场景'));
           break;
         case 'scenes.duplicate': {
-          const scene = this.scenes.document.scenes.find((item) => item.id === payload.id);
-          if (!scene) throw new Error('场景不存在');
-          await this.scenes.create(`${scene.name}（副本）`, scene);
+          const pkg = await this.store.exportPackage([String(payload.id)]);
+          const ids = await this.store.importPackage(pkg);
+          this.scenes.select(ids[0]);
           break;
         }
         case 'scenes.rename':
-          await this.scenes.change((doc) => {
-            const scene = doc.scenes.find((item) => item.id === payload.id);
-            if (!scene) throw new Error('场景不存在');
-            scene.name = String(payload.name ?? '');
-          });
+          await this.scenes.rename(
+            String(payload.id),
+            String(payload.name ?? ''),
+            String(payload.expectedHash),
+          );
           break;
         case 'scenes.delete': {
           const answer = await vscode.window.showWarningMessage(
-            '删除场景及其全部规则？激活场景将同时停用。',
+            '删除场景？激活场景将同时停用，原资源目录保留供恢复。',
             { modal: true },
             '删除场景',
           );
           if (answer === '删除场景')
-            await this.scenes.change((doc) => {
-              doc.scenes = doc.scenes.filter((item) => item.id !== payload.id);
-              if (doc.activeSceneId === payload.id) doc.activeSceneId = null;
-            });
+            await this.scenes.remove(String(payload.id), String(payload.expectedHash));
           break;
         }
         case 'automation.inspect':
@@ -2148,48 +2384,14 @@ class Workbench {
         case 'ws.rules.open':
           await vscode.window.showTextDocument(vscode.Uri.file(this.store.file), { preview: false });
           break;
-        case 'ws.rules.save': {
-          const rule = payload.rule as WsRule;
-          const targetId =
-            typeof payload.targetSceneId === 'string' ? payload.targetSceneId : this.scenes.selected?.id;
-          const target = this.scenes.document.scenes.find((scene) => scene.id === targetId);
-          if (!target) throw new Error('请选择目标场景');
-          const current = this.scenes.wsRules(target);
-          await this.saveWsRules(
-            current.some((item) => item.id === rule?.id)
-              ? current.map((item) => (item.id === rule.id ? rule : item))
-              : [...current, rule],
-            target.id,
-          );
-          break;
-        }
+        case 'ws.rules.save':
         case 'ws.rules.toggle':
-          await this.saveWsRules(
-            this.scenes.wsRules().map((r) => (r.id === payload.id ? { ...r, enabled: !r.enabled } : r)),
-          );
-          break;
         case 'ws.rules.delete':
-          await this.saveWsRules(this.scenes.wsRules().filter((r) => r.id !== payload.id));
+        case 'ws.rules.duplicate':
+        case 'ws.rules.move':
+          if (!(await this.editTemporaryWs(action.slice('ws.rules.'.length), payload)))
+            await this.editRule('ws', action.slice('ws.rules.'.length), payload);
           break;
-        case 'ws.rules.duplicate': {
-          const rule = this.scenes.wsRules().find((r) => r.id === payload.id);
-          if (!rule) throw new Error('WS 规则不存在');
-          await this.saveWsRules([
-            ...this.scenes.wsRules(),
-            { ...structuredClone(rule), id: randomUUID(), name: `${rule.name}（副本）`, enabled: false },
-          ]);
-          break;
-        }
-        case 'ws.rules.move': {
-          const rules = [...this.scenes.wsRules()].sort((a, b) => b.priority - a.priority);
-          const i = rules.findIndex((r) => r.id === payload.id);
-          const target = i + (payload.delta === -1 ? -1 : 1);
-          if (i >= 0 && target >= 0 && target < rules.length) {
-            [rules[i], rules[target]] = [rules[target], rules[i]];
-            await this.saveWsRules(rules.map((r, index) => ({ ...r, priority: rules.length - index })));
-          }
-          break;
-        }
         case 'project.open': {
           await this.project.reload();
           const file = payload.kind === 'rules' ? this.store.file : this.project.file;
@@ -2313,50 +2515,13 @@ class Workbench {
           );
           break;
         }
-        case 'rules.save': {
-          const rule = payload.rule as Rule;
-          const targetId =
-            typeof payload.targetSceneId === 'string' ? payload.targetSceneId : this.scenes.selected?.id;
-          const target = this.scenes.document.scenes.find((scene) => scene.id === targetId);
-          if (!target) throw new Error('请选择目标场景');
-          const index = target.httpRules.findIndex((item) => item.id === rule?.id);
-          await this.saveRules(
-            index < 0
-              ? [...target.httpRules, rule]
-              : target.httpRules.map((item, i) => (i === index ? rule : item)),
-            target.id,
-          );
-          break;
-        }
+        case 'rules.save':
         case 'rules.toggle':
-          await this.saveRules(
-            (this.scenes.selected?.httpRules ?? []).map((r) =>
-              r.id === payload.id ? { ...r, enabled: !r.enabled } : r,
-            ),
-          );
-          break;
         case 'rules.delete':
-          await this.saveRules((this.scenes.selected?.httpRules ?? []).filter((r) => r.id !== payload.id));
+        case 'rules.duplicate':
+        case 'rules.move':
+          await this.editRule('http', action.slice('rules.'.length), payload);
           break;
-        case 'rules.duplicate': {
-          const r = (this.scenes.selected?.httpRules ?? []).find((r) => r.id === payload.id);
-          if (r)
-            await this.saveRules([
-              ...(this.scenes.selected?.httpRules ?? []),
-              { ...r, id: randomUUID(), name: `${r.name} 副本`, enabled: false },
-            ]);
-          break;
-        }
-        case 'rules.move': {
-          const list = [...(this.scenes.selected?.httpRules ?? [])];
-          const i = list.findIndex((r) => r.id === payload.id);
-          const next = i + (payload.direction === 'up' ? -1 : 1);
-          if (i >= 0 && next >= 0 && next < list.length) {
-            [list[i], list[next]] = [list[next], list[i]];
-            await this.saveRules(list);
-          }
-          break;
-        }
         case 'rules.import': {
           const uris = await vscode.window.showOpenDialog({
             canSelectMany: false,
@@ -2364,10 +2529,8 @@ class Workbench {
             title: '导入场景（追加，不改变激活场景）',
           });
           if (!uris?.[0]) break;
-          const document = validateSceneDocument(JSON.parse(await readFile(uris[0].fsPath, 'utf8')));
-          await this.scenes.change((doc) => {
-            doc.scenes.push(...cloneScenes(document.scenes));
-          });
+          await this.store.importPackage(JSON.parse(await readFile(uris[0].fsPath, 'utf8')));
+          await this.scenes.reload();
           break;
         }
         case 'rules.export': {
@@ -2375,7 +2538,8 @@ class Workbench {
             defaultUri: vscode.Uri.file(join(this.folder.uri.fsPath, 'flutter-pilot.scenes.json')),
             filters: { 'Mock 场景': ['json'] },
           });
-          if (uri) await writeFile(uri.fsPath, JSON.stringify(this.scenes.document, null, 2), 'utf8');
+          if (uri)
+            await writeFile(uri.fsPath, JSON.stringify(await this.store.exportPackage(), null, 2), 'utf8');
           break;
         }
         case 'history.query': {

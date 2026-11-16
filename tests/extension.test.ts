@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { SceneStore } from '../src/scenes';
 import type { Scene, SceneDocument } from '../src/scene-model';
 import { discoverSessions, requestSession } from '../src/mcp/server';
 import { AgentAdapterManager } from '../src/mcp/adapters';
@@ -234,10 +235,40 @@ async function message(action: string, payload: unknown = {}) {
   await new Promise((r) => setTimeout(r, 5));
 }
 function latest() {
-  return fake.panels
-    .at(-1)
-    .webview.messages.filter((m: any) => m.type === 'state')
-    .at(-1);
+  const messages = fake.panels.at(-1).webview.messages;
+  const result = messages.filter((m: any) => m.type === 'state').at(-1);
+  const page = messages.filter((m: any) => m.type === 'scene.page').at(-1)?.page;
+  const detail = messages.filter((m: any) => m.type === 'scene.detail').at(-1)?.detail;
+  return {
+    ...result,
+    state: {
+      ...result.state,
+      scenes: page
+        ? {
+            version: 2,
+            activeSceneId: page.activeSceneId,
+            scenes: page.scenes.map((s: any) => ({
+              ...s,
+              httpRules: detail?.id === s.id ? detail.http.map((r: any) => r.overview) : [],
+              wsRules: detail?.id === s.id ? detail.ws.map((r: any) => r.overview) : [],
+              actions: detail?.id === s.id ? detail.actions : [],
+            })),
+          }
+        : undefined,
+    },
+  };
+}
+async function writeScenes(document: SceneDocument, workspace = fake.workspace) {
+  await rm(join(workspace, '.flutter-pilot', 'scenes'), { recursive: true, force: true });
+  const store = new SceneStore(join(workspace, '.flutter-pilot'), await privateStorage(workspace));
+  await store.load();
+  await store.importPackage({ version: 2, scenes: document.scenes }, false);
+  await store.activate(document.activeSceneId);
+}
+async function readScenes(workspace = fake.workspace): Promise<SceneDocument> {
+  const store = new SceneStore(join(workspace, '.flutter-pilot'), await privateStorage(workspace));
+  await store.load();
+  return { version: 1, activeSceneId: store.activeSceneId, scenes: (await store.exportPackage()).scenes };
 }
 function latestSelected() {
   return fake.panels
@@ -263,8 +294,9 @@ describe('Scene 操作与业务测试扩展整合', () => {
   };
   const sceneDocument: SceneDocument = { version: 1, activeSceneId: null, scenes: [actionScene] };
   async function saveScenes(document: SceneDocument = sceneDocument) {
-    await writeFile(rulesFile(), JSON.stringify(document));
+    await writeScenes(document);
     await message('project.reload');
+    await message('scenes.select', { id: document.scenes[0].id });
   }
   async function enable() {
     await open();
@@ -282,6 +314,50 @@ describe('Scene 操作与业务测试扩展整合', () => {
       args: { sessionId: descriptor.sessionId, ...args },
     })) as any;
   }
+  it('keeps ordinary workbench messages independent of library bodies and preserves paged resource delivery', async () => {
+    await open();
+    const document: SceneDocument = {
+      version: 1,
+      activeSceneId: null,
+      scenes: [
+        {
+          ...actionScene,
+          httpRules: [
+            {
+              ...rule,
+              id: 'large',
+              mock: { status: 200, headers: {}, body: 'private-body-marker'.repeat(100000) },
+            },
+          ],
+        },
+      ],
+    };
+    await saveScenes(document);
+    const panel = fake.panels.at(-1);
+    const pages = panel.webview.messages.filter((m: any) => m.type === 'scene.page');
+    expect(pages.at(-1).page.scenes[0]).toMatchObject({ httpRuleCount: 1, actionCount: 1 });
+    const start = panel.webview.messages.length;
+    await message('tests.refresh');
+    const ordinary = panel.webview.messages.slice(start);
+    expect(ordinary.some((m: any) => ['scene.page', 'scene.detail'].includes(m.type))).toBe(false);
+    const stateMessages = ordinary.filter((m: any) => m.type === 'state');
+    expect(stateMessages.length).toBeGreaterThan(0);
+    expect(JSON.stringify(ordinary)).not.toContain('private-body-marker');
+    for (const m of stateMessages) {
+      expect(m.state.scenes).toBeUndefined();
+      expect(m.state.rules).toEqual([]);
+      expect(Buffer.byteLength(JSON.stringify(m))).toBeLessThan(100000);
+    }
+    await message('scenes.resource', { sceneId: 'operations', kind: 'http', id: 'large', requestId: 17 });
+    const resource = panel.webview.messages.findLast((m: any) => m.type === 'scene.resource');
+    expect(resource.requestId).toBe(17);
+    expect(resource.resource.value.mock.body).toHaveLength(1900000);
+    await message('tests.action', { sceneId: 'operations', actionId: 'submit', requestId: 18 });
+    expect(panel.webview.messages.findLast((m: any) => m.type === 'test.action')).toMatchObject({
+      requestId: 18,
+      action: { id: 'submit', inputs: { price: { required: true } } },
+    });
+  });
   it('discovers launch names without secrets and routes start_app only to this workspace', async () => {
     const descriptor = await enable();
     await message('connection.mode', { mode: 'vm' });
@@ -348,12 +424,14 @@ describe('Scene 操作与业务测试扩展整合', () => {
     expect(actions.actions).toMatchObject([{ id: 'submit', inputs: { price: { required: true } } }]);
     expect(actions).not.toHaveProperty('httpRules');
     const summaries = await call(descriptor, 'list_scenes');
-    expect(JSON.stringify(summaries)).toContain('submit');
+    expect(summaries.scenes[0]).toMatchObject({ actionCount: 1, health: 'valid' });
     await writeFile(rulesFile(), '{broken');
     await message('project.reload');
     expect((await call(descriptor, 'list_scene_actions', { sceneId: 'operations' })).actions).toHaveLength(1);
     await message('scenes.open');
-    expect(fake.shownDocuments).toContain(await realpath(rulesFile()));
+    expect(
+      fake.shownDocuments.some((path) => path.endsWith('/scene.json') || path.endsWith('/scenes/index.json')),
+    ).toBe(true);
     expect(await readFile(rulesFile(), 'utf8')).toBe('{broken');
     expect(await readFile(legacy, 'utf8')).toBe('{legacy must remain untouched');
   });
@@ -392,9 +470,7 @@ describe('Scene 操作与业务测试扩展整合', () => {
       );
       expect(execute.mock.calls[0][2].text).toBe(secret);
       expect(JSON.stringify(latest().state)).not.toContain(secret);
-      expect(
-        JSON.parse(await readFile(rulesFile(), 'utf8')).scenes[0].actions[0].inputs.password.default,
-      ).toBe(secret);
+      expect((await readScenes()).scenes[0].actions![0].inputs!.password.default).toBe(secret);
     } finally {
       execute.mockRestore();
     }
@@ -461,13 +537,14 @@ describe('Scene 操作与业务测试扩展整合', () => {
       const edited = structuredClone(doc);
       edited.activeSceneId = 'business';
       edited.scenes[0].targets!.confirm.key = 'edited-confirm';
-      await writeFile(rulesFile(), JSON.stringify(edited));
+
       const start = await call(descriptor, 'run_scene_action', {
         sceneId: 'operations',
         actionId: 'submit',
         inputs: { price: '1' },
       });
       await vi.waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+      await writeScenes(edited);
       expect(action.mock.calls[0][2].selector).toEqual({ key: 'confirm' });
       expect((await call(descriptor, 'get_scene_action_run', { runId: start.runId })).run).toMatchObject({
         sceneId: 'operations',
@@ -1011,37 +1088,34 @@ describe('Scene 操作与业务测试扩展整合', () => {
       const descriptor = await enable();
       await message('connection.mode', { mode: 'vm' });
       await message('vm.connect', { url: 'ws://127.0.0.1:12345/ws' });
-      await writeFile(
-        rulesFile(),
-        JSON.stringify({
-          version: 1,
-          activeSceneId: null,
-          scenes: [
-            {
-              ...actionScene,
-              actions: [
-                ...(actionScene.actions ?? []),
-                { id: 'login', name: '登录', steps: [{ id: 'login', type: 'tap', target: 'login' }] },
-              ],
-            },
-            {
-              id: 'ws',
-              name: 'WS fixture',
-              httpRules: [],
-              wsRules: [
-                {
-                  id: 'ws_rule',
-                  name: 'pending rule',
-                  enabled: true,
-                  priority: 1,
-                  match: { url: 'wss://example.test/orders', direction: 'inbound' },
-                  action: { type: 'replace', text: '{}' },
-                },
-              ],
-            },
-          ],
-        }),
-      );
+      await writeScenes({
+        version: 1,
+        activeSceneId: null,
+        scenes: [
+          {
+            ...actionScene,
+            actions: [
+              ...(actionScene.actions ?? []),
+              { id: 'login', name: '登录', steps: [{ id: 'login', type: 'tap', target: 'login' }] },
+            ],
+          },
+          {
+            id: 'ws',
+            name: 'WS fixture',
+            httpRules: [],
+            wsRules: [
+              {
+                id: 'ws_rule',
+                name: 'pending rule',
+                enabled: true,
+                priority: 1,
+                match: { url: 'wss://example.test/orders', direction: 'inbound' },
+                action: { type: 'replace', text: '{}' },
+              },
+            ],
+          },
+        ],
+      });
       await message('project.reload');
       await writeFile(
         join(fake.workspace, '.flutter-pilot', 'tests.json'),
@@ -1092,7 +1166,7 @@ function projectFile(workspace = fake.workspace) {
   return join(workspace, '.flutter-pilot', 'project.json');
 }
 function rulesFile(workspace = fake.workspace) {
-  return join(workspace, '.flutter-pilot', 'scenes.json');
+  return join(workspace, '.flutter-pilot', 'scenes', 'index.json');
 }
 async function readProject(workspace = fake.workspace) {
   return JSON.parse(await readFile(projectFile(workspace), 'utf8'));
@@ -1163,6 +1237,85 @@ afterEach(async () => {
   delete process.env.FLUTTER_PILOT_MCP_ROOT;
 });
 describe('扩展与工作台整合', () => {
+  it('routes temporary WS CRUD by ID and rejects invalid, stale or inactive connection targets', async () => {
+    const { VmSession } = await import('../src/vm/session');
+    const { WsSession } = await import('../src/ws/session');
+    let vm: any;
+    const connect = vi.spyOn(VmSession.prototype, 'connect').mockImplementation(async function (this: any) {
+      vm = this;
+      this.state.status = 'connected';
+      this.state.isolates = 1;
+      this.websocket.state.connections = [{ id: 'socket', status: 'open', capture: 'attached' }];
+      this.emit('change');
+    });
+    const capture = vi.spyOn(WsSession.prototype, 'setCaptureEnabled').mockImplementation(async function (
+      this: any,
+      enabled,
+    ) {
+      this.state.captureEnabled = enabled;
+    });
+    const mock = vi.spyOn(WsSession.prototype, 'setMockEnabled').mockImplementation(async function (
+      this: any,
+      enabled,
+    ) {
+      this.state.mockEnabled = enabled;
+    });
+    try {
+      await open();
+      await writeScenes({
+        version: 1,
+        activeSceneId: null,
+        scenes: [
+          { id: 'active', name: 'Active', httpRules: [], wsRules: [] },
+          { id: 'other', name: 'Other', httpRules: [], wsRules: [] },
+        ],
+      });
+      await message('project.reload');
+      await message('scenes.select', { id: 'active' });
+      await message('connection.mode', { mode: 'vm' });
+      await message('vm.connect', { url: 'ws://127.0.0.1:12345/ws' });
+      const temporary = {
+        id: 'temp',
+        name: 'Temporary',
+        enabled: true,
+        priority: 1,
+        match: { connectionId: 'socket' },
+        action: { type: 'replace', text: 'replacement' },
+      };
+      await message('ws.rules.save', { rule: temporary, targetSceneId: 'active' });
+      expect(latest().state.lastError).toContain('当前激活');
+      await message('scenes.activate', { id: 'active' });
+      await message('ws.rules.save', { rule: temporary, targetSceneId: 'other' });
+      expect(latest().state.lastError).toContain('当前激活');
+      await message('ws.rules.save', {
+        rule: { ...temporary, priority: 'invalid' },
+        targetSceneId: 'active',
+      });
+      expect(latest().state.lastError).toContain('priority');
+      await message('ws.rules.save', { rule: temporary, targetSceneId: 'active' });
+      expect(latest().state.ws.rules).toEqual([temporary]);
+      await message('ws.rules.toggle', { id: 'temp' });
+      expect(latest().state.ws.rules[0].enabled).toBe(false);
+      await message('ws.rules.duplicate', { id: 'temp' });
+      expect(latest().state.ws.rules).toHaveLength(2);
+      const duplicate = latest().state.ws.rules.find((rule: any) => rule.id !== 'temp');
+      await message('ws.rules.move', { id: duplicate.id, delta: -1 });
+      expect(latest().state.ws.rules[0].id).toBe(duplicate.id);
+      vm.websocket.state.connections[0].status = 'closed';
+      await message('ws.rules.save', { rule: temporary, targetSceneId: 'active' });
+      expect(latest().state.lastError).toContain('在线连接');
+      vm.websocket.state.connections[0].status = 'open';
+      await message('ws.rules.delete', { id: duplicate.id });
+      await message('ws.rules.delete', { id: 'temp' });
+      expect(latest().state.ws.rules).toEqual([]);
+      expect((await readScenes()).scenes.every((scene) => scene.wsRules.length === 0)).toBe(true);
+    } finally {
+      connect.mockRestore();
+      capture.mockRestore();
+      mock.mockRestore();
+    }
+  });
+
   it('侧栏与工作台截图共用连接校验，未连接时显示明确提示', async () => {
     const manifest = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8'));
     expect(manifest.contributes.viewsWelcome[0].contents).toContain('command:flutterPilot.screenshot');
@@ -1198,7 +1351,7 @@ describe('扩展与工作台整合', () => {
       tool: 'get_network_status',
       args: { sessionId: descriptor.sessionId },
     })) as any;
-    expect(result.files.scenes).toMatch(/\/project\/\.flutter-pilot\/scenes\.json$/);
+    expect(result.files.scenes).toMatch(/\/project\/\.flutter-pilot\/scenes\/index\.json$/);
     expect(result.http.mockEnabled).toBe(false);
     const panel = fake.panels.at(-1);
     panel.dispose();
@@ -1298,13 +1451,15 @@ describe('扩展与工作台整合', () => {
     await message('rules.save', { rule: { ...rule, mock: { ...rule.mock, status: 999 } } });
     expect(latest().state.lastError).toContain('状态码');
     await message('rules.save', { rule });
-    expect(JSON.parse(await readFile(rulesFile(), 'utf8')).scenes[0].httpRules[0].id).toBe('test');
+    expect((await readScenes()).scenes[0].httpRules[0].id).toBe('test');
     expect(latest().state.rules).toEqual([]);
     const id = latest().state.scenes.scenes[0].id;
     fake.rejectSync = true;
     await message('scenes.activate', { id });
-    expect(latest().state.scenes.activeSceneId).toBe(id);
-    expect(latest().state.sceneRuntime.http.status).toBe('error');
+    await vi.waitFor(() => {
+      expect(latest().state.scenes.activeSceneId).toBe(id);
+      expect(latest().state.sceneRuntime.http.status).toBe('error');
+    });
   });
   it('选中完整历史仅发送一次，后续状态不重复传正文', async () => {
     await open();
@@ -2178,7 +2333,7 @@ describe('VM 连接模式扩展整合', () => {
       }),
     );
     await message('rules.save', { rule: { ...rule, enabled: false } });
-    expect(latest().state.scenes.scenes[0].httpRules).toMatchObject([{ id: 'test', enabled: false }]);
+    expect((await readScenes()).scenes[0].httpRules).toMatchObject([{ id: 'test', enabled: false }]);
     expect(latest().state.rules).toEqual([]);
     await message('connection.mode', { mode: 'proxy' });
     expect(latest().state.mode).toBe('proxy');
@@ -2279,7 +2434,7 @@ describe('项目文件与工作区绑定整合', () => {
       id: config.projectId,
       name: 'project',
       configPath: expect.stringContaining('/.flutter-pilot/project.json'),
-      rulesPath: expect.stringContaining('/.flutter-pilot/scenes.json'),
+      rulesPath: expect.stringContaining('/.flutter-pilot/scenes/index.json'),
     });
     expect(fake.engines[0].starts[0].storagePath).toBe(await privateStorage());
     await deactivate();
@@ -2292,7 +2447,7 @@ describe('项目文件与工作区绑定整合', () => {
     await open();
     await message('rules.save', { rule });
     await message('connection.mode', { mode: 'vm' });
-    expect(JSON.parse(await readFile(rulesFile(), 'utf8')).scenes[0].httpRules).toEqual([rule]);
+    expect((await readScenes()).scenes[0].httpRules).toEqual([rule]);
     expect((await readProject()).connection).toMatchObject({ mode: 'vm', connectionHost: '127.0.0.1' });
     expect(JSON.parse(await readFile(join(await privateStorage(), 'connection.json'), 'utf8'))).toEqual({
       androidDevices: [],
@@ -2308,20 +2463,23 @@ describe('项目文件与工作区绑定整合', () => {
     await message('project.open', { kind: 'rules' });
     expect(fake.shownDocuments.map((file) => file.slice(file.indexOf('/.flutter-pilot/')))).toEqual([
       '/.flutter-pilot/project.json',
-      '/.flutter-pilot/scenes.json',
+      '/.flutter-pilot/scenes/index.json',
     ]);
   });
 
   it('显式读取外部规则后同步引擎，配置变更保持当前会话并提示重载', async () => {
     await open();
     const external = { ...rule, id: 'external', name: 'external' };
-    const doc = JSON.parse(await readFile(rulesFile(), 'utf8'));
+    const doc = await readScenes();
     doc.scenes[0].httpRules = [external];
     doc.activeSceneId = doc.scenes[0].id;
-    await writeFile(rulesFile(), JSON.stringify(doc));
+    await writeScenes(doc);
     await writeProject({ connection: { mode: 'vm' }, settings: { autoStart: false } });
     await message('project.reload');
-    expect(latest().state.rules).toEqual([external]);
+    await message('scenes.activate', { id: doc.scenes[0].id });
+    expect(
+      fake.engines[0].calls.filter((call: any) => call.method === 'rules.sync').at(-1).params.rules,
+    ).toEqual([external]);
     expect(
       fake.engines[0].calls.filter((call: any) => call.method === 'rules.sync').at(-1).params.rules,
     ).toEqual([external]);
@@ -2337,20 +2495,20 @@ describe('项目文件与工作区绑定整合', () => {
   it('外部修改规则后拒绝旧内存覆盖，读取后允许继续编辑', async () => {
     await open();
     const external = { ...rule, id: 'external', name: 'external' };
-    const doc = JSON.parse(await readFile(rulesFile(), 'utf8'));
+    const doc = await readScenes();
     doc.scenes[0].httpRules = [external];
     doc.activeSceneId = doc.scenes[0].id;
-    await writeFile(rulesFile(), JSON.stringify(doc));
+    await writeScenes(doc);
     const previousSyncs = fake.engines[0].calls.filter((call: any) => call.method === 'rules.sync').length;
     await message('rules.save', { rule });
-    expect(latest().state.lastError).toContain('读取项目文件');
-    expect(JSON.parse(await readFile(rulesFile(), 'utf8')).scenes[0].httpRules).toEqual([external]);
+    expect(latest().state.lastError).toContain('重新读取');
+    expect((await readScenes()).scenes[0].httpRules).toEqual([external]);
     expect(fake.engines[0].calls.filter((call: any) => call.method === 'rules.sync')).toHaveLength(
       previousSyncs,
     );
     await message('project.reload');
     await message('rules.save', { rule });
-    expect(JSON.parse(await readFile(rulesFile(), 'utf8')).scenes[0].httpRules).toEqual([external, rule]);
+    expect((await readScenes()).scenes[0].httpRules).toEqual([external, rule]);
   });
 
   it('项目采集设置优先于 IDE 默认值，未指定参数仍使用默认值', async () => {
@@ -2384,13 +2542,13 @@ describe('项目文件与工作区绑定整合', () => {
     );
     await writeFile(projectFile(fake.extraWorkspace), JSON.stringify(config));
     const copiedRule = { ...rule, id: 'copied' };
-    await writeFile(
-      rulesFile(fake.extraWorkspace),
-      JSON.stringify({
+    await writeScenes(
+      {
         version: 1,
         activeSceneId: 'copy-scene',
         scenes: [{ id: 'copy-scene', name: '副本', httpRules: [copiedRule], wsRules: [] }],
-      }),
+      },
+      fake.extraWorkspace,
     );
     fake.engines = [];
     await activateCurrent();
@@ -2411,7 +2569,9 @@ describe('项目文件与工作区绑定整合', () => {
     fake.selectedWorkspace = fake.extraWorkspace;
     await open();
     expect(latest().state.project.id).toBe(config.projectId);
-    expect(latest().state.rules).toEqual([copiedRule]);
+    expect(copy.calls.filter((call: any) => call.method === 'rules.sync').at(-1).params.rules).toEqual([
+      copiedRule,
+    ]);
   });
 
   it('旧 VM SQLite 迁移后历史备注、标签与独立目录仍可查询且保留源文件', async () => {

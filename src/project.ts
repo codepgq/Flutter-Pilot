@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { link, lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { SceneStore } from './scenes';
+import { SceneFiles, safePath } from './scene-files';
 
 export interface ProjectConnection {
   mode: 'vm' | 'proxy';
@@ -150,7 +150,10 @@ export class ProjectBinding {
   }
   async reload(): Promise<ProjectConfig> {
     await checkDirectory(this.directory);
-    if ((await readText(join(this.rulesDirectory, 'scenes.json'), 64 * 1024 * 1024)) === undefined)
+    if (
+      (await readText(await safePath(this.rulesDirectory, 'scenes/index.json'), 16 * 1024 * 1024)) ===
+      undefined
+    )
       throw new Error('项目规则文件已移除，请重新打开工作区初始化');
     const config = await readProject(this.file);
     if (!config) throw new Error('项目绑定文件已移除，请重新打开工作区初始化');
@@ -231,6 +234,22 @@ export async function openProjectBinding(
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(claim.projectId)
   )
     throw new Error('旧项目存储绑定标识无效，请修复后重试');
-  await new SceneStore(directory).load();
+  await new SceneFiles(directory).locked(async () => {
+    const root = await safePath(directory, 'scenes/index.json');
+    const existing = await readText(root, 16 * 1024 * 1024);
+    if (existing === undefined) {
+      if ((await readText(join(directory, 'scenes.json'), 64 * 1024 * 1024)) !== undefined)
+        throw new Error('发现旧 scenes.json，请运行 Scene v1 → v2 迁移工具，未创建空配置');
+      // An existing directory with a missing root is damaged configuration, not a new library.
+      const scenesDirectory = await lstat(await safePath(directory, 'scenes')).catch((error) => {
+        if (!missing(error)) throw error;
+        return undefined;
+      });
+      if (scenesDirectory) return;
+      await new SceneFiles(directory).commit([
+        { path: 'scenes/index.json', expected: null, text: serialize({ version: 2, scenes: [] }) },
+      ]);
+    }
+  });
   return new ProjectBinding(directory, config);
 }

@@ -43,10 +43,9 @@ describe('project-local identity and configuration', () => {
     expect(binding.config).toMatchObject({ version: 1, name: 'flutter-project', connection: { mode: 'vm' } });
     expect(binding.projectId).toMatch(/^[0-9a-f-]{36}$/);
     expect(binding.rulesDirectory).toBe(join(await realpath(workspace), '.flutter-pilot'));
-    expect(await json(join(binding.directory, 'scenes.json'))).toMatchObject({
-      version: 1,
-      activeSceneId: null,
-      scenes: [{ name: '默认场景', httpRules: [], wsRules: [] }],
+    expect(await json(join(binding.directory, 'scenes/index.json'))).toMatchObject({
+      version: 2,
+      scenes: [],
     });
     const reopened = await openProjectBinding(workspace, legacy);
     expect(reopened.projectId).toBe(binding.projectId);
@@ -57,7 +56,7 @@ describe('project-local identity and configuration', () => {
     expect(binding.config.name).toBe('flutter-project');
   });
 
-  it('imports legacy rules and connection once while retaining the original private files', async () => {
+  it('preserves legacy rule files without loading them and imports only the connection', async () => {
     const connection = {
       lan: false,
       connectionHost: '127.0.0.1',
@@ -79,7 +78,7 @@ describe('project-local identity and configuration', () => {
       port: 8080,
       configuredPort: 8080,
     });
-    expect((await json(join(binding.directory, 'scenes.json'))).scenes[0].httpRules).toEqual([rule]);
+    expect((await json(join(binding.directory, 'scenes/index.json'))).scenes).toEqual([]);
     expect(await json(join(legacy, 'rules.json'))).toEqual(document);
     expect(await json(join(legacy, 'connection.json'))).toEqual(connection);
     expect(await readFile(binding.file, 'utf8')).not.toContain('private-');
@@ -87,7 +86,7 @@ describe('project-local identity and configuration', () => {
     await writeFile(join(legacy, 'rules.json'), JSON.stringify({ version: 1, rules: [] }));
     const reopened = await openProjectBinding(workspace, legacy);
     expect(reopened.config.connection.mode).toBe('vm');
-    expect((await json(join(binding.directory, 'scenes.json'))).scenes[0].httpRules).toEqual([rule]);
+    expect((await json(join(binding.directory, 'scenes/index.json'))).scenes).toEqual([]);
   });
 
   it('preserves manually edited settings and unknown fields when saving connection changes', async () => {
@@ -128,10 +127,10 @@ describe('project-local identity and configuration', () => {
     await second.saveConnection({ mode: 'proxy' });
     expect((await first.reload()).connection.mode).toBe('vm');
     expect((await second.reload()).connection.mode).toBe('proxy');
-    const doc = await json(join(second.directory, 'scenes.json'));
-    doc.scenes[0].httpRules = [rule];
-    await writeFile(join(second.directory, 'scenes.json'), JSON.stringify(doc));
-    expect((await json(join(first.directory, 'scenes.json'))).scenes[0].httpRules).toEqual([]);
+    const doc = await json(join(second.directory, 'scenes/index.json'));
+    doc.scenes.push({ id: 'other', directory: 'other' });
+    await writeFile(join(second.directory, 'scenes/index.json'), JSON.stringify(doc));
+    expect((await json(join(first.directory, 'scenes/index.json'))).scenes).toEqual([]);
   });
 
   it('concurrent initializers see one winning UUID and leave no temporary files', async () => {
@@ -140,7 +139,7 @@ describe('project-local identity and configuration', () => {
     );
     expect(new Set(bindings.map((binding) => binding.projectId)).size).toBe(1);
     const { readdir } = await import('node:fs/promises');
-    expect((await readdir(bindings[0].directory)).sort()).toEqual(['project.json', 'scenes.json']);
+    expect((await readdir(bindings[0].directory)).sort()).toEqual(['project.json', 'scenes']);
   });
 
   it.each([
@@ -167,9 +166,12 @@ describe('project-local identity and configuration', () => {
     await writeFile(binding.file, '{"private-authentication-value": invalid');
     await expect(openProjectBinding(workspace, legacy)).rejects.not.toThrow('private-authentication-value');
     await writeFile(binding.file, JSON.stringify(binding.config));
-    await writeFile(join(binding.directory, 'scenes.json'), '{"private-rule-value": invalid');
-    await expect(openProjectBinding(workspace, legacy)).rejects.toThrow('有效 JSON');
-    expect(await readFile(join(binding.directory, 'scenes.json'), 'utf8')).toContain('private-rule-value');
+    await writeFile(join(binding.directory, 'scenes/index.json'), '{"private-rule-value": invalid');
+    await expect(openProjectBinding(workspace, legacy)).resolves.toBeDefined();
+    // The resource repository reports root health and can retain the previous directory snapshot.
+    expect(await readFile(join(binding.directory, 'scenes/index.json'), 'utf8')).toContain(
+      'private-rule-value',
+    );
   });
 
   it('rejects a changed UUID during reload or save until the workspace is reopened', async () => {
@@ -188,7 +190,7 @@ describe('project-local identity and configuration', () => {
       if (kind === 'directory') await symlink(outside, join(workspace, '.flutter-pilot'));
       else {
         const binding = await openProjectBinding(workspace, legacy);
-        const file = join(binding.directory, kind === 'project' ? 'project.json' : 'scenes.json');
+        const file = join(binding.directory, kind === 'project' ? 'project.json' : 'scenes/index.json');
         const target = join(outside, 'target.json');
         await writeFile(target, 'untouched');
         await rm(file);
@@ -202,7 +204,7 @@ describe('project-local identity and configuration', () => {
 
   it('reload rejects rules replaced by a symlink after initialization', async () => {
     const binding = await openProjectBinding(workspace, legacy);
-    const rules = join(binding.directory, 'scenes.json');
+    const rules = join(binding.directory, 'scenes/index.json');
     const target = join(root, 'external-rules.json');
     await writeFile(target, JSON.stringify({ version: 1, rules: [rule] }));
     await rm(rules);
@@ -215,12 +217,12 @@ describe('project-local identity and configuration', () => {
     await writeFile(join(legacy, 'rules.json'), JSON.stringify({ version: 1, rules: [rule] }));
     await writeFile(join(legacy, 'connection.json'), JSON.stringify({ mode: 'proxy' }));
     const first = await openProjectBinding(workspace, legacy);
-    expect((await json(join(first.directory, 'scenes.json'))).scenes[0].httpRules).toEqual([]);
+    expect((await json(join(first.directory, 'scenes/index.json'))).scenes).toEqual([]);
     await rm(first.directory, { recursive: true });
     const recreated = await openProjectBinding(workspace, legacy);
     expect(recreated.projectId).not.toBe(first.projectId);
     expect(recreated.config.connection.mode).toBe('vm');
-    expect((await json(join(recreated.directory, 'scenes.json'))).scenes[0].httpRules).toEqual([]);
+    expect((await json(join(recreated.directory, 'scenes/index.json'))).scenes).toEqual([]);
     expect((await json(join(legacy, 'project-binding.json'))).projectId).toBe(first.projectId);
     expect((await json(join(legacy, 'rules.json'))).rules).toEqual([rule]);
   });
@@ -231,16 +233,18 @@ describe('project-local identity and configuration', () => {
     const first = await openProjectBinding(workspace, legacy);
     const nextId = randomUUID();
     await writeFile(first.file, JSON.stringify({ ...first.config, projectId: nextId }));
-    await rm(join(first.directory, 'scenes.json'));
+    await rm(join(first.directory, 'scenes/index.json'));
     const reopened = await openProjectBinding(workspace, legacy);
     expect(reopened.projectId).toBe(nextId);
-    expect((await json(join(reopened.directory, 'scenes.json'))).scenes[0].httpRules).toEqual([]);
+    await expect(readFile(join(reopened.directory, 'scenes/index.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
     expect((await json(join(legacy, 'project-binding.json'))).projectId).toBe(first.projectId);
   });
 
   it('reload rejects missing rules instead of allowing an empty in-memory overwrite', async () => {
     const binding = await openProjectBinding(workspace, legacy);
-    await rm(join(binding.directory, 'scenes.json'));
+    await rm(join(binding.directory, 'scenes/index.json'));
     await expect(binding.reload()).rejects.toThrow('规则文件已移除');
   });
 });

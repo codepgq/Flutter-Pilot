@@ -4,7 +4,7 @@ Test Case 组合环境、操作和业务断言。Scene 操作负责登录、输�
 
 | 定义      | 保存位置                     | 职责                                      |
 | --------- | ---------------------------- | ----------------------------------------- |
-| Scene     | `.flutter-pilot/scenes.json` | HTTP/WS Mock、共享 targets 和命名 actions |
+| Scene     | `.flutter-pilot/scenes/` | HTTP/WS Mock、共享 targets 和命名 actions |
 | Test Case | `.flutter-pilot/tests.json`  | 环境、前置流程、本轮 HTTP/WS/UI 关联断言  |
 | Run       | 当前插件会话                 | 步骤、断言、耗时、失败证据及清理结果      |
 
@@ -21,7 +21,7 @@ HTTP 环境先于 `setup` 应用。若登录等前置流程负责创建 WS 连�
 ## 保存与运行
 
 1. `get_usage_guide(topic="workflow")` 读取离线指南，`list_sessions` 选择项目。
-2. `list_scenes` 发现操作概要，`list_scene_actions({sessionId,sceneId})` 获取参数。首次探索并验证控件后在 `scenes.json` 保存 targets/actions，再 `reload_rules`。起始页面、目标账号和按钮可操作条件应明确；完整格式见 [Scene 操作指南](workflows.md)。
+2. `list_scenes` 发现操作概要，`list_scene_actions({sessionId,sceneId})` 获取参数。首次探索并验证控件后在 `scenes/` 保存 targets/actions，再 `reload_rules`。起始页面、目标账号和按钮可操作条件应明确；完整格式见 [Scene 操作指南](workflows.md)。
 3. `list_tests` 获取 `files.tests` 的准确绝对路径，使用 Agent 文件工具增量维护用例。缺文件返回空列表，不会写入默认测试或覆盖已有定义。
 4. 再次 `list_tests` 校验定义，`run_test` 显式启动，保存返回的 `runId`。
 5. `get_test_run` 查询终态和证据；需要停止时 `cancel_test_run`，继续查询直到资源释放与临时环境清理完成。
@@ -35,7 +35,7 @@ HTTP 环境先于 `setup` 应用。若登录等前置流程负责创建 WS 连�
 }
 ```
 
-测试文件每次启动重读并预检；Scene 操作使用已加载快照，修改 `scenes.json` 后必须 `reload_rules`。运行中的快照不受后续文件编辑影响。运行期间其他 UI 操作和环境修改会被拒绝，避免步骤之间插入动作。
+测试文件每次启动重读并预检；Scene 操作使用已加载快照，修改 `scenes/` 后必须 `reload_rules`。运行中的快照不受后续文件编辑影响。运行期间其他 UI 操作和环境修改会被拒绝，避免步骤之间插入动作。
 
 ## 用例结构
 

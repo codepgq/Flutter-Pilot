@@ -70,8 +70,8 @@ MCP 在连接初始化的 `instructions` 中发送功能介绍和“用户任务
 | ------------------ | ------------------------------------------------------------------------------- |
 | `overview`（默认） | 能力场景、Prompt 导航、首次调用、规则文件和运行前提                             |
 | `screenshot`       | App 普通截图、长图目标选择、设备整屏、图片返回与范围限制                        |
-| `http`             | `scenes.json` 中 HTTP 规则的字段、完整合法示例、请求／响应修改、转发及验证流程  |
-| `ws`               | `scenes.json` 中 WS 规则的 URL、方向、文本匹配、替换／丢弃及双向消息验证        |
+| `http`             | `scenes/` 中 HTTP 规则的字段、完整合法示例、请求／响应修改、转发及验证流程  |
+| `ws`               | `scenes/` 中 WS 规则的 URL、方向、文本匹配、替换／丢弃及双向消息验证        |
 | `ui`               | 快照发现真实 Key、父范围查找、点击／输入／滚动／等待、Key 诊断与修复            |
 | `workflow`         | 保存并复用 Scene 操作、Test Case 关联 HTTP/WS/UI 断言、临时有状态 Mock 与热更新 |
 
@@ -84,7 +84,7 @@ MCP 在连接初始化的 `instructions` 中发送功能介绍和“用户任务
 | `capabilities`           | 用户任务到工具的功能映射，以及由当前注册表生成的全部工具和同名 Prompt 目录；只读查阅，无需任务或会话                    |
 | `app_screenshot`         | 当前 Flutter App 优先截图的最短路径；普通截图、滚动长图与包含键盘／系统 UI 的设备整屏及各自前提                         |
 | `scene_action_quick_run` | 复用或启动 App、发现已有 actions、选择所需 Mock、传参运行、查询／取消、最终 UI 与本轮网络验证；包含工作台手动入口       |
-| `scene_action_authoring` | `scenes.json` 唯一来源、真实 Widget Key、无 target 的 `hide_keyboard`、公共 `call`、秘密参数、预检、归档及 Test Case v2 |
+| `scene_action_authoring` | `scenes/` 唯一来源、真实 Widget Key、无 target 的 `hide_keyboard`、公共 `call`、秘密参数、预检、归档及 Test Case v2 |
 
 先只查阅能力：
 
@@ -125,7 +125,7 @@ Agent 的可调用能力由 `tools/list` 提供，Prompts 是可选的使用指�
 
 步骤的 `target` 是共享选择器名称。例如 `targets.emailInput = {"source":"flutter","key":"emailEntry.input"}`，`target:"emailInput"` 会编译为按该 Widget Key 精确定位。Agent 无需逐步截图或重新探索；运行时核对当前挂载控件的唯一性与可操作状态，避免沿用页面切换前的对象。工作台步骤预览展示对应 Widget Key 和来源。
 
-[动作目录](scene-actions-catalogue.md) 已归档不同登录起点和公共表单操作，步骤定义统一来自 [随包 Scene 示例](../resources/example.scenes.json)。业务项目采用同样的入口 → `call` → 公共操作结构，显式传递参数并保持秘密属性；修改后重载快照，不额外创建动作文件。输入改变布局时显式 `hide_keyboard` 确认收起再继续。
+[动作目录](scene-actions-catalogue.md) 已归档不同登录起点和公共表单操作，步骤定义统一来自 [随包 Scene 示例](../resources/example.scenes.json)。业务项目采用同样的入口 → `call` → 公共操作结构，显式传递参数并保持秘密属性；修改后重载快照，每个动作使用独立 actions/*.json 文件。输入改变布局时显式 `hide_keyboard` 确认收起再继续。
 
 执行前记录本轮请求基线，结束时分别检查操作终态、最终 UI 和新请求 Mock 命中。HTTP `applied` 不保证每个客户端或启动首请求被覆盖，`completed` 不保证后台初始化都成功；发现真实 401 / refresh 循环应停止触发、补齐实际漏接口再验证。有意模拟的 503 等失败应单独说明，不能当作完整业务通过，也不能与漏 Mock 混为一谈。
 
@@ -287,7 +287,7 @@ auto 在设备连接后使用设备输入；失败不会换通道重放。device
 | `get_ws_connections` / `get_ws_messages`           | 查询 WS 连接和消息；`includeBodies` 请求正文                                      |
 | `inject_ws_message`                                | 向 App 注入模拟服务端消息，支持原始文本或 topic/data                              |
 | `send_ws_message`                                  | 经 App 真实 WS 连接发送消息，受当前 outbound 规则影响                             |
-| `reload_rules`                                     | 整份读取、校验并按激活状态同步 `scenes.json`，无 `domain` 参数                    |
+| `reload_rules`                                     | 增量刷新目录摘要并装配当前激活 Scene，无 `domain` 参数                    |
 | `list_scenes`                                      | 列出场景摘要（ID、名称、规则数量）、激活场景和 HTTP/WS 应用状态，支持 VM 离线查询 |
 | `activate_scene` / `deactivate_scene`              | 持久选择或停用场景；离线待应用，重连自动恢复                                      |
 | `set_capture_enabled`                              | 控制指定 `http`／`ws` 域采集；关闭暂停该域 Mock，重新开启恢复                     |
@@ -298,11 +298,11 @@ auto 在设备连接后使用设备输入；失败不会换通道重放。device
 
 可以向编码 Agent 下达以下任务：
 
-> 读取 Flutter Pilot 的 `get_usage_guide`（http／ui／workflow），调用 `list_sessions` 选择当前项目。查看 `get_network_status` 返回的规则路径，保留已有规则，只修改产品详情 Mock 正文。保存 `.flutter-pilot/scenes.json` 后调用 `reload_rules`，确认加载成功，再用 `activate_scene` 激活目标场景并检查 HTTP 应用状态。通过 `get_ui_snapshot` 找到实际产品及详情 Key，确认目标唯一后点击产品，等待详情出现，查询对应 HTTP 请求并验证响应字段。无 Key 时可明确使用唯一的文字／语义选择器；歧义时限定范围后重新验证。
+> 读取 Flutter Pilot 的 `get_usage_guide`（http／ui／workflow），调用 `list_sessions` 选择当前项目。查看 `get_network_status` 返回的规则路径，保留已有规则，只修改产品详情 Mock 正文。保存 `.flutter-pilot/scenes/` 后调用 `reload_rules`，确认加载成功，再用 `activate_scene` 激活目标场景并检查 HTTP 应用状态。通过 `get_ui_snapshot` 找到实际产品及详情 Key，确认目标唯一后点击产品，等待详情出现，查询对应 HTTP 请求并验证响应字段。无 Key 时可明确使用唯一的文字／语义选择器；歧义时限定范围后重新验证。
 
 > 分别构造接口成功、失败和空数据三个场景。每次只激活对应场景，保存后 `reload_rules`，确认采集和 Mock 状态，再用 `hot_restart` 重置页面状态。检查重启返回的网络状态及本次新请求；如果启动请求早于 Mock 接入，待接入后按 Key 再次触发。最后核对接口命中和对应 UI，不把热重启完成当作场景通过。
 
-HTTP 与 WS 规则统一保存在 `.flutter-pilot/scenes.json`，由 `get_network_status` 的 `files.scenes` 返回准确路径。顶层为 `{version:1, activeSceneId:null, scenes:[{id,name,httpRules:[],wsRules:[]}]}`；规则 ID 在同一协议的所有场景中唯一。Agent 直接维护文件；配置非法时保留文件及上一份有效配置，外部编辑未读取前禁止 UI 覆盖。`reload_rules(sessionId)` 整份重载后按文件中的激活状态同步；用 `activate_scene` / `deactivate_scene` 选择或停用。未激活场景的编辑不影响运行时；VM 离线时可选择待应用场景，重连、IDE 重开后自动恢复，遵守自动连接设置。连接临时 WS 规则仅存在所属激活场景的内存中，切换场景或连接失效后清除。
+HTTP 与 WS 规则使用 [Scene v2 目录存储](scene-storage.md)。`files.scenes` 返回 `scenes/index.json`；`list_scenes` 支持 `offset/limit/search`（默认50、最多200），列表不读正文；`list_scene_actions` 返回操作文件路径。`reload_rules` 增量刷新并隔离错误，激活 ID 保存到 IDE 项目私有存储。导入导出使用 v2 内联正文交换包，旧 scenes.json 需显式迁移。
 
 ## 可用性与验证边界
 

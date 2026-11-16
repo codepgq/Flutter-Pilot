@@ -17,7 +17,7 @@ const inputs = z
 export const sceneActionMcpTools = {
   list_scene_actions: {
     description:
-      '读取指定 Scene 的共享 targets、命名操作、起始前提及参数；VM 离线也可查询。优先复用已有操作，target 自动解析真实 Key，无需逐步截图或 find_widget；仅缺少操作时探索并归档到 scenes.json。',
+      '读取指定 Scene 的共享 targets、命名操作、起始前提及参数；VM 离线也可查询。优先复用已有操作，target 自动解析真实 Key，无需逐步截图或 find_widget；仅缺少操作时探索并归档到 scenes/ 目录。',
     schema: z.object({ ...session, sceneId: z.string().min(1).max(128) }).strict(),
   },
   run_scene_action: {

@@ -1,3 +1,4 @@
+import { cancelResource, requestResource } from './scene-resources';
 import React, { useEffect, useState } from 'react';
 import type { WorkbenchState } from '../src/model';
 import type { Scene } from '../src/scene-model';
@@ -92,7 +93,10 @@ function WaitObservation({ diagnostics }: { diagnostics: WaitDiagnostics }) {
 }
 
 function sceneName(state: WorkbenchState, id: string | null | undefined) {
-  return id ? (state.scenes?.scenes.find((scene) => scene.id === id)?.name ?? id) : '未激活 Mock';
+  return id
+    ? (state.scenes?.scenes.find((scene) => scene.id === id)?.name ??
+        (state.scenePage?.activeScene?.id === id ? state.scenePage.activeScene.name : id))
+    : '未激活 Mock';
 }
 
 function stepSummary(step: WorkflowStep, scene: Scene, state: WorkbenchState) {
@@ -146,7 +150,13 @@ export function SceneActionsPanel({
   const [backend, setBackend] = useState('auto');
   const action = actions.find((item) => item.id === selected);
   const actionInputsKey = JSON.stringify([scene.id, selected, action?.inputs]);
-  const locked = state.busy || data?.locked || state.tests?.locked;
+  const blocked = state.sceneDetail?.actions.find((item) => item.id === selected)?.blocked;
+  useEffect(() => {
+    if (!state.scenePage || !selected) return;
+    const requestId = requestResource(send, scene.id, 'actions', selected);
+    return () => cancelResource('actions', requestId);
+  }, [scene.id, selected, state.sceneDetail]);
+  const locked = state.busy || data?.locked || state.tests?.locked || state.sceneDetail?.health === 'error';
   useEffect(() => {
     if (selected && !actions.some((item) => item.id === selected)) {
       setSelected('');
@@ -197,8 +207,8 @@ export function SceneActionsPanel({
         <div className="scene-operation-empty">
           <strong>尚未配置 UI 操作</strong>
           <p>
-            当前场景只有 Mock 或目标定义。在 scenes.json 中为此场景添加 targets 和 actions，保存后重新加载，
-            即可在这里选择并运行登录、填表等多步操作。
+            当前场景只有 Mock 或目标定义。在场景目录的 targets.json 和 actions/ 中添加 targets 和
+            actions，保存后重新加载， 即可在这里选择并运行登录、填表等多步操作。
           </p>
           <small className="muted">
             操作由手动或 Agent 显式运行；激活场景、重连和重新加载均不会自动执行。
@@ -214,12 +224,16 @@ export function SceneActionsPanel({
                 aria-label="选择场景操作"
                 value={selected}
                 disabled={locked}
-                onChange={(event) => setSelected(event.target.value)}
+                onChange={(event) => {
+                  setSelected(event.target.value);
+                }}
               >
                 <option value="">请选择操作</option>
                 {actions.map((item) => (
                   <option key={item.id} value={item.id}>
-                    {item.name} · {item.steps.length} 个步骤
+                    {item.name} ·{' '}
+                    {state.sceneDetail?.actions.find((a) => a.id === item.id)?.stepCount ?? item.steps.length}{' '}
+                    个步骤
                   </option>
                 ))}
               </select>
@@ -255,6 +269,7 @@ export function SceneActionsPanel({
                 </label>
               ))}
           </div>
+          {blocked && <p role="alert">操作不可运行：{blocked}</p>}
           {action?.description && <p>{action.description}</p>}
           {action && (
             <details className="scene-operation-preview">
@@ -281,7 +296,12 @@ export function SceneActionsPanel({
           )}
           <button
             className="primary"
-            disabled={!action || missing || locked}
+            disabled={
+              !action ||
+              missing ||
+              locked ||
+              (!!state.scenePage && (state.loadedSceneAction?.id !== selected || !!blocked))
+            }
             onClick={() => {
               const values = Object.fromEntries(
                 Object.entries(inputs).filter(

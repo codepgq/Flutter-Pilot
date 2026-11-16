@@ -1,0 +1,63 @@
+{
+  "id": "submit_order",
+  "name": "填入价格数量并确认下单（替换为实际 Key）",
+  "inputs": {
+    "price": {
+      "required": true
+    },
+    "quantity": {
+      "required": true
+    }
+  },
+  "steps": [
+    {
+      "id": "fillPrice",
+      "type": "enter_text",
+      "target": "priceInput",
+      "text": "${inputs.price}"
+    },
+    {
+      "id": "fillQuantity",
+      "type": "enter_text",
+      "target": "quantityInput",
+      "text": "${inputs.quantity}"
+    },
+    {
+      "id": "waitSubmit",
+      "type": "wait_for_widget",
+      "target": "submitButton",
+      "state": "actionable"
+    },
+    {
+      "id": "openConfirmation",
+      "type": "tap",
+      "target": "submitButton"
+    },
+    {
+      "id": "waitConfirmation",
+      "type": "wait_for_widget",
+      "target": "confirmation",
+      "state": "visible"
+    },
+    {
+      "id": "checkConfirmPrice",
+      "type": "wait_for_widget",
+      "target": "confirmPrice",
+      "state": "text_equals",
+      "text": "${inputs.price}"
+    },
+    {
+      "id": "checkConfirmQuantity",
+      "type": "wait_for_widget",
+      "target": "confirmQuantity",
+      "state": "text_equals",
+      "text": "${inputs.quantity}"
+    },
+    {
+      "id": "confirmOnce",
+      "type": "tap",
+      "target": "confirmButton"
+    }
+  ],
+  "description": "仅执行操作，不切换当前 Mock；执行前确认起始页面。"
+}

@@ -1,6 +1,6 @@
 # Scene 联调与归档流程
 
-先找已有动作，再补缺失能力。运行定义统一保存在业务项目的 `.flutter-pilot/scenes.json`；[动作目录](scene-actions-catalogue.md) 提供示例入口，[格式指南](workflows.md) 解释配置，[MCP 指南](mcp.md) 解释工具。本文将 Wali 登录联调中验证过的做法整理成可重复流程。
+先找已有动作，再补缺失能力。运行定义统一保存在业务项目的 `.flutter-pilot/scenes/`；[动作目录](scene-actions-catalogue.md) 提供示例入口，[格式指南](workflows.md) 解释配置，[MCP 指南](mcp.md) 解释工具。本文将 Wali 登录联调中验证过的做法整理成可重复流程。
 
 Agent 在 MCP 初始化时收到功能及任务路由说明，也可通过 `prompts/get` 读取 `capabilities` 查阅能力。已有业务操作读取 `scene_action_quick_run`，编写归档读取 `scene_action_authoring`；当前 App 截图读取 `app_screenshot` 或 `screenshot` 指南。`overview.capabilityRoutes` 提供相同的用户任务到工具映射，具体工具还有同名 Prompt 和生产参数 schema。Prompt 可离线按需读取，初始化不会全量读取模板，读取本身不执行操作；实际运行时才选择项目、设备和操作。
 
@@ -37,7 +37,7 @@ Flutter 目标保存为 `{ "source": "flutter", "key": "emailEntry.input" }`，�
 - 通用表单 / 验证码 / 返回主页步骤放公共操作 Scene，入口通过 `call` 和显式参数映射复用。只保留一份通用步骤，保持对外 action ID 稳定。
 - 输入使用字符串参数；密码、验证码声明 `secret:true`，公共操作和入口都保持秘密属性。不记录真实凭据、认证 VM 地址或运行 sessionId。
 - 用 `wait_for_widget` 等待页面可见或按钮可操作。输入导致键盘改变布局时，`hide_keyboard` 确认收起，再等待下一控件；不用固定延时掩盖时序。
-- 预检整份配置、引用、参数和展开限额，再运行。对动作整理前后的入口，比较展开后的工具、选择器和参数，避免只校验 JSON 能解析。
+- 预检本次依赖闭包、引用、参数和展开限额，再运行。对动作整理前后的入口，比较展开后的工具、选择器和参数，避免只校验 JSON 能解析。
 
 ## 网络验证和阻塞处理
 
@@ -59,8 +59,8 @@ Mock 使用假 token 时，登录后的账号详情、地址、组合、通知�
 
 ## 归档和回归
 
-动作定义保存在业务 `scenes.json` 的公共操作 Scene；可复用模式整理进 [随包示例](../resources/example.scenes.json)，仅作为新项目的模板，不是业务项目的第二配置来源。[动作目录](scene-actions-catalogue.md) 只索引 ID、前提、参数和验证状态，不复制步骤或生成运行 catalogue。Test Case 继续在 `tests.json` v2 负责环境与断言。
+动作定义保存在业务 `scenes/` 的公共操作 Scene；可复用模式整理进 [随包示例](../resources/example.scenes.json)，仅作为新项目的模板，不是业务项目的第二配置来源。[动作目录](scene-actions-catalogue.md) 只索引 ID、前提、参数和验证状态，不复制步骤或生成运行 catalogue。Test Case 继续在 `tests.json` v2 负责环境与断言。
 
-协议和示例用生产 `validateSceneDocument` / `compileSceneAction` 校验。重构保持展开后的原子行为不变，并确认公共操作没有修改 `activeSceneId`；适当验证 secret 传播与执行锁。工作台涉及布局或操作交互时补相应 UI 回归；VM 模板变化同时验证真实注入上下文。
+协议和示例用生产目录 schema、`validateScenePackage` / `compileSceneAction` 校验。重构保持展开后的原子行为不变，并确认公共操作没有修改 `activeSceneId`；适当验证 secret 传播与执行锁。工作台涉及布局或操作交互时补相应 UI 回归；VM 模板变化同时验证真实注入上下文。
 
 交付记录分别注明 schema / 单元验证、模拟器实际流程、真实设备和未覆盖业务，不把某次成功耗时当作性能保证。本轮 Wali 登录 15 步、工作台手动返回主页 4 步与网络验证记录见 [验收记录](validation.md)；历史证据不代替未来改动后的复验。

@@ -1,0 +1,33 @@
+{
+  "id": "open_home",
+  "name": "从已登录 App 返回主页",
+  "description": "起点为已登录的 App 主界面，底栏可用；按 Home Key 返回主页。不会替代登录，不切换当前 Mock。示例 Key 在目标 App 中核验后使用。",
+  "steps": [
+    {
+      "id": "wait_app_shell",
+      "type": "wait_for_widget",
+      "target": "appShell",
+      "timeoutMs": 30000,
+      "state": "visible"
+    },
+    {
+      "id": "ready_homeTab",
+      "type": "wait_for_widget",
+      "target": "homeTab",
+      "timeoutMs": 30000,
+      "state": "actionable"
+    },
+    {
+      "id": "open_home",
+      "type": "tap",
+      "target": "homeTab"
+    },
+    {
+      "id": "wait_home",
+      "type": "wait_for_widget",
+      "target": "homePage",
+      "timeoutMs": 30000,
+      "state": "visible"
+    }
+  ]
+}

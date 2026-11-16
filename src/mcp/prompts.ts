@@ -48,7 +48,7 @@ const templates = {
       '按任务使用 tap、enter_text、scroll 和 wait_for_widget；滚动与等待设置限额。enter_text 替换输入内容，按实际需要在点击按钮前 hide_keyboard，确认键盘稳定收起；不将输入描述为真实系统键盘 IME 测试。',
       'NOT_FOUND 先检查是否进入目标页面、是否懒加载，再有界等待或滚动，不能直接判为缺 Key。遇到 MISSING_KEY、UNSTABLE_KEY 或交互目标歧义时，调用 inspect_key_issues，结合 source 和业务源码定位原因。',
       '任务涉及源码修复时补稳定 ValueKey，列表优先使用业务 ID；没有源码修改授权时报告诊断。保存后通过MCP hot_reload保留状态应用变更；需重置内存并重跑入口时显式选择hot_restart。仅控制当前VM准确对应的IDE Flutter Debug会话；之后重新读取快照并定位，确认修复，不复用旧对象；不把当前挂载树诊断宣称为全仓审计。',
-      '手动探索时验证关键状态，已保存操作由内部等待推进；终态后用 wait_for_widget 或 find_widget 独立验证最终页面，按任务检查新网络记录。首次验证的步骤仅归档到 scenes.json，公共操作用 call 复用。遮挡或禁用时按正常业务流程处理，不绕过命中测试。',
+      '手动探索时验证关键状态，已保存操作由内部等待推进；终态后用 wait_for_widget 或 find_widget 独立验证最终页面，按任务检查新网络记录。首次验证的步骤仅归档到 scenes/ 目录，公共操作用 call 复用。遮挡或禁用时按正常业务流程处理，不绕过命中测试。',
     ],
   },
   mock_workflow: {
@@ -56,12 +56,12 @@ const templates = {
       '完整业务联调：复用或启动 App、准备 API/WS Mock、执行 Scene 操作、验证 HTTP/WS/UI 或 Test Case，并归档公共 actions。',
     topics: ['workflow'],
     steps: [
-      '重复的登录、填表、下单确认操作优先复用 Scene 操作：先 list_scenes，再按 sceneId 调用 list_scene_actions。首次探索和验证后在 scenes.json 保存 targets 与 actions，reload_rules 更新快照，后续 run_scene_action 一次启动，由插件执行，不逐步重新寻找控件或调用模型；get_scene_action_run 查看进度，cancel_scene_action_run 停止。',
+      '重复的登录、填表、下单确认操作优先复用 Scene 操作：先 list_scenes，再按 sceneId 调用 list_scene_actions。首次探索和验证后在 scenes/ 目录 保存 targets 与 actions，reload_rules 更新快照，后续 run_scene_action 一次启动，由插件执行，不逐步重新寻找控件或调用模型；get_scene_action_run 查看进度，cancel_scene_action_run 停止。',
       '需要可重复业务测试时，先 list_tests，按 files.tests 引用同一 Scene 操作，配置本轮 HTTP 参数/响应提取、关联 WS 和精确订单行 UI 断言；run_test 启动、get_test_run 查询，只有 passed 表示通过，cancel_test_run 取消。临时 Scene/有状态 Mock 随本轮恢复；先验证本轮请求，再注入同一订单事件。',
       '把任务拆成接口或消息条件、Mock 预期、界面操作和可观察的通过标准；按实际涉及的域读取 http、ws、ui 指南。不要求不存在的网络事件，不凭空增加测试场景。',
       '任务要求多状态验证时，按本次指定场景逐个执行，例如下单成功、失败和资产变化；每个场景先构造 API 响应或 WS 事件，再操作目标 Key 并核对结果，避免前一场景的规则、消息或页面状态干扰下一场景。',
       '用 list_sessions 确认项目、设备和已有 App；未启动时按现有命名配置 start_app，TIMEOUT 先查状态不重复启动。get_network_status 记录路径与开关；已有操作按说明确认前提，仅缺少操作或定位失效时 get_ui_snapshot 探索真实 Key。记录请求/消息基线。',
-      '使用 Agent 文件工具增量编辑目标规则，保留其他规则；调用 reload_rules 整份重载场景，检查 loaded 和 status.scene.runtime。',
+      '使用 Agent 文件工具增量编辑目标规则，保留其他规则；调用 reload_rules 增量刷新目录资源并重新应用当前 Mock，检查 loaded 和 status.scene.runtime。',
       '激活目标场景并确认本次所需 HTTP/Dio 或 WS 接入；不强制等待所有域。公共操作 Scene 只复用步骤，当前 Mock 保持；纯操作或只读排查无需开启 Mock。',
       '场景需要重新启动时，使用MCP hot_restart重置内存并重跑入口；仅应用源码且需保留状态时用hot_reload。仅支持当前VM准确对应的IDE Flutter Debug会话，无法绑定时报告诊断，不选择其他会话。热重启不代替reload_rules；连接未断时已有开关维持并重新发现运行时对象，但启动首请求可能未拦截，检查返回的network及新记录，不能仅凭工具完成断言Mock有效。实际VM断线后需重新连接，已保存的激活场景会自动恢复；检查分域应用状态。',
       '需要主动 WS 事件时，选择 inject_ws_message 向 App 注入，或 send_ws_message 经真实连接发往服务端；使用实际业务协议的 topic/data 或原始 text，检查 outbound 规则影响，并验证事件处理结果。',
@@ -154,7 +154,7 @@ export const toolPromptPlans = {
   reload_rules: {
     topics: ['http', 'ws'],
     steps: [
-      '如需修改规则，先通过 get_network_status 获取路径，再使用 Agent 文件工具增量编辑并保存，保留其他规则；也可直接重载现有场景文件。调用 reload_rules 整份重载场景文件。',
+      '如需修改规则，先通过 get_network_status 获取路径，再使用 Agent 文件工具增量编辑并保存，保留其他规则；也可直接重载现有场景文件。调用 reload_rules 增量刷新目录资源并重新应用当前 Mock文件。',
       '检查 loaded 和 status.scene.runtime 的分域状态；失败时修复文件，不能把旧有效规则当作新规则已生效。重载按持久激活场景同步，不代替 hot_reload/hot_restart，也不重放业务请求。',
     ],
   },

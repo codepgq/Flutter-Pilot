@@ -5,7 +5,7 @@ import { encodeWsMessage } from './tools';
 export interface NetworkHost {
   scenesPath: string;
   testsPath?: string;
-  listScenes(): unknown;
+  listScenes(query?: { offset?: number; limit?: number; search?: string }): unknown;
   activateScene(id: string | null): Promise<void>;
   reloadScenes(): Promise<void>;
   status(): Record<string, unknown>;
@@ -26,13 +26,14 @@ export class McpNetworkController {
   status() {
     return {
       ...this.host.status(),
+      storageVersion: 2,
       files: {
         scenes: this.host.scenesPath,
         ...(this.host.testsPath ? { tests: this.host.testsPath } : {}),
       },
       loaded: this.loaded,
       instructions:
-        '编辑 files.scenes 后调用 reload_rules；用 list_scenes / activate_scene / deactivate_scene 统一控制 HTTP/WS Mock，并以新记录验证命中。',
+        'files.scenes 是 v2 根清单；按清单编辑独立资源后调用 reload_rules；旧 scenes.json 需显式迁移；用 list_scenes / activate_scene / deactivate_scene 统一控制 HTTP/WS Mock，并以新记录验证命中。',
     };
   }
 
@@ -54,7 +55,7 @@ export class McpNetworkController {
       case 'reload_rules':
         return this.reload();
       case 'list_scenes':
-        return this.host.listScenes();
+        return this.host.listScenes(query);
       case 'activate_scene':
         await this.host.activateScene(args.sceneId);
         return this.host.listScenes();

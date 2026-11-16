@@ -6,9 +6,9 @@
 
 配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key、文字或语义定位页面，通过 VM 或设备输入操作，减少逐步截图识别的耗时与 token 消耗。
 
-当前版本为 **0.0.21**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+当前版本为 **0.0.22**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
 
-**0.0.21 更新**：新增 Cursor MCP 一键适配、项目 / 全局配置和连接状态；Mock 场景页各主要区块及操作运行结果支持独立展开与收起，保留搜索、参数和草稿。
+**0.0.22 更新**：Scene 改为目录化 v2 存储，规则、动作和正文按需加载；工作台分页搜索、增量保存及事务恢复。旧 `scenes.json` 请先通过 **Flutter Pilot: 迁移 Scene v1 到 v2** 显式转换，详见 [目录存储与迁移](docs/scene-storage.md)。
 
 **0.0.20 更新**：完善 MCP 功能与任务引导，新增截图专用 Prompt / 指南，并更新插件、活动栏、工作台和 MCP 服务图标。
 
@@ -24,7 +24,7 @@
 
 **移动交互**：新增私有 Appium 设备通道，支持无 Key 定位、多指手势、文本编辑、键盘和系统操作，详见 [移动交互指南](docs/mobile-automation.md)。
 
-**Scene 操作**：Mock、共享 targets 和多个命名 actions 统一保存于 `scenes.json`。Agent 首次探索验证后，通过 `run_scene_action` 参数化执行登录、填表或下单；App 未运行时可用 `start_app` 启动当前工作区命名 Debug 配置，可选 `deviceId` 明确设备。公共操作可复用于不同 Mock，运行不切换当前 Mock。支持后台进度、耗时、取消与失败即停，连接恢复不重放。详见 [操作指南](docs/workflows.md)。
+**Scene 操作**：Mock、共享 targets 和多个命名 actions 统一保存于 `scenes/`。Agent 首次探索验证后，通过 `run_scene_action` 参数化执行登录、填表或下单；App 未运行时可用 `start_app` 启动当前工作区命名 Debug 配置，可选 `deviceId` 明确设备。公共操作可复用于不同 Mock，运行不切换当前 Mock。支持后台进度、耗时、取消与失败即停，连接恢复不重放。详见 [操作指南](docs/workflows.md)。
 
 后续类似需求先按 [Scene 联调流程](docs/scene-authoring.md) 查找和运行已有动作；[动作目录](docs/scene-actions-catalogue.md) 已归档首次邮箱登录、最近账号切换登录、已有会话返回主页及下单示例。公共步骤通过 `call` 复用，目标按真实 Widget Key 定位，验证同时覆盖最终 UI 和本轮网络命中。
 
@@ -42,7 +42,7 @@
 
 **MCP 与编码 Agent 接入**：MCP 服务名为 `flutter-pilot`。工作台的 MCP Tab 默认按项目适配 Claude Code CLI、Codex CLI／App；Agent 可复用现有 VM 操作 UI、重载 HTTP／WS 规则并查询记录验证结果。详见 [MCP 与编码 Agent](#mcp-与编码-agent) 和 [MCP 使用说明](docs/mcp.md)。
 
-项目首次初始化会生成 `.flutter-pilot/project.json` 保存 UUID 和项目配置，Mock 场景保存在 `.flutter-pilot/scenes.json`。复制项目或创建 worktree 后，各目录读取自己的规则、分别记录本机历史。统一的 **API 请求** 页面逐条展示 HTTP 调用，按请求时间从新到旧排列，响应自动尝试 JSON 格式化；规则启停使用简洁 switch。
+项目首次初始化会生成 `.flutter-pilot/project.json` 保存 UUID 和项目配置，Mock 场景保存在 `.flutter-pilot/scenes/`。复制项目或创建 worktree 后，各目录读取自己的规则、分别记录本机历史。统一的 **API 请求** 页面逐条展示 HTTP 调用，按请求时间从新到旧排列，响应自动尝试 JSON 格式化；规则启停使用简洁 switch。
 
 > 当前通过 VSIX 安装，尚未发布到扩展商店。0.0.2 VM 路线已在 iPhone 18 Pro / iOS 27.2 模拟器实际验证，应用入口 SHA-256 保持不变。代理路线的旧版设备验收与 VM 新版验收分别记录，完整证据和限制见 [VM 使用与可行性验证](docs/v0.0.2-vm-service.md) 和 [验收记录](docs/validation.md)。
 
@@ -111,7 +111,7 @@ MCP 服务名称和客户端配置项名称均为 **`flutter-pilot`**；插件�
 3. 按客户端提示加载配置、信任或批准项目 MCP；必要时重连或新建会话。**已配置不代表客户端已连接**，实际握手状态在工作台显示。
 4. 让 Agent 使用 `flutter-pilot` 的 `get_usage_guide` 和 `list_sessions`，选择对应项目后执行任务。
 
-Agent 可按 `ValueKey<String/int>`、文字、语义、类型、祖先或快照引用定位；连接设备后支持完整手势、原生编辑器与系统 UI，也可诊断当前界面的 Key 问题；也可查询 HTTP 请求和业务 WebSocket 消息、重载规则并控制采集与 Mock。场景由 Agent 编辑项目的 `.flutter-pilot/scenes.json`，`reload_rules` 整份重载，`list_scenes` 查询，`activate_scene` / `deactivate_scene` 统一控制 HTTP / WS Mock。激活状态持久保存，重连和重开 IDE 后自动恢复。多状态测试逐个切换场景，分别检查新网络记录和页面结果；Key 用于日常精确交互，视觉样式和布局验收再补充截图。
+Agent 可按 `ValueKey<String/int>`、文字、语义、类型、祖先或快照引用定位；连接设备后支持完整手势、原生编辑器与系统 UI，也可诊断当前界面的 Key 问题；也可查询 HTTP 请求和业务 WebSocket 消息、重载规则并控制采集与 Mock。场景由 Agent 编辑项目的 `.flutter-pilot/scenes/`，`reload_rules` 增量刷新，`list_scenes` 查询，`activate_scene` / `deactivate_scene` 统一控制 HTTP / WS Mock。激活状态持久保存，重连和重开 IDE 后自动恢复。多状态测试逐个切换场景，分别检查新网络记录和页面结果；Key 用于日常精确交互，视觉样式和布局验收再补充截图。
 
 WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服务端消息，`send_ws_message` 通过 App 当前真实 WS 连接发给服务端。均需开启 WS 采集并确认连接已接入，并选择准确的在线连接；不新建连接。可传原始 `text`，或传 `topic` 和 `data` 组装为 `{"topic": "...", "data": ...}`；自定义业务协议使用完整原始文本。真实发送经过当前 outbound 规则，可能被替换或丢弃；工具调用成功后仍需核对消息和业务结果。
 
@@ -175,7 +175,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 
 ### 从 VSIX 安装
 
-1. 获取 `flutter-pilot-0.0.21.vsix`。从源码构建见下方步骤。
+1. 获取 `flutter-pilot-0.0.22.vsix`。从源码构建见下方步骤。
 2. 在 VS Code 或 Cursor 扩展面板右上角菜单选择 **Install from VSIX… / 从 VSIX 安装…**。
 3. 选择安装包，按 IDE 提示重新加载窗口。
 4. 打开包含 `pubspec.yaml` 的 Flutter 项目根目录，并信任工作区。
@@ -185,8 +185,8 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 安装当前 Flutter Pilot 包，例如：
 
 ```sh
-cursor --install-extension artifacts/flutter-pilot-0.0.21.vsix --force
-# VS Code 使用 code --install-extension 同一文件 --force
+cursor --install-extension artifacts/flutter-pilot-0.0.22.vsix --force
+# VS Code 使用 code --install-extension 同一 VSIX 文件 --force
 ```
 
 命令在仓库根目录执行，并要求对应 IDE 的 CLI 可用。安装后执行 **Developer: Reload Window / 重新加载窗口**。
@@ -208,7 +208,7 @@ npm test
 npm run package
 ```
 
-产物为 `artifacts/flutter-pilot-0.0.21.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
+产物为 `artifacts/flutter-pilot-0.0.22.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
 
 ### 使用已有引擎
 
@@ -384,9 +384,9 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 激活会保存选择并开启所需协议的采集和 Mock；关闭采集暂停该域 Mock，重新开启采集恢复。停用场景关闭两域 Mock，保留采集；删除激活场景也会停用。重连或重开 IDE 后自动恢复已激活场景，不改变 VM 自动连接设置。显示分域待应用、已应用、失败、不支持和暂停状态；没有 Dio 实例或目标 WS 连接不能表示已应用，实际命中仍须查看新记录。同步失败不恢复旧场景，旧租约可能需要最多约 16 秒等待。
 
-首次升级将当前 `.flutter-pilot/rules.json` 与 `ws-rules.json` 一次性归入“默认场景”，保留规则 ID、顺序和启停，默认不激活；新项目创建空默认场景。生成 `scenes.json` 后旧文件保留但不再读取或更新。文件无效或被外部修改时拒绝覆盖，修复后使用 **读取项目文件**。
+Scene 存储升级到目录 v2，旧 `scenes.json` 必须显式预检并迁移，保留原文件。新项目创建默认 Scene，激活选择保存于 IDE 私有存储。详见 [存储格式、迁移和冲突处理](docs/scene-storage.md)。
 
-复制场景重新生成场景与规则 ID，保留启停状态且不自动激活；复制单条规则仍默认禁用。导入使用场景格式，重新生成 ID 后追加，保留启停状态并保持当前激活场景。导出整份场景配置，不含历史或 CA。持久 WS 使用 URL；当前连接的临时规则仅属于激活场景，连接失效或切换场景时清除。WS 手动推送继续在 WebSocket 页面操作；Test Case 可在指定 HTTP 断言成功后注入本轮关联事件，不提供通用定时或重放。代理模式仅支持 HTTP，混合场景的 WS 显示不支持。
+复制场景重新生成场景与规则 ID，保留启停状态且不自动激活；复制单条规则仍默认禁用。导入使用 v2 自包含交换包，重新生成 Scene / 规则 ID 后追加，保留启停状态并保持当前激活场景。导出包含依赖的 v2 交换包，正文内联，不含历史或 CA。持久 WS 使用 URL；当前连接的临时规则仅属于激活场景，连接失效或切换场景时清除。WS 手动推送继续在 WebSocket 页面操作；Test Case 可在指定 HTTP 断言成功后注入本轮关联事件，不提供通用定时或重放。代理模式仅支持 HTTP，混合场景的 WS 显示不支持。
 
 ### 断点队列
 
@@ -396,7 +396,7 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 ## 规则格式与执行顺序
 
-场景文件和导入结构为 `{"version":1,"activeSceneId":null,"scenes":[{"id":"default","name":"默认场景","httpRules":[],"wsRules":[]}]}`。最多 1000 个场景，每场景每个协议最多 1000 条规则；规则 ID 在同一协议的所有场景中唯一。HTTP 单条规则的字段如下：
+持久格式为 `scenes/index.json` v2 根清单及独立资源，详见 [目录存储](docs/scene-storage.md)；导入结构为 `{"version":2,"scenes":[{"id":"default","name":"默认场景","httpRules":[],"wsRules":[]}]}` 自包含交换包。全库不设 Scene 总数限制；单次协议应用仍受规则数及正文限额保护。规则 ID 在同一协议的所有场景中唯一。HTTP 单条规则的字段如下：
 
 | 字段 | 含义 |
 | --- | --- |
@@ -455,8 +455,7 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 ```json
 {
-  "version": 1,
-  "activeSceneId": null,
+  "version": 2,
   "scenes": [
     {
       "id": "example-scene",
@@ -609,7 +608,7 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 项目根目录/
 └── .flutter-pilot/
     ├── project.json              # 项目 UUID、格式版本、接入方式和项目设置
-    ├── scenes.json               # 场景及持久激活状态，统一包含 HTTP / WS 规则、targets 和 actions
+    ├── scenes/index.json         # v2 根清单；每个 Scene 目录含规则、targets、actions 与 bodies
     └── tests.json                # 可选：引用 Scene 操作的 v2 业务测试与关联断言
 ```
 
@@ -633,12 +632,12 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 }
 ```
 
-`settings` 可省略；其中字段使用不带 `flutterPilot.` 前缀的名称，优先于对应 IDE 设置。引擎路径仍使用本机 IDE 的 `flutterPilot.enginePath`。`scenes.json` 与导入 / 导出使用相同场景结构；工作台增删改、复制、启停和排序都会保存到当前目录的规则文件。
+`settings` 可省略；其中字段使用不带 `flutterPilot.` 前缀的名称，优先于对应 IDE 设置。引擎路径仍使用本机 IDE 的 `flutterPilot.enginePath`。运行配置使用 Scene 目录，导入 / 导出使用 v2 自包含 JSON 交换包。单项编辑只写相应资源，激活选择保存在 IDE 私有存储。
 
 | 修改内容 | 生效方式 |
 | --- | --- |
 | 工作台编辑规则 | 保存到项目文件，并同步运行中的会话；以同步结果为准 |
-| 外部编辑 `scenes.json` | 保存文件后点击 **读取项目文件**，校验并同步 |
+| 外部编辑 `scenes/` | 保存文件后点击 **读取项目文件**，校验并同步 |
 | 外部编辑项目名称 | 保存后点击 **读取项目文件**，更新项目显示名称 |
 | 外部编辑接入方式、端口、采集参数 | 保存后重新加载窗口；当前会话继续使用启动时的配置 |
 | 修改 `projectId` | 重新加载窗口建立新绑定；当前会话拒绝直接切换 UUID |
@@ -810,7 +809,7 @@ python3 tool/device_smoke.py --mitmdump /absolute/path/to/mitmdump --ios YOUR_SI
 
 ```sh
 npm run package
-shasum -a 256 artifacts/flutter-pilot-0.0.21.vsix
+shasum -a 256 artifacts/flutter-pilot-0.0.22.vsix
 ```
 
 VSIX 包含扩展构建产物、VM 注入模板、代理 addon、引擎清单及文档，不包含 Node 开发依赖、Flutter 示例构建结果或真实证书。首次引擎下载单独发生。源码中的 README 修改后，应重新打包，安装包内的文档才会更新。

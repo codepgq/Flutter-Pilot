@@ -74,7 +74,7 @@ export const mcpTools = {
   ...testMcpTools,
   get_network_status: {
     description:
-      '查询 files.scenes、当前 Mock 与分域接入状态；HTTP 查看 attachedDioInstances 和覆盖边界，只要求本流程所需域/客户端就绪。编辑后 reload_rules 并激活所需 Mock；applied 需以本轮新记录验证。',
+      '查询 storageVersion:2、files.scenes 根清单路径、当前 Mock 与分域接入状态；HTTP 查看 attachedDioInstances 和覆盖边界，只要求本流程所需域/客户端就绪。编辑后 reload_rules 并激活所需 Mock；applied 需以本轮新记录验证。',
     schema: z.object(session).strict(),
   },
   get_requests: {
@@ -123,7 +123,7 @@ export const mcpTools = {
   },
   reload_rules: {
     description:
-      '整份读取并验证scenes.json，同步持久激活场景；无激活场景时不自动选择。检查loaded和status.scene.runtime，再用新记录验证命中。',
+      '增量刷新 scenes/index.json v2 目录与资源摘要，仅装配当前激活场景；错误隔离并保留最后有效运行快照，stale 表示新配置未生效；无激活场景时不自动选择。检查loaded和status.scene.runtime，再用新记录验证命中。',
     schema: z.object(session).strict(),
   },
   set_capture_enabled: {
@@ -132,8 +132,15 @@ export const mcpTools = {
   },
   list_scenes: {
     description:
-      '优先发现项目 Scene、HTTP/WS 规则数量、targets/actions 概要和当前 Mock；再 list_scene_actions 选择已有操作及参数，无需逐步探索或读取整份 Mock。VM 离线也可查询；定义仅来自 files.scenes。',
-    schema: z.object(session).strict(),
+      '分页搜索项目 Scene 摘要，返回目录、清单路径、规则/操作数量、健康状态及当前 Mock，不读取正文。offset 默认0，limit 默认50且最多200；search 匹配名称、ID、规则与动作名称。再 list_scene_actions 查询独立 action 文件路径和参数。',
+    schema: z
+      .object({
+        ...session,
+        offset: z.number().int().min(0).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        search: z.string().max(1000).optional(),
+      })
+      .strict(),
   },
   activate_scene: {
     description:

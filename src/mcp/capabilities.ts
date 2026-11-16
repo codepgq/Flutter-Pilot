@@ -120,7 +120,7 @@ export const capabilityRoutes = [
     prompt: 'scene_action_quick_run',
     topics: ['workflow', 'ui'],
     workflow:
-      'list_scenes → list_scene_actions 查前提和输入，run_scene_action 显式启动并查询 runId；target 自动解析真实 Key，无需每步截图/find_widget。新增归档查 scene_action_authoring；公共 call 不切换 Mock，completed 后独立核验 UI 与本轮网络。',
+      'list_scenes(offset,limit,search) 分页查目录资源 → list_scene_actions 查前提和输入，run_scene_action 显式启动并查询 runId；target 自动解析真实 Key，无需每步截图/find_widget。新增归档、目录 v2 与显式迁移查 scene_action_authoring 和 overview.sceneStorage；公共 call 不切换 Mock，completed 后独立核验 UI 与本轮网络。',
   },
   {
     id: 'test',

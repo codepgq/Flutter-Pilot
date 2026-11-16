@@ -119,6 +119,10 @@ export interface ApiCatalogEntry {
   lastAt: number;
 }
 export interface WorkbenchState {
+  loadedSceneAction?: import('./workflows/model').SceneAction;
+  scenePage?: import('./scene-storage-model').ScenePage;
+  sceneDetail?: import('./scene-storage-model').SceneDetail;
+  ruleNames?: Record<string, { name: string; sceneId: string; sceneName: string }>;
   sceneActions?: {
     run?: ReturnType<import('./workflows/controller').WorkflowController['get']>['run'];
     running: boolean;

@@ -1,12 +1,36 @@
+import { validateScenePackage } from '../src/scenes';
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { validateSceneDocument } from '../src/scene-model';
 import { compileSceneAction } from '../src/workflows/model';
+import { SceneStore } from '../src/scenes';
+import { cp, mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const loadExamples = async () =>
-  validateSceneDocument(JSON.parse(await readFile('resources/example.scenes.json', 'utf8')));
+  validateSceneDocument({
+    ...validateScenePackage(JSON.parse(await readFile('resources/example.scenes.json', 'utf8'))),
+    version: 1,
+    activeSceneId: null,
+  });
 
 describe('archived Scene action examples', () => {
+  it('assembles the shipped directory resources into the same self-contained exchange package', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pilot-directory-example-'));
+    try {
+      await cp('resources/example-scenes', join(root, 'scenes'), { recursive: true });
+      const store = new SceneStore(root);
+      await store.load();
+      const pkg = await store.exportPackage();
+      const expected = await loadExamples();
+      const normalize = (scenes: typeof expected.scenes) =>
+        scenes.map((s) => ({ ...s, targets: s.targets ?? {}, actions: s.actions ?? [] }));
+      expect(normalize(pkg.scenes)).toEqual(normalize(expected.scenes));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it('compiles every shipped action with explicit string inputs', async () => {
     const doc = await loadExamples();
     for (const scene of doc.scenes) {

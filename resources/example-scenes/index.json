@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "scenes": [
+    {
+      "id": "example-orders",
+      "directory": "eb10f022-5ab2-54eb-bf37-84f1e02be6d1"
+    },
+    {
+      "id": "common_operations",
+      "directory": "ed45e9bf-9ebf-52a1-8d2c-22609fbec60f"
+    },
+    {
+      "id": "email_operations",
+      "directory": "2b30941c-c5a6-5fbf-8488-0c76e55dcd02"
+    },
+    {
+      "id": "email_entrypoints",
+      "directory": "b3f55e44-d509-5c4d-8cb9-a80d81fe111b"
+    }
+  ]
+}

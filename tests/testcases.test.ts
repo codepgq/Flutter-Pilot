@@ -9,6 +9,7 @@ import { validateSceneDocument } from '../src/scene-model';
 import type { HistoryEntry } from '../src/model';
 import type { WsMessage } from '../src/ws/model';
 import type { TestMock } from '../src/testing/mock-model';
+import { SceneStore } from '../src/scenes';
 
 const controllers: TestController[] = [],
   roots: string[] = [];
@@ -292,10 +293,16 @@ describe('test case execution and network correlation', () => {
     expect(run.action).toEqual({ sceneId: 'common', actionId: 'order' });
     expect(run.sceneId).toBe('insufficient_balance');
     expect(run.mockSceneId).toBe('insufficient_balance');
-    expect(host.prepare).toHaveBeenCalledWith(run.runId, 'insufficient_balance', undefined, {
-      http: true,
-      ws: true,
-    });
+    expect(host.prepare).toHaveBeenCalledWith(
+      run.runId,
+      'insufficient_balance',
+      undefined,
+      {
+        http: true,
+        ws: true,
+      },
+      expect.objectContaining({ scenes: expect.any(Array) }),
+    );
     expect(run.steps.every((step) => step.sceneId === 'common')).toBe(true);
   });
   it('leaves the current Mock selection to the host when no environment is specified', async () => {
@@ -304,7 +311,13 @@ describe('test case execution and network correlation', () => {
     const run = await terminal(controller, (await controller.start('pending')).runId);
     expect(run.status).toBe('passed');
     expect(run.mockSceneId).toBe('currently-active');
-    expect(host.prepare).toHaveBeenCalledWith(run.runId, undefined, undefined, { http: true, ws: true });
+    expect(host.prepare).toHaveBeenCalledWith(
+      run.runId,
+      undefined,
+      undefined,
+      { http: true, ws: true },
+      expect.objectContaining({ scenes: expect.any(Array) }),
+    );
     expect(run.sceneId).toBeUndefined();
   });
   it('observes before confirm, extracts the actual order and validates its exact row', async () => {
@@ -487,6 +500,38 @@ describe('test case execution and network correlation', () => {
     expect(log).toContain('wait_for_widget:account');
     expect(log).toContain('tap:confirm');
     expect(log).not.toContain('tap:account');
+  });
+  it('resolves a templated Mock Scene from inputs before collecting the shared setup/action snapshot', async () => {
+    const test = definition();
+    test.sceneId = '${inputs.quantity}';
+    test.inputs!.quantity = 'mock';
+    test.setup = [{ action: { sceneId: 'common', actionId: 'login' }, inputs: { account: 'expected-user' } }];
+    const { controller, host, flows, setAccount } = await fixture(test);
+    setAccount('expected-user');
+    const root = await mkdtemp(join(tmpdir(), 'pilot-template-snapshot-'));
+    roots.push(root);
+    const store = new SceneStore(root);
+    await store.load();
+    await store.importPackage(
+      {
+        version: 2,
+        scenes: [...flows.scenes, { id: 'mock', name: '模板 Mock', httpRules: [], wsRules: [] }],
+      },
+      false,
+    );
+    vi.mocked(host.loadScenes).mockImplementation(async (definition, resolveMock) =>
+      store.prepareSnapshot(
+        [definition!.action, ...definition!.setup!.map((s) => s.action)],
+        null,
+        (actions) => resolveMock!(actions) ?? null,
+      ),
+    );
+    const run = await terminal(controller, (await controller.start('pending')).runId);
+    expect(run.status).toBe('passed');
+    expect(host.loadScenes).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(host.prepare).mock.calls[0][1]).toBe('mock');
+    expect(vi.mocked(host.prepare).mock.calls[0][4]!.scenes.map((s) => s.id)).toEqual(['common', 'mock']);
+    expect(Object.isFrozen(vi.mocked(host.prepare).mock.calls[0][4]!.scenes[0].actions![0].steps)).toBe(true);
   });
   it('waits for setup-created connections before establishing the main baseline', async () => {
     const test = definition();

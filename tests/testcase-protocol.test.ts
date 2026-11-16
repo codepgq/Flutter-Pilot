@@ -1,3 +1,4 @@
+import { validateScenePackage } from '../src/scenes';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -25,7 +26,11 @@ describe('Test Case MCP contracts', () => {
     const example = JSON.parse(await readFile('resources/example.tests.json', 'utf8'));
     expect((getUsageGuide('workflow').testing as Record<string, unknown>).exampleDocument).toEqual(example);
     const document = validateTestDocument(example);
-    const scenes = validateSceneDocument(JSON.parse(await readFile('resources/example.scenes.json', 'utf8')));
+    const scenes = validateSceneDocument({
+      ...validateScenePackage(JSON.parse(await readFile('resources/example.scenes.json', 'utf8'))),
+      version: 1,
+      activeSceneId: null,
+    });
     expect(document.tests).toHaveLength(2);
     for (const test of document.tests) {
       expect(test.action.actionId).toBe('submit_order');

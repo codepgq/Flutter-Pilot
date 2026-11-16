@@ -1,0 +1,82 @@
+{
+  "id": "complete_email_login_to_home",
+  "name": "填写邮箱验证码并进入主页",
+  "description": "起点为邮箱输入页；传入本轮允许使用的邮箱和验证码。按真实 Key 输入、确认键盘收起、请求验证码并等待主页。须另行准备认证和主页初始化 Mock；本操作不切换当前 Mock。示例 Key 来自已验证模式，接入其他 App 前核验源码。",
+  "inputs": {
+    "email": {
+      "required": true
+    },
+    "code": {
+      "required": true,
+      "secret": true
+    }
+  },
+  "steps": [
+    {
+      "id": "wait_email_input",
+      "type": "wait_for_widget",
+      "target": "emailInput",
+      "timeoutMs": 30000,
+      "state": "actionable"
+    },
+    {
+      "id": "fill_email",
+      "type": "enter_text",
+      "target": "emailInput",
+      "text": "${inputs.email}",
+      "timeoutMs": 10000
+    },
+    {
+      "id": "dismiss_email_keyboard",
+      "type": "hide_keyboard",
+      "timeoutMs": 5000
+    },
+    {
+      "id": "ready_sendCode",
+      "type": "wait_for_widget",
+      "target": "sendCode",
+      "timeoutMs": 30000,
+      "state": "actionable"
+    },
+    {
+      "id": "request_code",
+      "type": "tap",
+      "target": "sendCode"
+    },
+    {
+      "id": "wait_verification_page",
+      "type": "wait_for_widget",
+      "target": "codePage",
+      "timeoutMs": 30000,
+      "state": "visible"
+    },
+    {
+      "id": "wait_code_input",
+      "type": "wait_for_widget",
+      "target": "codeInput",
+      "timeoutMs": 30000,
+      "state": "present"
+    },
+    {
+      "id": "fill_code",
+      "type": "enter_text",
+      "target": "codeInput",
+      "text": "${inputs.code}",
+      "timeoutMs": 10000
+    },
+    {
+      "id": "wait_app_shell",
+      "type": "wait_for_widget",
+      "target": "appShell",
+      "timeoutMs": 30000,
+      "state": "visible"
+    },
+    {
+      "id": "wait_home",
+      "type": "wait_for_widget",
+      "target": "homePage",
+      "timeoutMs": 30000,
+      "state": "visible"
+    }
+  ]
+}

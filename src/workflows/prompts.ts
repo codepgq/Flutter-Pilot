@@ -5,7 +5,7 @@ export const sceneActionPromptPlans = {
     steps: [
       '调用 list_scene_actions 取得指定 sceneId 的共享 targets、命名操作 actionId、说明及参数。优先按起始页和参数复用现有操作；只读查询不会开启 Mock 或连接 VM。',
       'steps[].target 引用 targets 中的别名，执行器自动解析为真实 Widget Key 并匹配当前已挂载控件，无需每步额外 find_widget 或截图。仅缺少操作或定义失效时探索；任务允许改源码时补稳定 Key 并复验，禁止临时 ref 和坐标。',
-      '只在 scenes.json 增量保存 targets/actions，保留其他场景；公共步骤归档为纯操作 Scene，业务入口通过 call 和显式 inputs 复用。说明列起始页、账号、参数和预期终点，归档文档只索引 sceneId/actionId。保存后 reload_rules，再次 list_scene_actions 确认。',
+      '只在 scenes/ 目录 增量保存 targets/actions，保留其他场景；公共步骤归档为纯操作 Scene，业务入口通过 call 和显式 inputs 复用。说明列起始页、账号、参数和预期终点，归档文档只索引 sceneId/actionId。保存后 reload_rules，再次 list_scene_actions 确认。',
     ],
   },
   run_scene_action: {

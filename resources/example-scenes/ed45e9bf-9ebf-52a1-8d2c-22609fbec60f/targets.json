@@ -1,0 +1,47 @@
+{
+  "loginPage": {
+    "key": "login.page"
+  },
+  "usernameInput": {
+    "key": "login.username"
+  },
+  "passwordInput": {
+    "key": "login.password"
+  },
+  "loginSubmitButton": {
+    "key": "login.submit"
+  },
+  "accountLabel": {
+    "key": "account.identity"
+  },
+  "priceInput": {
+    "key": "order.price"
+  },
+  "quantityInput": {
+    "key": "order.quantity"
+  },
+  "submitButton": {
+    "key": "order.submit"
+  },
+  "confirmation": {
+    "key": "order.confirmation"
+  },
+  "confirmPrice": {
+    "key": "order.confirm.price",
+    "ancestor": {
+      "key": "order.confirmation"
+    }
+  },
+  "confirmQuantity": {
+    "key": "order.confirm.quantity",
+    "ancestor": {
+      "key": "order.confirmation"
+    }
+  },
+  "confirmButton": {
+    "key": "order.confirm.submit",
+    "ancestor": {
+      "key": "order.confirmation"
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import { requestResource, resourceHash } from './scene-resources';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { WsConnection, WsDirection, WsMessage, WsRule, WsState } from '../src/ws/model';
 import type { Scene } from '../src/scene-model';
@@ -113,18 +114,22 @@ export function WebSocketPanel({
   busy,
   send,
   rulesOnly = false,
+  resourceMode = false,
   openScenes,
   createInScene,
   initialDraft,
   onDraftClosed,
   scenes = [],
   sceneId,
+  ruleNames,
 }: {
+  ruleNames?: Record<string, { name: string }>;
   scenes?: Scene[];
   sceneId?: string;
   initialDraft?: WsRule;
   onDraftClosed?: () => void;
   rulesOnly?: boolean;
+  resourceMode?: boolean;
   openScenes?: () => void;
   createInScene?: (rule: WsRule) => void;
   state?: WsState;
@@ -174,13 +179,22 @@ export function WebSocketPanel({
   }, [connectionId, direction, querySearch, offset, send]);
   useEffect(() => {
     const listener = (event: MessageEvent) => {
+      if (
+        event.data?.type === 'scene.saved' &&
+        event.data.sceneId === sceneId &&
+        event.data.id === pendingRule.current?.id
+      ) {
+        pendingRule.current = undefined;
+        setDraft(undefined);
+        onDraftClosed?.();
+      }
       if (event.data?.type !== 'ws.detail') return;
       const message = event.data.message as WsMessage | null;
       if (!message || message.id === selectedId.current) setDetail(message ?? undefined);
     };
     window.addEventListener('message', listener);
     return () => window.removeEventListener('message', listener);
-  }, []);
+  }, [sceneId, onDraftClosed]);
 
   useEffect(() => {
     const pending = pendingRule.current;
@@ -475,7 +489,7 @@ export function WebSocketPanel({
                   <small className="ws-id">
                     连接 {detail.connectionId}
                     {detail.ruleId
-                      ? ` · 命中规则 ${state.rules.find((r) => r.id === detail.ruleId)?.name ?? detail.ruleId}`
+                      ? ` · 命中规则 ${ruleNames?.[detail.ruleId]?.name ?? state.rules.find((r) => r.id === detail.ruleId)?.name ?? detail.ruleId}`
                       : ''}
                   </small>
                   {detail.truncated && (
@@ -576,9 +590,13 @@ export function WebSocketPanel({
               sceneId={sceneId}
               connections={state.connections}
               busy={busy}
-              save={(rule, targetSceneId) => {
+              save={(rule, targetSceneId, expectedHash) => {
                 pendingRule.current = rule;
-                send('ws.rules.save', { rule, targetSceneId });
+                send('ws.rules.save', {
+                  rule,
+                  targetSceneId,
+                  ...(expectedHash ? { expectedHash } : {}),
+                });
               }}
               cancel={() => {
                 pendingRule.current = undefined;
@@ -624,7 +642,14 @@ export function WebSocketPanel({
                 {rule.match.contains ? `包含「${rule.match.contains}」` : '匹配全部文本消息'}
               </p>
               <div className="ws-rule-actions">
-                <button disabled={busy} onClick={() => setDraft(JSON.parse(JSON.stringify(rule)))}>
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    resourceMode && sceneId && !rule.match.connectionId
+                      ? requestResource(send, sceneId, 'ws', rule.id)
+                      : setDraft(JSON.parse(JSON.stringify(rule)))
+                  }
+                >
                   编辑
                 </button>
                 <button disabled={busy} onClick={() => send('ws.rules.duplicate', { id: rule.id })}>
@@ -674,12 +699,14 @@ function RuleEditor({
   rule: WsRule;
   connections: WsConnection[];
   busy: boolean;
-  save: (rule: WsRule, targetSceneId?: string) => void;
+  save: (rule: WsRule, targetSceneId?: string, expectedHash?: string) => void;
   cancel: () => void;
 }) {
   const [name, setName] = useState(rule.name);
   const [targetSceneId, setTargetSceneId] = useState(sceneId);
-  const existingRule = scenes.some((scene) => scene.wsRules.some((item) => item.id === rule.id));
+  const [expectedHash] = useState(() => resourceHash(sceneId, 'ws', rule.id));
+  const existingRule =
+    !!expectedHash || scenes.some((scene) => scene.wsRules.some((item) => item.id === rule.id));
   const [priority, setPriority] = useState(String(rule.priority));
   const [scope, setScope] = useState(rule.match.connectionId ? 'connection' : 'url');
   const [url, setUrl] = useState(rule.match.url ?? '');
@@ -734,6 +761,7 @@ function RuleEditor({
             action: action === 'drop' ? { type: 'drop' } : { type: 'replace', text },
           },
           targetSceneId,
+          expectedHash,
         );
       }}
     >

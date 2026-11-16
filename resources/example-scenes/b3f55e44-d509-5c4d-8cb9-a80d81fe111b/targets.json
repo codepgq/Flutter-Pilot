@@ -1,0 +1,18 @@
+{
+  "loginPage": {
+    "source": "flutter",
+    "key": "registrationLogin.page.root"
+  },
+  "otherOptions": {
+    "source": "flutter",
+    "key": "registrationLogin.otherOptions"
+  },
+  "switchAccount": {
+    "source": "flutter",
+    "key": "registrationLogin.switchAccount"
+  },
+  "emailMethod": {
+    "source": "flutter",
+    "key": "loginMethod.email"
+  }
+}

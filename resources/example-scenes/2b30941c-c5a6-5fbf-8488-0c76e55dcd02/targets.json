@@ -1,0 +1,30 @@
+{
+  "emailInput": {
+    "source": "flutter",
+    "key": "emailEntry.input"
+  },
+  "sendCode": {
+    "source": "flutter",
+    "key": "emailEntry.continue"
+  },
+  "codePage": {
+    "source": "flutter",
+    "key": "emailVerification.page.root"
+  },
+  "codeInput": {
+    "source": "flutter",
+    "key": "verificationCode.input"
+  },
+  "appShell": {
+    "source": "flutter",
+    "key": "app.shell.root"
+  },
+  "homeTab": {
+    "source": "flutter",
+    "key": "app.bottomNavigation.home"
+  },
+  "homePage": {
+    "source": "flutter",
+    "key": "home.page.root"
+  }
+}

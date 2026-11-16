@@ -1,6 +1,6 @@
 # Scene 操作归档目录
 
-可复制的操作模板统一维护在 [example.scenes.json](../resources/example.scenes.json)，MCP 的 `workflow` 指南引用同一份文件。项目实际执行只读取自己的 `.flutter-pilot/scenes.json`；复制需要的 Scene 后修改并核验 Key、补齐相应 Mock、重载配置。目录只索引操作，不另存步骤或创建 `workflows.json`。
+可复制的操作模板统一维护在 [example.scenes.json](../resources/example.scenes.json)，MCP 的 `workflow` 指南引用同一份文件。项目实际执行只读取自己的 `.flutter-pilot/scenes/`；复制需要的 Scene 后修改并核验 Key、补齐相应 Mock、重载配置。目录只索引操作，不另存步骤或创建 `workflows.json`。
 
 模板中的 Key 必须在目标 App 源码及当前控件树中核验。邮箱操作采用本轮 Wali 已验证的 Key 模式，其他 App 不能直接照搬；模板通过生产 schema 和编译检查，不等于已在任意 App 完成设备验收。
 
@@ -20,7 +20,7 @@
 
 ## 已验证的 Wali 实例
 
-调试项目的 `.flutter-pilot/scenes.json` 保存业务环境 `wali-wallet-logged-in` 与公共操作 `wali_common_operations`：
+调试项目的 `.flutter-pilot/scenes/` 保存业务环境 `wali-wallet-logged-in` 与公共操作 `wali_common_operations`：
 
 | 业务入口                       | 复用的公共操作                 | 展开步骤 | 设备证据                                     |
 | ------------------------------ | ------------------------------ | -------- | -------------------------------------------- |
@@ -28,7 +28,7 @@
 | `switch_account_login_to_home` | `complete_email_login_to_home` | 15       | iPhone 17 模拟器已完成登录并独立确认主页可见 |
 | `open_home`                    | `open_home`                    | 4        | 工作台从钱包页手动运行完成，保留当前 Mock    |
 
-Wali 的 40 条 HTTP 规则与操作保存在同一文件，登录后的资产初始化也须核对本轮命中。地址恢复 probe 有意模拟 503 退避，完整地址恢复与单独 NFT 刷新不属于登录验收；不能把后台退避描述成恢复成功。实际运行证据和模板校验分开记录，详见 [验收记录](validation.md) 与调试项目的 `.harness/memory/flutter-pilot-wallet-login-scene.md`。
+Wali 的 40 条 HTTP 规则与操作保存在同一目录库，登录后的资产初始化也须核对本轮命中。地址恢复 probe 有意模拟 503 退避，完整地址恢复与单独 NFT 刷新不属于登录验收；不能把后台退避描述成恢复成功。实际运行证据和模板校验分开记录，详见 [验收记录](validation.md) 与调试项目的 `.harness/memory/flutter-pilot-wallet-login-scene.md`。
 
 ## 后续归档要求
 

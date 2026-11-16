@@ -1,3 +1,4 @@
+import { validateScenePackage } from '../src/scenes';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -22,7 +23,11 @@ describe('Workflow MCP contracts', () => {
   it('keeps the shipped login/order example executable against the production compiler', async () => {
     const example = JSON.parse(await readFile('resources/example.scenes.json', 'utf8'));
     expect((getUsageGuide('workflow').reusable as Record<string, unknown>).exampleDocument).toEqual(example);
-    const document = validateSceneDocument(example);
+    const document = validateSceneDocument({
+      ...validateScenePackage(example),
+      version: 1,
+      activeSceneId: null,
+    });
     const compiled = compileSceneAction(document, 'common_operations', 'login_and_submit_order', {
       username: 'fixture@example.test',
       password: 'fixture-only-password',
@@ -37,11 +42,11 @@ describe('Workflow MCP contracts', () => {
     const examples = [...documentation.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) =>
       JSON.parse(match[1]),
     );
-    const sceneExample = examples.find((value) => value.version === 1 && Array.isArray(value.scenes));
+    const sceneExample = examples.find((value) => value.version === 2 && Array.isArray(value.scenes));
     const runExample = examples.find((value) => value.sessionId && value.sceneId && value.actionId);
     expect(sceneExample).toBeDefined();
     expect(runExample).toBeDefined();
-    expect(() => validateSceneDocument(sceneExample)).not.toThrow();
+    expect(() => validateScenePackage(sceneExample)).not.toThrow();
     expect(() => parseTool('run_scene_action', runExample)).not.toThrow();
   });
 

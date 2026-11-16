@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import type { ActionSummary } from '../src/scene-storage-model';
 import type { WorkbenchState } from '../src/model';
 
 const labels: Record<string, string> = {
@@ -28,7 +29,29 @@ export function TestPanel({
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const test = tests.find((item) => item.id === selected);
   const actionScene = state.scenes?.scenes.find((scene) => scene.id === test?.action.sceneId);
-  const action = actionScene?.actions?.find((item) => item.id === test?.action.actionId);
+  const [metadata, setMetadata] = useState<{ action?: ActionSummary; sceneName?: string }>();
+  const request = useRef(0);
+  const action = state.scenePage
+    ? metadata?.action
+    : actionScene?.actions?.find((item) => item.id === test?.action.actionId);
+  useEffect(() => {
+    setMetadata(undefined);
+    const requestId = ++request.current;
+    if (!state.scenePage || !test) return;
+    const listener = (event: MessageEvent) => {
+      const m = event.data;
+      if (
+        m?.type === 'test.action' &&
+        m.requestId === request.current &&
+        m.sceneId === test.action.sceneId &&
+        m.actionId === test.action.actionId
+      )
+        setMetadata({ action: m.action ?? undefined, sceneName: m.sceneName });
+    };
+    window.addEventListener('message', listener);
+    send('tests.action', { ...test.action, requestId });
+    return () => window.removeEventListener('message', listener);
+  }, [test?.action.sceneId, test?.action.actionId, state.scenePage?.revision]);
   const actionInputsKey = JSON.stringify([test?.action, action?.inputs]);
   const run = data?.run;
   useEffect(() => {
@@ -77,10 +100,13 @@ export function TestPanel({
           <>
             {test && (
               <p className="muted">
-                操作来源：{actionScene?.name ?? test.action.sceneId} / {action?.name ?? test.action.actionId}
+                操作来源：{metadata?.sceneName ?? actionScene?.name ?? test.action.sceneId} /{' '}
+                {action?.name ?? test.action.actionId}
               </p>
             )}
-            {test && !action && <p role="alert">测试引用的场景操作不存在，请检查配置并重新加载场景。</p>}
+            {test && !action && (!state.scenePage || metadata) && (
+              <p role="alert">测试引用的场景操作不存在，请检查配置并重新加载场景。</p>
+            )}
             <div className="workflow-fields">
               <label>
                 选择测试

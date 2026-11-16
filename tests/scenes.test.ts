@@ -1,76 +1,118 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile, lstat, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { cloneScenes, SceneStore } from '../src/scenes';
-import { validateSceneDocument, type SceneDocument } from '../src/scene-model';
+import { join, dirname, relative } from 'node:path';
+import { SceneStore, cloneScenes } from '../src/scenes';
 import { SceneController, type SceneHost } from '../src/scene-controller';
+import { migrateScenes } from '../src/scene-migration';
+import { hash, json, SceneFiles } from '../src/scene-files';
+import { compileSceneAction } from '../src/workflows/model';
+import type { Scene, SceneDocument } from '../src/scene-model';
 import type { Rule } from '../src/model';
-import type { WsRule } from '../src/ws/model';
-import { sceneExample } from '../src/mcp/guide';
+import { build } from 'esbuild';
+import { fork } from 'node:child_process';
+import { resolve } from 'node:path';
 
-const http: Rule = {
-  id: 'http-1',
-  name: '订单',
-  enabled: true,
-  priority: 10,
-  match: { path: '/orders' },
-  mock: { status: 200, headers: {}, body: 'one' },
-};
-const ws: WsRule = {
-  id: 'ws-1',
-  name: '订单消息',
-  enabled: true,
-  priority: 10,
-  match: { url: 'wss://example.test/orders' },
-  action: { type: 'drop' },
-};
 let directory: string;
 let store: SceneStore;
+const rule: Rule = {
+  id: '中文/特殊 ID',
+  name: '订单',
+  enabled: true,
+  priority: 1,
+  match: { path: '/orders' },
+  mock: { status: 200, headers: {}, body: '\uFEFF中文\r\n\u0000特殊正文 😀\n' },
+};
+const scenes = (): Scene[] => [
+  {
+    id: '入口 / 中文',
+    name: '入口',
+    httpRules: [structuredClone(rule)],
+    wsRules: [
+      {
+        id: 'ws',
+        name: '消息',
+        enabled: true,
+        priority: 1,
+        match: { url: '*' },
+        action: { type: 'replace', text: '' },
+      },
+    ],
+    actions: [
+      {
+        id: 'start',
+        name: '入口操作',
+        inputs: { password: { secret: true, required: true } },
+        steps: [
+          {
+            id: 'call',
+            type: 'call',
+            sceneId: 'common',
+            actionId: 'fill',
+            inputs: { password: '${inputs.password}' },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'common',
+    name: '公共操作',
+    httpRules: [],
+    wsRules: [],
+    targets: { input: { source: 'flutter', key: 'password' } },
+    actions: [
+      {
+        id: 'fill',
+        name: '填表',
+        inputs: { password: { secret: true, required: true } },
+        steps: [
+          { id: 'fill', type: 'enter_text', target: 'input', text: '${inputs.password}' },
+          { id: 'hide', type: 'hide_keyboard' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'unrelated',
+    name: '无关',
+    httpRules: [{ ...rule, id: 'other', mock: { status: 200, headers: {}, body: 'untouched' } }],
+    wsRules: [],
+    actions: [{ id: 'idle', name: '无关操作', steps: [{ id: 'hide', type: 'hide_keyboard' }] }],
+  },
+];
 beforeEach(async () => {
-  directory = await mkdtemp(join(tmpdir(), 'pilot-scenes-'));
+  directory = await mkdtemp(join(tmpdir(), 'pilot-scene-v2-'));
   store = new SceneStore(directory);
+  await store.load();
 });
 afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
-const document = (): SceneDocument => ({
-  version: 1,
-  activeSceneId: null,
-  scenes: [
-    { id: 'one', name: '成功', httpRules: [structuredClone(http)], wsRules: [structuredClone(ws)] },
-    {
-      id: 'two',
-      name: '失败',
-      httpRules: [{ ...http, id: 'http-2', mock: { ...http.mock!, body: 'two' } }],
-      wsRules: [],
-    },
-  ],
-});
-async function fixture(connected = true) {
-  await writeFile(store.file, JSON.stringify(document()));
-  let state = {
-    key: 'connection-1',
+async function fixture() {
+  await store.importPackage({ version: 2, scenes: scenes() }, false);
+}
+async function bodyFile() {
+  const file = store.getScene('入口 / 中文').http[0].file;
+  return join(dirname(dirname(file)), JSON.parse(await readFile(file, 'utf8')).mock.bodyFile);
+}
+async function controllerFixture() {
+  await fixture();
+  const state = {
+    key: 'vm',
     mode: 'vm' as 'vm' | 'proxy',
-    connected,
-    proxyRulesUnreachable: false,
+    connected: true,
     httpApplied: false,
     wsApplied: false,
+    proxyRulesUnreachable: false,
   };
-  const events: string[] = [];
-  let projected: { http: Rule[]; ws: WsRule[] } = { http: [], ws: [] };
   const host: SceneHost = {
-    snapshot: () => ({ ...state }),
+    snapshot: () => state,
     disable: vi.fn(async (domain: 'http' | 'ws') => {
-      events.push(`off:${domain}`);
       state[`${domain}Applied`] = false;
     }),
-    project: vi.fn(async (http, ws) => {
-      events.push(`project:${http[0]?.id ?? ''}:${ws[0]?.id ?? ''}`);
-      projected = { http, ws };
-    }),
+    project: vi.fn(async () => {}),
     enable: vi.fn(async (domain: 'http' | 'ws') => {
-      events.push(`on:${domain}`);
       state[`${domain}Applied`] = true;
     }),
     capture: vi.fn(async () => {}),
@@ -78,463 +120,538 @@ async function fixture(connected = true) {
   };
   const controller = new SceneController(store, host);
   await controller.initialize();
-  events.length = 0;
-  return { controller, host, events, state, projected: () => projected };
+  return { controller, host, state };
 }
+describe('directory Scene repository', () => {
+  it('reports stale disk configuration when body preview detects corruption in an applied Scene', async () => {
+    const { controller, host } = await controllerFixture();
+    await controller.activate('入口 / 中文');
+    const applied = vi.mocked(host.project).mock.calls.length;
+    await writeFile(await bodyFile(), Buffer.from([0xff]));
+    await expect(store.getRule('入口 / 中文', 'http', rule.id)).rejects.toThrow();
+    expect(controller.runtime.stale).toBeTruthy();
+    expect(controller.active!.httpRules).toEqual([rule]);
+    expect(host.project).toHaveBeenCalledTimes(applied);
+    controller.dispose();
+  });
 
-describe('scene documents and project store', () => {
-  it('copies cross-Scene calls into each imported group without sharing definitions or identifiers', () => {
-    const source: SceneDocument = {
+  it('preserves unused targets and whitespace in names through migration and export', async () => {
+    await rm(join(directory, 'scenes'), { recursive: true });
+    const source = {
       version: 1,
       activeSceneId: null,
       scenes: [
         {
-          id: 'caller',
-          name: '入口',
-          httpRules: [structuredClone(http)],
-          wsRules: [structuredClone(ws)],
-          actions: [
-            {
-              id: 'submit',
-              name: '提交',
-              steps: [{ id: 'common', type: 'call', sceneId: 'common', actionId: 'confirm' }],
-            },
-          ],
-        },
-        {
-          id: 'common',
-          name: '公共操作',
+          id: 'targets-only',
+          name: '  中文 名称  ',
           httpRules: [],
           wsRules: [],
-          targets: { button: { key: 'confirm' } },
-          actions: [{ id: 'confirm', name: '确认', steps: [{ id: 'tap', type: 'tap', target: 'button' }] }],
+          targets: { button: { source: 'flutter', key: 'button' } },
         },
       ],
     };
-    const first = cloneScenes(source.scenes),
-      second = cloneScenes(source.scenes);
-    expect(() => validateSceneDocument({ ...source, scenes: [...first, ...second] })).not.toThrow();
-    for (const group of [first, second]) {
-      expect(group[0].actions![0].steps[0]).toMatchObject({ sceneId: group[1].id, actionId: 'confirm' });
-      expect(group[0].id).not.toBe('caller');
-      expect(group[0].httpRules[0].id).not.toBe(http.id);
-      expect(group[0].wsRules[0].id).not.toBe(ws.id);
-    }
-    expect(first[0].id).not.toBe(second[0].id);
-    first[1].targets!.button.key = 'edited';
-    expect(second[1].targets!.button.key).toBe('confirm');
-    expect(source.scenes[1].targets!.button.key).toBe('confirm');
-    expect(source.scenes[0].actions![0].steps[0]).toMatchObject({ sceneId: 'common' });
+    await writeFile(join(directory, 'scenes.json'), json(source));
+    await migrateScenes(directory, true);
+    await store.reload();
+    const exported = await store.exportPackage();
+    expect(exported.scenes[0].name).toBe(source.scenes[0].name);
+    expect(exported.scenes[0].targets).toEqual(source.scenes[0].targets);
   });
-  it('remaps explicit local calls while preserving implicit calls and references outside the copied group', () => {
-    const source = document().scenes[0];
-    source.targets = { button: { key: 'confirm' } };
-    source.actions = [
-      { id: 'confirm', name: '确认', steps: [{ id: 'tap', type: 'tap', target: 'button' }] },
-      {
-        id: 'local',
-        name: '本场景',
-        steps: [
-          { id: 'implicit', type: 'call', actionId: 'confirm' },
-          { id: 'explicit', type: 'call', sceneId: source.id, actionId: 'confirm' },
-          { id: 'external', type: 'call', sceneId: 'external', actionId: 'confirm' },
-        ],
-      },
-    ];
-    const copy = cloneScenes([source])[0];
-    expect(copy.actions![1].steps).toEqual([
-      { id: 'implicit', type: 'call', actionId: 'confirm' },
-      { id: 'explicit', type: 'call', sceneId: copy.id, actionId: 'confirm' },
-      { id: 'external', type: 'call', sceneId: 'external', actionId: 'confirm' },
-    ]);
+  it('rejects inconsistent scenario saves without publishing invalid source', async () => {
+    await fixture();
+    const first = await store.getRule('入口 / 中文', 'http', rule.id);
+    await store.saveResource(
+      first.address,
+      { ...first.value, scenario: { id: 'group', initial: 'a', when: 'a' } },
+      first.hash,
+    );
+    const before = await readFile(store.getScene('入口 / 中文').file, 'utf8');
+    await expect(
+      store.saveResource(
+        { sceneId: '入口 / 中文', kind: 'http', id: 'second' },
+        { ...rule, id: 'second', scenario: { id: 'group', initial: 'b', when: 'b' } },
+        null,
+      ),
+    ).rejects.toThrow('initial');
+    expect(await readFile(store.getScene('入口 / 中文').file, 'utf8')).toBe(before);
+    expect(store.getScene('入口 / 中文').health).toBe('valid');
   });
-  it('ships valid complete scene examples in the guide and resource', async () => {
-    expect(validateSceneDocument(sceneExample).activeSceneId).toBeNull();
-    const example = JSON.parse(await readFile(join(process.cwd(), 'resources/example.scenes.json'), 'utf8'));
-    expect(validateSceneDocument(example).scenes.length).toBeGreaterThan(0);
+
+  it('rejects inconsistent scenario groups before activation and retains the applied snapshot', async () => {
+    const { controller, host } = await controllerFixture();
+    await controller.activate('入口 / 中文');
+    const previousCalls = vi.mocked(host.project).mock.calls.length;
+    const source = store.getScene('入口 / 中文').http[0].file;
+    const first = JSON.parse(await readFile(source, 'utf8'));
+    first.scenario = { id: 'group', initial: 'a', when: 'a' };
+    await writeFile(source, json(first));
+    const secondFile = join(dirname(source), 'second.json');
+    await writeFile(
+      secondFile,
+      json({ ...first, id: 'second', scenario: { id: 'group', initial: 'b', when: 'b' } }),
+    );
+    const manifestFile = store.getScene('入口 / 中文').file;
+    const manifest = JSON.parse(await readFile(manifestFile, 'utf8'));
+    manifest.http.push({ id: 'second', file: 'second.json' });
+    await writeFile(manifestFile, json(manifest));
+    await expect(controller.reload()).rejects.toThrow('initial');
+    expect(store.getScene('入口 / 中文').health).toBe('error');
+    await expect(store.prepareSnapshot([], '入口 / 中文')).rejects.toThrow('initial');
+    expect(controller.active!.httpRules).toEqual([rule]);
+    expect(vi.mocked(host.project).mock.calls).toHaveLength(previousCalls);
+    expect(controller.runtime.stale).toContain('initial');
+    controller.dispose();
   });
-  it('imports both legacy domains once, preserving IDs, order and enabled states', async () => {
-    await writeFile(join(directory, 'rules.json'), JSON.stringify({ version: 1, rules: [http] }));
-    await writeFile(join(directory, 'ws-rules.json'), JSON.stringify({ version: 1, rules: [ws] }));
-    const loaded = await store.load();
-    expect(loaded).toMatchObject({
-      activeSceneId: null,
-      scenes: [{ name: '默认场景', httpRules: [http], wsRules: [ws] }],
+
+  it('isolates corrupt private activation and rebuilds tampered derived caches', async () => {
+    await fixture();
+    await writeFile(join(store.privateDirectory, 'scene-active.json'), '{');
+    const mapping = JSON.parse(await readFile(store.file, 'utf8')).scenes[0];
+    const shard = join(store.privateDirectory, 'scene-cache', `${mapping.directory}.json`);
+    const cached = JSON.parse(await readFile(shard, 'utf8'));
+    const manifest = cached.entries.find(([path]: [string]) => path.endsWith('/scene.json'));
+    delete manifest[1].value.http;
+    await writeFile(shard, json(cached));
+    const reopened = new SceneStore(directory);
+    await reopened.load();
+    expect(reopened.activeSceneId).toBeNull();
+    expect(reopened.listScenes().warning).toContain('激活记录');
+    expect(reopened.getScene('入口 / 中文').health).toBe('valid');
+    expect(reopened.getScene('入口 / 中文').http).toHaveLength(1);
+    expect(await readFile(join(store.privateDirectory, 'scene-active.json'), 'utf8')).toBe('{');
+    await reopened.activate('unrelated');
+    expect(reopened.listScenes().warning).toBeUndefined();
+  });
+  it('keeps healthy Scene writes available beside a corrupt manifest and detects repaired duplicate IDs', async () => {
+    await fixture();
+    const brokenFile = store.getScene('unrelated').file;
+    const original = JSON.parse(await readFile(brokenFile, 'utf8'));
+    await writeFile(brokenFile, '{');
+    await store.reload();
+    await store.saveResource(
+      { sceneId: 'common', kind: 'http', id: 'new-rule' },
+      { ...rule, id: 'new-rule' },
+      null,
+    );
+    expect(store.getScene('common').health).toBe('valid');
+    expect(store.getScene('unrelated').health).toBe('error');
+    original.http[0].id = 'new-rule';
+    await writeFile(brokenFile, json(original));
+    await store.reload();
+    expect(store.getScene('common').health).toBe('error');
+    expect(store.getScene('unrelated').errors.join()).toContain('重复');
+  });
+  it('refuses imported global rule collisions before changing the root', async () => {
+    await fixture();
+    const root = await readFile(store.file, 'utf8');
+    await expect(
+      store.importPackage(
+        { version: 2, scenes: [{ id: 'incoming', name: 'import', httpRules: [{ ...rule }], wsRules: [] }] },
+        false,
+      ),
+    ).rejects.toThrow('重复');
+    expect(await readFile(store.file, 'utf8')).toBe(root);
+    expect(store.getScene('入口 / 中文').health).toBe('valid');
+  });
+  it('validates manually supplied body references before committing a save', async () => {
+    await fixture();
+    const current = await store.getRule('入口 / 中文', 'http', rule.id);
+    const source = await readFile(current.file, 'utf8');
+    const stored = JSON.parse(source);
+    stored.mock.bodyFile = 'bodies/missing.txt';
+    await expect(store.saveResource(current.address, stored, current.hash)).rejects.toThrow('缺失');
+    expect(await readFile(current.file, 'utf8')).toBe(source);
+    expect((await store.getRule('入口 / 中文', 'http', rule.id)).value).toEqual(rule);
+  });
+  it('refuses reorder and deletion against an externally changed root mapping', async () => {
+    await fixture();
+    const first = await store.getRule('入口 / 中文', 'http', rule.id);
+    const root = JSON.parse(await readFile(store.file, 'utf8'));
+    root.scenes.reverse();
+    await writeFile(store.file, json(root));
+    const source = await readFile(first.file, 'utf8');
+    await expect(store.reorderRules('入口 / 中文', 'http', rule.id, rule.id, first, first)).rejects.toThrow(
+      '冲突',
+    );
+    await expect(store.deleteResource(first.address, first.hash)).rejects.toThrow('冲突');
+    expect(await readFile(first.file, 'utf8')).toBe(source);
+  });
+  it('exports under one lock and rejects external body changes between Scene reads', async () => {
+    await fixture();
+    const locked = vi.spyOn(store.files, 'locked');
+    const original = (store as any).collectSnapshot.bind(store);
+    let calls = 0;
+    vi.spyOn(store as any, 'collectSnapshot').mockImplementation(async (...args: any[]) => {
+      if (++calls === 2) await writeFile(await bodyFile(), 'external mutation');
+      return original(...args);
     });
-    await writeFile(join(directory, 'rules.json'), 'invalid old file');
-    expect(await store.load()).toEqual(loaded);
-    expect(await readFile(join(directory, 'ws-rules.json'), 'utf8')).toContain(ws.id);
+    await expect(store.exportPackage(['入口 / 中文', 'unrelated'])).rejects.toThrow('冲突');
+    expect(locked).toHaveBeenCalledTimes(1);
   });
-  it('concurrent initialization creates one empty default scene', async () => {
-    const docs = await Promise.all([store.load(), new SceneStore(directory).load(), store.load()]);
-    expect(docs[0]).toEqual(docs[1]);
-    expect(docs[1]).toEqual(docs[2]);
-    expect(docs[0].scenes).toHaveLength(1);
-    expect(docs[0].scenes[0]).toMatchObject({ name: '默认场景', httpRules: [], wsRules: [] });
+
+  it('resolves the Mock from action inputs under the same immutable snapshot lock', async () => {
+    await fixture();
+    const snapshot = await store.prepareSnapshot(
+      [{ sceneId: '入口 / 中文', actionId: 'start' }],
+      null,
+      (actions) => {
+        expect(actions.scenes.every((s) => s.httpRules.length === 0)).toBe(true);
+        return compileSceneAction(actions, '入口 / 中文', 'start', { password: 'fixture' }).sceneId;
+      },
+    );
+    expect(snapshot.activeSceneId).toBe('入口 / 中文');
+    expect(snapshot.scenes[0].httpRules).toEqual([rule]);
+    expect(Object.isFrozen(snapshot.scenes[0].httpRules[0].mock)).toBe(true);
   });
-  it('rejects broken imports without creating the scene document', async () => {
-    await writeFile(join(directory, 'rules.json'), '{secret-invalid');
-    await expect(store.load()).rejects.toThrow('有效 JSON');
-    await expect(readFile(store.file)).rejects.toThrow();
-    expect(await readFile(join(directory, 'rules.json'), 'utf8')).toBe('{secret-invalid');
+  it('keeps activation and the applied snapshot intact when deleting with a stale hash', async () => {
+    const { controller, host } = await controllerFixture();
+    await controller.activate('入口 / 中文');
+    const applied = vi.mocked(host.project).mock.calls.length;
+    await expect(controller.remove('入口 / 中文', 'stale')).rejects.toThrow('冲突');
+    expect(controller.activeSceneId).toBe('入口 / 中文');
+    expect(controller.active!.httpRules).toEqual([rule]);
+    expect(host.project).toHaveBeenCalledTimes(applied);
+    controller.dispose();
   });
-  it('detects external edits and refuses to overwrite invalid or changed files', async () => {
-    const before = await store.load();
-    const changed = structuredClone(before);
-    changed.scenes[0].name = '外部编辑';
-    await writeFile(store.file, JSON.stringify(changed));
-    await expect(store.save(before, before)).rejects.toThrow('已被修改');
-    expect(await store.load()).toEqual(changed);
-    await writeFile(store.file, 'bad');
-    await expect(store.save(before, before)).rejects.toThrow();
-    expect(await readFile(store.file, 'utf8')).toBe('bad');
+  it('marks invalid UTF-8 bodies unhealthy only when read and keeps other Scenes usable', async () => {
+    await fixture();
+    await writeFile(await bodyFile(), Buffer.from([0xff, 0xfe]));
+    await store.reload();
+
+    expect(store.getScene('入口 / 中文').health).toBe('valid');
+    await expect(store.getRule('入口 / 中文', 'http', rule.id)).rejects.toThrow();
+    expect(store.getScene('入口 / 中文').health).toBe('error');
+    await expect(store.prepareSnapshot([{ sceneId: 'unrelated', actionId: 'idle' }])).resolves.toBeDefined();
   });
-  it('does not reimport legacy files when an initialized document is removed during reload', async () => {
-    await store.load();
+  it('migrates IDs, order, UTF-8 bytes, empty bodies, selectors, calls and secrets without activation', async () => {
+    await rm(join(directory, 'scenes'), { recursive: true });
+    const source: SceneDocument = { version: 1, activeSceneId: '入口 / 中文', scenes: scenes() };
+    await writeFile(join(directory, 'scenes.json'), json(source));
+    expect(await migrateScenes(directory)).toMatchObject({
+      mode: 'preflight',
+      verified: true,
+      previousActiveSceneId: '入口 / 中文',
+    });
+    await expect(lstat(store.file)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await migrateScenes(directory, true)).toMatchObject({
+      activeSceneId: null,
+      bodyBytes: expect.any(Number),
+    });
+    await store.reload();
+    expect((await store.exportPackage()).scenes.map((s) => s.id)).toEqual(source.scenes.map((s) => s.id));
+    expect(await readFile(await bodyFile())).toEqual(Buffer.from(rule.mock!.body));
+    expect(await readFile(join(directory, 'scenes.json'), 'utf8')).toBe(json(source));
+    expect(store.activeSceneId).toBeNull();
+    await expect(migrateScenes(directory, true)).rejects.toThrow();
+  });
+  it('requires explicit migration and never hides legacy data behind an empty v2 config', async () => {
+    await rm(join(directory, 'scenes'), { recursive: true });
+    await writeFile(
+      join(directory, 'scenes.json'),
+      json({ version: 1, activeSceneId: null, scenes: scenes() }),
+    );
+    await expect(new SceneStore(directory).load()).rejects.toThrow('迁移');
+    await expect(lstat(store.file)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+  it('lists and searches without bodies and loads only the action closure', async () => {
+    await fixture();
+    const before = store.metrics.bodyReads;
+    expect(store.listScenes({ search: '填表', limit: 500 }).scenes.map((s) => s.id)).toEqual(['common']);
+    expect(store.listScenes({ limit: 500 }).limit).toBe(200);
+    expect(store.getScene('common').actions[0]).not.toHaveProperty('steps');
+    const spy = vi.spyOn(store as any, 'text');
+    const doc = await store.prepareSnapshot([{ sceneId: '入口 / 中文', actionId: 'start' }]);
+    expect(doc.scenes.map((s) => s.id)).toEqual(['入口 / 中文', 'common']);
+    expect(store.metrics.bodyReads).toBe(before);
+    expect(
+      spy.mock.calls.some(([path]) => String(path).includes('/http/') || String(path).includes('/ws/')),
+    ).toBe(false);
+    expect(compileSceneAction(doc, '入口 / 中文', 'start', { password: 'secret' }).secrets).toEqual([
+      'secret',
+    ]);
+    expect(Object.isFrozen(doc.scenes[0].actions![0].steps)).toBe(true);
+  });
+  it('keeps selected resource edits incremental and refuses external rule or body edits', async () => {
+    await fixture();
+    const resource = await store.getRule('入口 / 中文', 'http', rule.id),
+      other = store.getScene('unrelated').http[0].file;
+    const unrelated = await lstat(other),
+      root = await readFile(store.file),
+      manifest = await readFile(store.getScene('入口 / 中文').file);
+    await store.saveResource(resource.address, { ...resource.value, name: '更名' }, resource.hash);
+    expect(await readFile(store.file)).toEqual(root);
+    expect(await readFile(store.getScene('入口 / 中文').file)).toEqual(manifest);
+    expect((await lstat(other)).mtimeMs).toBe(unrelated.mtimeMs);
+    await expect(store.saveResource(resource.address, resource.value, resource.hash)).rejects.toThrow('冲突');
+    const latest = await store.getRule('入口 / 中文', 'http', rule.id);
+    await writeFile(await bodyFile(), 'human edit');
+    await expect(store.saveResource(latest.address, latest.value, latest.hash)).rejects.toThrow('冲突');
+    expect(await readFile(await bodyFile(), 'utf8')).toBe('human edit');
+  });
+  it('rejects traversal, symlink bodies and mutually specified inline/file bodies', async () => {
+    await fixture();
+    const file = store.getScene('入口 / 中文').http[0].file;
+    const stored = JSON.parse(await readFile(file, 'utf8'));
+    for (const bodyFile of ['../outside', 'bodies/../outside', '/tmp/outside', 'bodies/sub/file']) {
+      await writeFile(file, json({ ...stored, mock: { ...stored.mock, bodyFile } }));
+      await store.reload();
+      expect(store.listScenes().scenes[0].health).toBe('error');
+    }
+    await writeFile(file, json({ ...stored, mock: { ...stored.mock, body: 'ambiguous' } }));
+    await store.reload();
+    expect(store.getScene('入口 / 中文').errors.join(' ')).toContain('互斥');
+    await writeFile(file, json(stored));
+    await store.reload();
+    const body = await bodyFile();
+    await rm(body);
+    await symlink(store.file, body);
+    await expect(store.getRule('入口 / 中文', 'http', rule.id)).rejects.toThrow('符号链接');
+  });
+  it('isolates corrupt scenes, detects all global ID owners and blocks callers', async () => {
+    await fixture();
+    await writeFile(store.getScene('common').actions[0].file, '{broken');
+    await store.reload();
+    expect(store.getScene('common').health).toBe('error');
+    expect(store.getScene('入口 / 中文').actions[0].blocked).toContain('依赖不可用');
+    expect(await store.prepareSnapshot([{ sceneId: 'unrelated', actionId: 'idle' }])).toHaveProperty(
+      'scenes',
+    );
+    const other = store.getScene('unrelated'),
+      manifest = JSON.parse(await readFile(other.file, 'utf8'));
+    manifest.http[0].id = rule.id;
+    await writeFile(other.file, json(manifest));
+    await store.reload();
+    expect(store.getScene('入口 / 中文').health).toBe('error');
+    expect(store.getScene('unrelated').health).toBe('error');
+  });
+  it('rejects missing calls, cycles and parameter errors before execution', async () => {
+    await fixture();
+    const file = store.getScene('common').actions[0].file,
+      original = JSON.parse(await readFile(file, 'utf8'));
+    for (const steps of [
+      [{ id: 'call', type: 'call', sceneId: 'missing', actionId: 'a' }],
+      [
+        {
+          id: 'call',
+          type: 'call',
+          sceneId: '入口 / 中文',
+          actionId: 'start',
+          inputs: { password: '${inputs.password}' },
+        },
+      ],
+      [{ id: 'bad', type: 'enter_text', target: 'missing', text: '${inputs.password}' }],
+    ]) {
+      await writeFile(file, json({ ...original, steps }));
+      await store.reload();
+      await expect(store.prepareSnapshot([{ sceneId: '入口 / 中文', actionId: 'start' }])).rejects.toThrow();
+    }
+  });
+  it('retains the last directory snapshot when the root is corrupt', async () => {
+    await fixture();
+    const old = store.listScenes().scenes;
+    await writeFile(store.file, '{');
+    await expect(store.reload()).rejects.toThrow();
+    expect(store.listScenes().scenes).toEqual(old);
+    expect(store.listScenes().error).toBeTruthy();
+    await expect(store.prepareSnapshot([], '入口 / 中文')).rejects.toThrow();
+    const reopened = new SceneStore(directory);
+    await reopened.load();
+    expect(reopened.listScenes().scenes).toEqual(old);
+    expect(reopened.listScenes().error).toContain('有效 JSON');
+    await expect(reopened.getAction('common', 'fill')).rejects.toThrow('有效 JSON');
+    const recovered = new SceneController(reopened, {
+      snapshot: () => ({ key: 'off', mode: 'vm', connected: false, httpApplied: false, wsApplied: false }),
+      disable: async () => {},
+      project: async () => {},
+      enable: async () => {},
+      capture: async () => {},
+      changed: () => {},
+    });
+    await recovered.initialize();
+    expect(recovered.summary().error).toContain('有效 JSON');
+    recovered.dispose();
     await rm(store.file);
-    await writeFile(join(directory, 'rules.json'), JSON.stringify({ version: 1, rules: [http] }));
-    await expect(store.read()).rejects.toThrow('已移除');
-    await expect(readFile(store.file)).rejects.toThrow();
+    const missingRoot = new SceneStore(directory);
+    await missingRoot.load();
+    expect(missingRoot.listScenes().scenes).toEqual(old);
+    expect(missingRoot.listScenes().error).toContain('缺失');
+    await expect(lstat(store.file)).rejects.toMatchObject({ code: 'ENOENT' });
   });
-  it('rejects duplicate rule IDs across scenes, invalid references and persistent connection rules', () => {
-    const doc = document();
-    doc.scenes[1].httpRules[0].id = http.id;
-    expect(() => validateSceneDocument(doc)).toThrow('重复');
-    expect(() => validateSceneDocument({ ...document(), activeSceneId: 'missing' })).toThrow('activeSceneId');
-    const temporary = document();
-    temporary.scenes[0].wsRules[0].match = { connectionId: 'old' };
-    expect(() => validateSceneDocument(temporary)).toThrow('本次会话');
+  it('uses private workspace activation and immutable Mock snapshots', async () => {
+    const { controller, host } = await controllerFixture();
+    const root = await readFile(store.file);
+    await controller.activate('入口 / 中文');
+    expect(await readFile(store.file)).toEqual(root);
+    expect(host.project).toHaveBeenLastCalledWith([rule], expect.any(Array));
+    const snapshot = await store.prepareSnapshot(
+      [{ sceneId: '入口 / 中文', actionId: 'start' }],
+      '入口 / 中文',
+    );
+    await writeFile(await bodyFile(), 'new disk body');
+    expect(snapshot.scenes[0].httpRules[0].mock!.body).toBe(rule.mock!.body);
+    await controller.beginRun('run', undefined, [], { snapshot });
+    expect(controller.active!.httpRules[0].mock!.body).toBe(rule.mock!.body);
+    await expect(controller.activate(null)).rejects.toThrow('测试运行');
+    await controller.endRun('run');
+    const reopened = new SceneStore(directory);
+    await reopened.load();
+    expect(reopened.activeSceneId).toBe('入口 / 中文');
+    const isolated = new SceneStore(directory, join(directory, 'other-private'));
+    await isolated.load();
+    expect(isolated.activeSceneId).toBeNull();
+    controller.dispose();
   });
-  it('never follows a scene symlink', async () => {
-    const target = join(directory, 'external.json');
-    await writeFile(target, JSON.stringify(document()));
-    await symlink(target, store.file);
-    await expect(store.load()).rejects.toThrow('符号链接');
+  it('keeps last valid applied rules with a stale warning after body loss', async () => {
+    const { controller, host } = await controllerFixture();
+    await controller.activate('入口 / 中文');
+    const calls = vi.mocked(host.project).mock.calls.length;
+    await rm(await bodyFile());
+    await expect(controller.reload()).rejects.toThrow('缺失');
+    expect(controller.runtime.stale).toContain('缺失');
+    expect(controller.active!.httpRules).toEqual([rule]);
+    expect(host.project).toHaveBeenCalledTimes(calls);
+    await expect(controller.activate('入口 / 中文')).rejects.toThrow('缺失');
+    controller.dispose();
+  });
+  it('appends a self-contained package with rewritten group calls and no activation changes', async () => {
+    await fixture();
+    await store.activate('unrelated');
+    const pkg = await store.exportPackage(['入口 / 中文']);
+    expect(pkg.scenes.map((s) => s.id)).toEqual(['入口 / 中文', 'common']);
+    const ids = await store.importPackage(pkg);
+    expect(store.activeSceneId).toBe('unrelated');
+    const action = (await store.getAction(ids[0], 'start')).value;
+    expect(action.steps[0]).toMatchObject({ sceneId: ids[1], actionId: 'fill' });
+    expect(cloneScenes(pkg.scenes)[0].id).not.toBe(pkg.scenes[0].id);
   });
 });
 
-describe('scene activation lifecycle', () => {
-  it('replaces both protocols before enabling, then removes WS when moving to HTTP-only scene', async () => {
-    const { controller, events, projected } = await fixture();
-    await controller.activate('one');
-    expect(events).toEqual(['off:http', 'off:ws', 'project:http-1:ws-1', 'on:http', 'on:ws']);
-    expect(controller.runtime).toMatchObject({ http: { status: 'applied' }, ws: { status: 'applied' } });
-    events.length = 0;
-    await controller.activate('two');
-    expect(events).toEqual(['off:http', 'off:ws', 'project:http-2:', 'on:http']);
-    expect(projected().ws).toEqual([]);
-  });
-  it('keeps browsing and editing an inactive scene separate from runtime', async () => {
-    const { controller, events, projected } = await fixture();
-    await controller.activate('one');
-    events.length = 0;
-    controller.select('two');
-    await controller.saveHttp([{ ...http, id: 'http-2', name: 'edited' }]);
-    expect(events).toEqual([]);
-    expect(projected().http[0].id).toBe('http-1');
-    controller.select('one');
-    await controller.saveHttp([{ ...http, name: 'active edited' }]);
-    expect(events).toContain('on:http');
-    expect(projected().http[0].name).toBe('active edited');
-  });
-  it('reloads inactive edits without uninstalling or renewing the active scene', async () => {
-    const { controller, events } = await fixture();
-    await controller.activate('one');
-    events.length = 0;
-    const doc = await store.read();
-    doc.scenes[1].httpRules[0].name = 'external inactive edit';
-    await writeFile(store.file, JSON.stringify(doc));
-    await controller.reload();
-    expect(events).toEqual([]);
-    expect(controller.active?.id).toBe('one');
-  });
-  it('file-based activation resets capture pauses just like explicit activation', async () => {
-    const { controller } = await fixture();
-    await controller.activate('one');
-    await controller.setCapture('http', false);
-    const doc = await store.read();
-    doc.activeSceneId = 'two';
-    await writeFile(store.file, JSON.stringify(doc));
-    await controller.reload();
-    expect(controller.runtime.http.status).toBe('applied');
-  });
-  it('returns bounded MCP scene summaries without rule bodies', async () => {
-    const { controller } = await fixture(false);
-    await controller.saveHttp(
-      [{ ...http, mock: { ...http.mock!, body: 'x'.repeat(5 * 1024 * 1024) } }],
-      'one',
-    );
-    await controller.activate('one');
-    const summary = controller.summary();
-    expect(summary.scenes[0]).toMatchObject({ httpRuleCount: 1, enabledHttpRuleCount: 1, wsRuleCount: 1 });
-    expect(JSON.stringify(summary).length).toBeLessThan(4096);
-  });
-  it('copies scenes with fresh rule IDs and independent contents without changing activation', async () => {
-    const { controller } = await fixture();
-    await controller.activate('one');
-    await controller.create('副本', controller.active);
-    const copy = controller.selected!;
-    expect(copy.id).not.toBe('one');
-    expect(copy.httpRules[0].id).not.toBe(http.id);
-    expect(copy.wsRules[0].id).not.toBe(ws.id);
-    await controller.saveHttp([{ ...copy.httpRules[0], name: 'copy edited' }]);
-    expect(controller.active?.httpRules[0].name).toBe(http.name);
-    expect(controller.document.activeSceneId).toBe('one');
-  });
-  it('copies explicit calls to local actions onto the new Scene', async () => {
-    const { controller } = await fixture();
-    await controller.change((doc) => {
-      doc.scenes[0].targets = { button: { key: 'confirm' } };
-      doc.scenes[0].actions = [
-        { id: 'confirm', name: '确认', steps: [{ id: 'tap', type: 'tap', target: 'button' }] },
-        {
-          id: 'submit',
-          name: '提交',
-          steps: [{ id: 'confirm', type: 'call', sceneId: 'one', actionId: 'confirm' }],
-        },
-      ];
+describe('real process write coordination', () => {
+  async function worker(contents: string) {
+    const file = join(directory, 'worker.cjs');
+    await build({
+      stdin: {
+        contents: `import { SceneStore } from ${JSON.stringify(resolve('src/scenes.ts'))};\n${contents}`,
+        resolveDir: process.cwd(),
+        loader: 'ts',
+      },
+      outfile: file,
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
     });
-    await controller.create('操作副本', controller.document.scenes[0]);
-    const copy = controller.selected!;
-    expect(copy.actions![1].steps[0]).toMatchObject({ sceneId: copy.id, actionId: 'confirm' });
-    expect(controller.document.scenes[0].actions![1].steps[0]).toMatchObject({ sceneId: 'one' });
-  });
-  it('persists offline selection, restores after reconnection and IDE reopen', async () => {
-    const { controller, host, state } = await fixture(false);
-    await controller.activate('one');
-    expect(controller.runtime.http.status).toBe('pending');
-    expect(host.enable).not.toHaveBeenCalled();
-    state.connected = true;
-    state.key = 'connection-2';
-    await controller.reconcile();
-    expect(controller.runtime.http.status).toBe('applied');
-    state.connected = false;
-    state.key = 'disconnected';
-    await controller.reconcile();
-    state.connected = true;
-    state.key = 'connection-3';
-    const reopened = new SceneController(store, host);
-    await reopened.initialize();
-    expect(reopened.active?.id).toBe('one');
-    expect(reopened.runtime.ws.status).toBe('applied');
-  });
-  it.each(['two', null])(
-    'replaces old proxy rules after offline selection %s, even with an unchanged key',
-    async (selection) => {
-      const { controller, host, state, events, projected } = await fixture();
-      state.mode = 'proxy';
-      let actual: Rule[] = [];
-      vi.mocked(host.disable).mockImplementation(async (domain) => {
-        events.push(`off:${domain}`);
-        if (domain === 'http' && state.connected) actual = [];
+    return file;
+  }
+  it('serializes two processes and rejects the loser without overwriting the winner', async () => {
+    await fixture();
+    const file = await worker(
+      `
+      const store = new SceneStore(process.argv[2]);
+      await store.load();
+      const resource = await store.getRule('入口 / 中文', 'http', '中文/特殊 ID');
+      process.on('message', async () => {
+        try { await store.saveResource(resource.address, { ...resource.value, name: process.argv[3] }, resource.hash); process.send({ ok: true }); }
+        catch (e) { process.send({ ok: false, error: e.message }); }
+        process.disconnect();
       });
-      vi.mocked(host.enable).mockImplementation(async (domain) => {
-        events.push(`on:${domain}`);
-        if (domain === 'http') actual = projected().http;
-      });
-      state.httpApplied = true;
-      await controller.activate('one');
-      expect(actual.map((rule) => rule.id)).toEqual(['http-1']);
-      state.connected = false;
-      await controller.activate(selection);
-      expect(actual.map((rule) => rule.id)).toEqual(['http-1']);
-      state.connected = true;
-      if (selection) expect(controller.runtime.http.status).toBe('pending');
-      await controller.reconcile();
-      expect(actual.map((rule) => rule.id)).toEqual(selection ? ['http-2'] : []);
-      expect(controller.runtime.http.status).toBe(selection ? 'applied' : 'unneeded');
-    },
-  );
-  it('rejects active scene changes while the proxy control connection is lost', async () => {
-    const { controller, state, host } = await fixture();
-    state.mode = 'proxy';
-    await controller.activate('one');
-    const saved = await store.read();
-    state.connected = false;
-    state.proxyRulesUnreachable = true;
-    await expect(controller.activate('two')).rejects.toThrow('旧规则可能仍在生效');
-    await expect(controller.activate(null)).rejects.toThrow('旧规则可能仍在生效');
-    await expect(controller.saveHttp([{ ...http, enabled: false }], 'one')).rejects.toThrow(
-      '旧规则可能仍在生效',
+      process.send({ ready: true });
+    `.replace('const store =', '(async () => { const store =') + '\n})();',
     );
-    await expect(controller.saveWs([], 'one')).rejects.toThrow('旧规则可能仍在生效');
-    await expect(controller.setCapture('http', false)).rejects.toThrow('旧规则可能仍在生效');
-    expect(controller.active?.id).toBe('one');
-    expect(await store.read()).toEqual(saved);
-    // Unrelated edits do not change the rules still serving in the proxy.
-    await controller.saveHttp([{ ...http, id: 'other' }], 'two');
-    const edited = await store.read();
-    const external = structuredClone(edited);
-    external.activeSceneId = 'two';
-    await writeFile(store.file, JSON.stringify(external));
-    await expect(controller.reload()).rejects.toThrow('旧规则可能仍在生效');
-    expect(controller.active?.id).toBe('one');
-    expect(await store.read()).toEqual(external);
-    state.connected = true;
-    state.proxyRulesUnreachable = false;
-    await controller.reconcile();
-    expect(host.enable).toHaveBeenLastCalledWith('http');
-    await controller.reload();
-    expect(controller.active?.id).toBe('two');
-  });
-  it('stops the proxy if its control connection drops while an active scene change is being saved', async () => {
-    const { controller, state, host } = await fixture();
-    state.mode = 'proxy';
-    await controller.activate('one');
-    const save = store.save.bind(store);
-    vi.spyOn(store, 'save').mockImplementationOnce(async (...args) => {
-      const result = await save(...args);
-      state.connected = false;
-      state.proxyRulesUnreachable = true;
-      return result;
-    });
-    host.stopUnreachableProxy = vi.fn(async () => {
-      state.proxyRulesUnreachable = false;
-    });
-    await controller.activate('two');
-    expect(host.stopUnreachableProxy).toHaveBeenCalledOnce();
-    expect(controller.active?.id).toBe('two');
-    expect(controller.runtime.http.status).toBe('pending');
-  });
-  it('pauses only the requested protocol and re-enables it from the active scene', async () => {
-    const { controller, host } = await fixture();
-    await controller.activate('one');
-    await controller.setCapture('ws', false);
-    expect(host.capture).toHaveBeenLastCalledWith('ws', false);
-    expect(controller.runtime).toMatchObject({ http: { status: 'applied' }, ws: { status: 'paused' } });
-    await controller.setCapture('ws', true);
-    expect(controller.runtime.ws.status).toBe('applied');
-  });
-  it('deactivation and active scene deletion clear persisted intent without disabling capture', async () => {
-    const { controller, host, projected } = await fixture();
-    await controller.activate('one');
-    await controller.change((doc) => {
-      doc.scenes = doc.scenes.filter((scene) => scene.id !== 'one');
-      doc.activeSceneId = null;
-    });
-    expect((await store.load()).activeSceneId).toBeNull();
-    expect(projected()).toEqual({ http: [], ws: [] });
-    expect(host.capture).not.toHaveBeenCalled();
-  });
-  it('does not report success or restore old scene after partial synchronization failure', async () => {
-    const { controller, host, projected } = await fixture();
-    await controller.activate('one');
-    vi.mocked(host.enable).mockRejectedValueOnce(new Error('sync failed'));
-    await controller.activate('two');
-    expect(controller.active?.id).toBe('two');
-    expect(projected().http[0].id).toBe('http-2');
-    expect(controller.runtime.http).toMatchObject({ status: 'error', message: 'sync failed' });
-    await controller.activate('two');
-    expect(controller.runtime.http.status).toBe('applied');
-  });
-  it('shows capture stop failures instead of claiming the domain is paused', async () => {
-    const { controller, host } = await fixture();
-    await controller.activate('one');
-    vi.mocked(host.disable).mockRejectedValueOnce(new Error('旧租约尚未到期'));
-    await expect(controller.setCapture('http', false)).rejects.toThrow('租约');
-    expect(host.capture).toHaveBeenLastCalledWith('http', false);
-    await controller.reconcile();
-    expect(controller.runtime.http).toMatchObject({ status: 'error', message: '旧租约尚未到期' });
-    await controller.setCapture('http', false);
-    expect(controller.runtime.http.status).toBe('paused');
-  });
-  it('does not mark capture paused if the capture switch itself failed', async () => {
-    const { controller, host } = await fixture();
-    await controller.activate('one');
-    vi.mocked(host.capture).mockRejectedValueOnce(new Error('capture failed'));
-    await expect(controller.setCapture('http', false)).rejects.toThrow('capture failed');
-    expect(controller.runtime.http.status).toBe('error');
-    vi.mocked(host.capture).mockRejectedValueOnce(new Error('capture failed'));
-    await controller.reconcile();
-    expect(controller.runtime.http.status).toBe('error');
-    await controller.activate('one');
-    expect(controller.runtime.http.status).toBe('applied');
-  });
-  it('retries a paused domain resume after lease expiry without losing the requested capture state', async () => {
-    const { controller, host } = await fixture();
-    await controller.activate('one');
-    await controller.setCapture('ws', false);
-    vi.useFakeTimers();
+    const children = ['one', 'two'].map((name) =>
+      fork(file, [directory, name], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] }),
+    );
     try {
-      vi.mocked(host.capture).mockRejectedValueOnce(new Error('旧租约尚未到期，请等待16秒'));
-      await expect(controller.setCapture('ws', true)).rejects.toThrow('租约');
-      expect(controller.runtime.ws.status).toBe('error');
-      await vi.advanceTimersByTimeAsync(16100);
-      await controller.reconcile();
-      expect(host.capture).toHaveBeenLastCalledWith('ws', true);
-      expect(controller.runtime.ws.status).toBe('applied');
+      const outcomes = children.map(
+        (child) =>
+          new Promise<any>((resolve, reject) => {
+            child.on('message', (m: any) => {
+              if (!m.ready) resolve(m);
+            });
+            child.on('error', reject);
+          }),
+      );
+      await Promise.all(
+        children.map(
+          (child) =>
+            new Promise<void>((resolve, reject) => {
+              child.once('message', () => resolve());
+              child.once('error', reject);
+              child.once('exit', (code) => {
+                if (code) reject(new Error(`worker exited ${code}`));
+              });
+            }),
+        ),
+      );
+      for (const child of children) child.send('save');
+      const results = await Promise.all(outcomes);
+      expect(results.filter((r) => r.ok)).toHaveLength(1);
+      expect(results.find((r) => !r.ok).error).toContain('冲突');
+      await store.reload();
+      expect(['one', 'two']).toContain((await store.getRule('入口 / 中文', 'http', rule.id)).value.name);
     } finally {
-      controller.dispose();
-      vi.useRealTimers();
+      for (const child of children) child.kill();
     }
   });
-  it('keeps the new scene selected while waiting for old leases and retries after expiry', async () => {
-    const { controller, host, events } = await fixture();
-    await controller.activate('one');
-    vi.useFakeTimers();
-    try {
-      vi.mocked(host.disable).mockRejectedValueOnce(new Error('旧租约尚未到期，请等待16秒'));
-      await controller.activate('two');
-      expect(controller.active?.id).toBe('two');
-      expect(controller.runtime.http.status).toBe('error');
-      events.length = 0;
-      await vi.advanceTimersByTimeAsync(16100);
-      await controller.reconcile();
-      expect(controller.runtime.http.status).toBe('applied');
-      expect(events).toEqual(['off:http', 'off:ws', 'project:http-2:', 'on:http']);
-    } finally {
-      controller.dispose();
-      vi.useRealTimers();
-    }
+  it('recovers the durable transaction after a writer process exits at journal publication', async () => {
+    await fixture();
+    const file = await worker(`(async () => {
+      const store = new SceneStore(process.argv[2], undefined, phase => { if (phase === 'journal') process.exit(42); });
+      await store.load();
+      const resource = await store.getRule('入口 / 中文', 'http', '中文/特殊 ID');
+      await store.saveResource(resource.address, { ...resource.value, name: 'recovered process' }, resource.hash);
+    })();`);
+    const child = fork(file, [directory], { stdio: 'ignore' });
+    expect(await new Promise((resolve) => child.once('exit', resolve))).toBe(42);
+    const reopened = new SceneStore(directory);
+    await reopened.load();
+    expect((await reopened.getRule('入口 / 中文', 'http', rule.id)).value.name).toBe('recovered process');
+    await expect(lstat(join(directory, '.scene-transaction.json'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
-  it('waits for runtime objects and marks proxy WS unsupported', async () => {
-    const { controller, host, state } = await fixture();
-    vi.mocked(host.enable).mockResolvedValue(undefined);
-    await controller.activate('one');
-    expect(controller.runtime.http.status).toBe('pending');
-    state.mode = 'proxy';
-    state.key = 'proxy';
-    await controller.reconcile();
-    expect(controller.runtime.ws.status).toBe('unsupported');
+});
+describe('project writes and recovery', () => {
+  it('serializes independent stores and rejects a stale writer', async () => {
+    await fixture();
+    const second = new SceneStore(directory);
+    await second.load();
+    const a = await store.getRule('入口 / 中文', 'http', rule.id),
+      b = await second.getRule('入口 / 中文', 'http', rule.id);
+    const results = await Promise.allSettled([
+      store.saveResource(a.address, { ...a.value, name: 'a' }, a.hash),
+      second.saveResource(b.address, { ...b.value, name: 'b' }, b.hash),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
   });
-  it('serializes rapid switches and ignores stale asynchronous results from an old connection', async () => {
-    const { controller, host, state, events } = await fixture();
-    let release!: () => void;
-    vi.mocked(host.project).mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          release = resolve;
-        }),
-    );
-    const one = controller.activate('one');
-    await vi.waitFor(() => expect(release).toBeDefined());
-    const two = controller.activate('two');
-    state.key = 'new-connection';
-    release();
-    await Promise.all([one, two]);
-    expect(events.filter((event) => event.startsWith('on:'))).toEqual(['on:http']);
-    expect(controller.active?.id).toBe('two');
-  });
-  it('temporary WS rules belong only to the active scene, expire and never reach disk', async () => {
-    const { controller, projected } = await fixture();
-    await controller.activate('one');
-    const temp: WsRule = { ...ws, id: 'temp', match: { connectionId: 'current' } };
-    await controller.saveWs([ws, temp], 'one');
-    expect(projected().ws).toHaveLength(2);
-    expect((await store.load()).scenes[0].wsRules).toHaveLength(1);
-    controller.expireTemporary([]);
-    await controller.reconcile();
-    expect(projected().ws).toHaveLength(1);
-    await controller.saveWs([ws, temp], 'one');
-    await controller.activate('two');
-    expect(projected().ws).toEqual([]);
-    await expect(controller.saveWs([temp], 'one')).rejects.toThrow('激活场景');
-  });
-  it('reload validates the entire document before replacing the last good scene', async () => {
-    const { controller } = await fixture();
-    await controller.activate('one');
-    await writeFile(store.file, 'invalid');
-    await expect(controller.reload()).rejects.toThrow();
-    expect(controller.active?.id).toBe('one');
+  for (const phase of ['journal', 'replace'])
+    it(`recovers interruption after ${phase}`, async () => {
+      const files = new SceneFiles(directory, (actual, index) => {
+        if (actual === phase && index === 0) throw new Error('interrupted');
+      });
+      const changes = ['a', 'b'].map((name) => ({ path: `scenes/${name}.txt`, expected: null, text: name }));
+      await expect(files.locked(() => files.commit(changes))).rejects.toThrow('interrupted');
+      await new SceneFiles(directory).locked(async () => {});
+      expect(await readFile(join(directory, 'scenes/a.txt'), 'utf8')).toBe('a');
+      expect(await readFile(join(directory, 'scenes/b.txt'), 'utf8')).toBe('b');
+      await expect(lstat(join(directory, '.scene-transaction.json'))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    });
+  it('stops recovery before any additional replace when a human changed a transaction file', async () => {
+    const files = new SceneFiles(directory, (phase) => {
+      if (phase === 'journal') throw new Error('crash');
+    });
+    await expect(
+      files.locked(() =>
+        files.commit([
+          { path: 'scenes/a', expected: null, text: 'agent' },
+          { path: 'scenes/b', expected: null, text: 'agent' },
+        ]),
+      ),
+    ).rejects.toThrow();
+    await writeFile(join(directory, 'scenes/b'), 'human');
+    await expect(new SceneFiles(directory).locked(async () => {})).rejects.toThrow('冲突');
+    expect(await readFile(join(directory, 'scenes/b'), 'utf8')).toBe('human');
+    await expect(lstat(join(directory, 'scenes/a'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readFile(join(directory, '.scene-transaction.json'), 'utf8')).toContain('scenes/a');
   });
 });

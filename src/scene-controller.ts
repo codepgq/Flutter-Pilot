@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { validateRuleDocument, type Rule } from './model';
-import type { WsRule } from './ws/model';
+import { validateWsRuleDocument, type WsRule } from './ws/model';
 import type { Scene, SceneDocument, SceneRuntime } from './scene-model';
 import { cloneScenes, SceneStore } from './scenes';
+import type { SceneDetail, ResourceAddress } from './scene-storage-model';
 
 type Domain = 'http' | 'ws';
 export interface SceneHost {
@@ -27,7 +28,12 @@ export interface SceneHost {
 
 /** Owns scene selection, persistence and serialized replacement of runtime rules. */
 export class SceneController {
-  document: SceneDocument = { version: 1, activeSceneId: null, scenes: [] };
+  private activeScene?: Scene;
+  detail?: SceneDetail;
+  stale?: string;
+  get activeSceneId() {
+    return this.store.activeSceneId;
+  }
   selectedSceneId?: string;
   private temporary: WsRule[] = [];
   private revision = 0;
@@ -53,39 +59,30 @@ export class SceneController {
   ) {}
   get active() {
     if (this.run && !this.run.restoring) return this.run.scene;
-    return this.document.scenes.find((scene) => scene.id === this.document.activeSceneId);
+    return this.activeScene;
   }
-  summary() {
+  summary(query: { offset?: number; limit?: number; search?: string } = {}) {
     return {
-      version: this.document.version,
-      activeSceneId: this.document.activeSceneId,
+      ...this.store.listScenes(query),
+      ...(this.stale && this.activeScene
+        ? {
+            activeSceneId: this.activeScene.id,
+            activeScene: { id: this.activeScene.id, name: this.activeScene.name },
+          }
+        : {}),
       runtimeRunId: this.run?.id,
-      scenes: this.document.scenes.map((scene) => ({
-        id: scene.id,
-        name: scene.name,
-        httpRuleCount: scene.httpRules.length,
-        wsRuleCount: scene.wsRules.length,
-        targetCount: Object.keys(scene.targets ?? {}).length,
-        actionCount: scene.actions?.length ?? 0,
-        actions: (scene.actions ?? []).map((action) => ({ id: action.id, name: action.name })),
-        enabledHttpRuleCount: scene.httpRules.filter((rule) => rule.enabled).length,
-        enabledWsRuleCount: scene.wsRules.filter((rule) => rule.enabled).length,
-      })),
       runtime: this.runtime,
+      stale: this.stale,
     };
   }
-  get selected(): Scene | undefined {
-    return (
-      this.document.scenes.find((scene) => scene.id === this.selectedSceneId) ??
-      this.active ??
-      this.document.scenes[0]
-    );
+  get selected() {
+    return this.detail;
   }
-  wsRules(scene: Scene | undefined = this.selected) {
+  wsRules(scene: Scene | undefined = this.active) {
     return [...(scene?.wsRules ?? []), ...(scene?.id === this.active?.id ? this.temporary : [])];
   }
   select(id: string) {
-    if (!this.document.scenes.some((scene) => scene.id === id)) throw new Error('场景不存在');
+    this.detail = this.store.getScene(id);
     this.selectedSceneId = id;
     this.host.changed();
   }
@@ -95,16 +92,37 @@ export class SceneController {
     return next;
   }
   async initialize() {
-    this.document = await this.store.load();
-    this.selectedSceneId = this.document.activeSceneId ?? this.document.scenes[0]?.id;
+    await this.store.load();
+    if (!this.store.error && !this.store.listScenes().total) await this.create('默认场景');
+    this.stale = this.store.error;
     this.loaded = true;
+    const initial = this.activeSceneId ?? this.store.listScenes().scenes[0]?.id;
+    if (initial) {
+      try {
+        this.select(initial);
+      } catch {
+        /* A stale active ID is reported below. */
+      }
+    }
+    if (this.activeSceneId) {
+      try {
+        this.activeScene = (await this.store.prepareSnapshot([], this.activeSceneId)).scenes[0];
+      } catch (error) {
+        this.stale = (error as Error).message;
+      }
+    }
     await this.reconcile();
   }
   private ensureNoRun() {
     if (this.run) throw new Error(`测试运行 ${this.run.id} 正在使用场景，请等待结束或取消后再修改`);
   }
   /** Apply an in-memory test environment without persisting or changing activeSceneId. */
-  beginRun(runId: string, sceneId?: string, httpOverrides: Rule[] = [], options: { deferWs?: boolean } = {}) {
+  beginRun(
+    runId: string,
+    sceneId?: string,
+    httpOverrides: Rule[] = [],
+    options: { deferWs?: boolean; snapshot?: SceneDocument } = {},
+  ) {
     return this.enqueue(async () => {
       this.ensureNoRun();
       if (!runId || runId.trim().length === 0 || runId.length > 128 || /[\x00-\x1f\x7f]/.test(runId))
@@ -113,8 +131,9 @@ export class SceneController {
       const snapshot = this.host.snapshot();
       if (!snapshot.connected || snapshot.proxyRulesUnreachable)
         throw new Error('测试环境尚未连接，不能开始测试');
-      const source =
-        sceneId === undefined ? this.active : this.document.scenes.find((scene) => scene.id === sceneId);
+      const mockId = sceneId ?? this.activeSceneId;
+      const snapshotDoc = options.snapshot ?? (await this.store.prepareSnapshot([], mockId));
+      const source = snapshotDoc.scenes.find((scene) => scene.id === mockId);
       if (sceneId !== undefined && !source) throw new Error('测试场景不存在');
       const scene: Scene = source
         ? structuredClone(source)
@@ -135,7 +154,7 @@ export class SceneController {
         pendingCaptures: new Map(this.pendingCaptures),
         temporary: structuredClone(this.temporary),
       };
-      if (source?.id !== this.document.activeSceneId) this.temporary = [];
+      if (source?.id !== this.activeSceneId) this.temporary = [];
       this.paused.clear();
       // Login/setup may be responsible for creating the target socket. HTTP
       // fixtures are ready before setup; WS activation follows the ready hook.
@@ -206,109 +225,135 @@ export class SceneController {
       this.host.changed();
     });
   }
-  private ensureSafeChange(next: SceneDocument) {
-    if (!this.host.snapshot().proxyRulesUnreachable) return;
-    const activeRules = (doc: SceneDocument) => {
-      const scene = doc.scenes.find((item) => item.id === doc.activeSceneId);
-      return [doc.activeSceneId, scene?.httpRules ?? [], scene?.wsRules ?? []];
-    };
-    if (JSON.stringify(activeRules(this.document)) !== JSON.stringify(activeRules(next)))
+  private ensureSafeChange() {
+    if (this.host.snapshot().proxyRulesUnreachable)
       throw new Error('代理控制连接已断开，旧规则可能仍在生效。请等待重连或停止代理后再更改激活场景。');
   }
-  private async stopIfDisconnectedDuringSave(next: SceneDocument) {
+  private async confirmCommittedChange() {
     try {
-      this.ensureSafeChange(next);
-    } catch (error) {
-      // The connection can drop while the file save is in flight. The new
-      // selection is already persisted, so stop the still-serving process.
-      if (!this.host.stopUnreachableProxy) throw error;
+      if (!this.host.snapshot().proxyRulesUnreachable) return;
+      if (!this.host.stopUnreachableProxy)
+        throw new Error('配置已保存，但代理控制连接已断开，旧规则可能仍在生效；请停止代理后重新读取');
       await this.host.stopUnreachableProxy();
+      if (this.host.snapshot().proxyRulesUnreachable)
+        throw new Error('配置已保存，但无法确认代理已停止，旧规则可能仍在生效；请停止代理后重新读取');
+    } catch (error) {
+      this.stale = (error as Error).message;
+      this.host.changed();
+      throw error;
     }
   }
   reload() {
+    return this.enqueue(() => this.reloadNow(true));
+  }
+  private async reloadNow(readDisk = false) {
+    this.ensureNoRun();
+    try {
+      if (readDisk) await this.store.reload();
+      if (this.selectedSceneId) {
+        try {
+          this.detail = this.store.getScene(this.selectedSceneId);
+        } catch {
+          this.detail = undefined;
+          this.selectedSceneId = undefined;
+        }
+      }
+      if (this.activeSceneId) {
+        const next = (await this.store.prepareSnapshot([], this.activeSceneId)).scenes[0];
+        if (JSON.stringify(next) !== JSON.stringify(this.activeScene)) this.ensureSafeChange();
+        this.activeScene = next;
+      } else if (this.activeScene) {
+        this.ensureSafeChange();
+        this.activeScene = undefined;
+        this.temporary = [];
+      }
+      this.stale = undefined;
+      await this.apply();
+    } catch (error) {
+      this.stale = (error as Error).message;
+      throw error;
+    } finally {
+      this.host.changed();
+    }
+  }
+  activate(id: string | null) {
     return this.enqueue(async () => {
       this.ensureNoRun();
-      const doc = await this.store.read();
-      this.ensureSafeChange(doc);
-      if (doc.activeSceneId !== this.document.activeSceneId) {
+      this.ensureSafeChange();
+      const next = id === null ? undefined : (await this.store.prepareSnapshot([], id)).scenes[0];
+      await this.store.activate(id);
+      await this.confirmCommittedChange();
+      this.activeScene = next;
+      this.stale = undefined;
+      this.temporary = [];
+      this.paused.clear();
+      this.pendingCaptures.clear();
+      await this.apply(true);
+      this.host.changed();
+    });
+  }
+  async create(name: string, source?: Scene) {
+    return this.enqueue(async () => {
+      this.ensureNoRun();
+      const scene = source
+        ? cloneScenes([source])[0]
+        : { id: randomUUID(), name, httpRules: [], wsRules: [] };
+      scene.name = name;
+      const ids = await this.store.importPackage({ version: 2, scenes: [scene] }, false);
+      this.select(ids[0]);
+    });
+  }
+  async rename(id: string, name: string, hash: string) {
+    return this.enqueue(async () => {
+      this.ensureNoRun();
+      await this.store.renameScene(id, name, hash);
+      await this.reloadNow();
+    });
+  }
+  async remove(id: string, hash: string) {
+    return this.enqueue(async () => {
+      this.ensureNoRun();
+      const wasActive = id === this.activeSceneId;
+      if (wasActive) this.ensureSafeChange();
+      await this.store.deleteScene(id, hash);
+      if (wasActive) await this.confirmCommittedChange();
+      if (wasActive) {
+        this.activeScene = undefined;
         this.temporary = [];
         this.paused.clear();
         this.pendingCaptures.clear();
       }
-      this.document = doc;
-      if (!doc.scenes.some((scene) => scene.id === this.selectedSceneId))
-        this.selectedSceneId = doc.activeSceneId ?? doc.scenes[0]?.id;
-      await this.apply();
-      this.host.changed();
+      await this.reloadNow();
     });
   }
-  change(edit: (document: SceneDocument) => void, force = false, resetPaused = false) {
+  async saveResource(address: ResourceAddress, value: unknown, hash: string | null) {
     return this.enqueue(async () => {
       this.ensureNoRun();
-      const before = this.document;
-      const next = structuredClone(before);
-      edit(next);
-      this.ensureSafeChange(next);
-      const saved = await this.store.save(next, before);
-      if (this.host.snapshot().proxyRulesUnreachable) await this.stopIfDisconnectedDuringSave(saved);
-      this.document = saved;
-      if (resetPaused) {
-        this.paused.clear();
-        this.pendingCaptures.clear();
-      }
-      if (before.activeSceneId !== next.activeSceneId) this.temporary = [];
-      if (!next.scenes.some((scene) => scene.id === this.selectedSceneId))
-        this.selectedSceneId = next.activeSceneId ?? next.scenes[0]?.id;
-      await this.apply(force);
-      this.host.changed();
+      if (address.sceneId === this.activeSceneId) this.ensureSafeChange();
+      await this.store.saveResource(address, value, hash);
+      if (address.sceneId === this.activeSceneId) await this.confirmCommittedChange();
+      await this.reloadNow();
     });
   }
-  activate(id: string | null) {
-    return this.change(
-      (doc) => {
-        doc.activeSceneId = id;
-      },
-      true,
-      true,
-    );
-  }
-  create(name: string, source?: Scene) {
-    const scene: Scene = source
-      ? cloneScenes([source])[0]
-      : { id: randomUUID(), name, httpRules: [], wsRules: [] };
-    scene.name = name;
-    return this.change((doc) => {
-      doc.scenes.push(scene);
-    }).then(() => this.select(scene.id));
-  }
-  saveHttp(rules: Rule[], id = this.selected?.id) {
-    return this.change((doc) => {
-      const scene = doc.scenes.find((scene) => scene.id === id);
-      if (!scene) throw new Error('请选择目标场景');
-      scene.httpRules = rules;
-    });
-  }
-  saveWs(rules: WsRule[], id = this.selected?.id) {
-    const temporary = rules.filter((rule) => rule.match.connectionId);
-    if (temporary.length && id !== this.active?.id)
-      return Promise.reject(new Error('临时连接规则只能加入当前激活场景'));
+  async deleteResource(address: ResourceAddress, hash: string) {
     return this.enqueue(async () => {
       this.ensureNoRun();
-      const doc = structuredClone(this.document);
-      const scene = doc.scenes.find((scene) => scene.id === id);
-      if (!scene) throw new Error('请选择目标场景');
-      scene.wsRules = rules.filter((rule) => !rule.match.connectionId);
-      this.ensureSafeChange(doc);
-      if (
-        id === this.active?.id &&
-        this.host.snapshot().proxyRulesUnreachable &&
-        JSON.stringify(temporary) !== JSON.stringify(this.temporary)
-      )
-        throw new Error('代理控制连接已断开，旧规则可能仍在生效。请等待重连或停止代理后再更改激活场景。');
-      const saved = await this.store.save(doc, this.document);
-      if (this.host.snapshot().proxyRulesUnreachable) await this.stopIfDisconnectedDuringSave(saved);
-      this.document = saved;
-      if (id === this.active?.id) this.temporary = temporary;
+      if (address.sceneId === this.activeSceneId) this.ensureSafeChange();
+      await this.store.deleteResource(address, hash);
+      if (address.sceneId === this.activeSceneId) await this.confirmCommittedChange();
+      await this.reloadNow();
+    });
+  }
+  async saveTemporary(rules: WsRule[], sceneId = this.activeSceneId) {
+    return this.enqueue(async () => {
+      this.ensureNoRun();
+      this.ensureSafeChange();
+      if (!this.active || !sceneId || sceneId !== this.activeSceneId || sceneId !== this.active.id)
+        throw new Error('临时 WS 规则只能保存到当前激活场景');
+      const validated = validateWsRuleDocument({ version: 1, rules }).rules;
+      if (validated.some((rule) => !rule.match.connectionId)) throw new Error('临时 WS 规则必须绑定当前连接');
+      validateWsRuleDocument({ version: 1, rules: [...this.active.wsRules, ...validated] });
+      this.temporary = validated;
       await this.apply();
       this.host.changed();
     });
@@ -452,9 +497,22 @@ export class SceneController {
   }
   get runtime(): SceneRuntime {
     const state = this.host.snapshot();
+    let sourceError = this.store.error;
+    if (this.activeScene && !sourceError) {
+      try {
+        const detail = this.store.getScene(this.activeScene.id);
+        if (detail.health === 'error') sourceError = detail.errors.join('；');
+      } catch {
+        sourceError = '当前运行场景已从磁盘配置移除，请重新读取';
+      }
+    }
+    const stale = this.stale ?? sourceError;
     const status = (domain: Domain) => {
       const rules =
         domain === 'http' ? (this.active?.httpRules ?? []) : this.active ? this.wsRules(this.active) : [];
+      if (state.proxyRulesUnreachable && this.active)
+        return { status: 'error' as const, message: stale ?? '代理控制连接已断开，旧规则可能仍在生效' };
+      if (this.errors[domain]) return { status: 'error' as const, message: this.errors[domain] };
       if (
         this.active &&
         rules.some((rule) => rule.enabled) &&
@@ -462,7 +520,6 @@ export class SceneController {
         this.appliedKey !== this.applicationKey(state)
       )
         return { status: 'pending' as const, message: '等待同步场景' };
-      if (this.errors[domain]) return { status: 'error' as const, message: this.errors[domain] };
       if (!this.active || !rules.some((rule) => rule.enabled)) return { status: 'unneeded' as const };
       if (this.paused.has(domain)) return { status: 'paused' as const, message: '采集已关闭' };
       if (domain === 'ws' && state.mode === 'proxy')
@@ -481,6 +538,11 @@ export class SceneController {
             : '等待目标 WS 连接接入',
       };
     };
-    return { revision: this.revision, http: status('http'), ws: status('ws') };
+    return {
+      revision: this.revision,
+      http: status('http'),
+      ws: status('ws'),
+      ...(stale ? { stale } : {}),
+    };
   }
 }

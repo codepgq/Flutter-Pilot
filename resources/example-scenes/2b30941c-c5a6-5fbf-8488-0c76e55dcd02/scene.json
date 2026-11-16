@@ -1,0 +1,16 @@
+{
+  "id": "email_operations",
+  "name": "邮箱登录公共操作（示例 Key 需核验）",
+  "http": [],
+  "ws": [],
+  "actions": [
+    {
+      "id": "complete_email_login_to_home",
+      "file": "5bb6074a-3271-5231-a13c-6c06d83b7446.json"
+    },
+    {
+      "id": "open_home",
+      "file": "a3571454-fc41-535d-a373-c70dbe1f7ceb.json"
+    }
+  ]
+}

@@ -1,10 +1,10 @@
 # Scene 操作
 
-Scene 在 `.flutter-pilot/scenes.json` 中统一保存 HTTP/WS Mock、共享 `targets` 和多个命名 `actions`。可以只保存 Mock、只保存操作，或只保存 targets。文件仍使用 `version:1`，原有纯 Mock 场景继续有效。
+Scene 在 `.flutter-pilot/scenes/` 中统一保存 HTTP/WS Mock、共享 `targets` 和多个命名 `actions`。可以只保存 Mock、只保存操作，或只保存 targets。根清单使用 `version:2`，规则、targets、action 与正文独立保存。旧文件需要显式迁移。详见 [目录存储、迁移与交换包](scene-storage.md)。
 
 Agent 首次探索并验证控件后保存稳定选择器；后续调用 `run_scene_action`，由插件顺序执行输入、收起键盘、点击、等待、滚动与子操作，无需再次逐个探索控件。激活、重载、重连或重开 IDE 都不会自动执行操作。`completed` 仅说明操作完成；业务通过应使用 Test Case 的 `passed`。
 
-已有动作优先按 [联调流程](scene-authoring.md) 发现和执行；[动作目录](scene-actions-catalogue.md) 按起始页、参数和终点索引可复用示例。公共动作与业务入口均保存在同一份 `scenes.json`，目录只提供说明，不是第二个配置来源。
+已有动作优先按 [联调流程](scene-authoring.md) 发现和执行；[动作目录](scene-actions-catalogue.md) 按起始页、参数和终点索引可复用示例。公共动作与业务入口均保存在同一目录库，目录只提供说明，不是第二个配置来源。
 
 工作台的运行结果可点击标题展开或收起，也支持聚焦标题后按 Enter / Space。收起后保留操作名称、状态、操作来源与本轮 Mock，隐藏耗时和步骤详情；同一次运行刷新时保留当前展开状态，新运行默认展开。运行中的取消按钮始终可用。
 
@@ -12,14 +12,13 @@ Mock 场景页的运行状态、场景列表、场景详情、UI 操作、HTTP �
 
 ## 保存配置
 
-通过 `get_network_status` 获取 `files.scenes` 的准确路径。增量编辑 Scene 后调用 `reload_rules` 更新加载快照；配置无效时保留上一份有效配置。所有操作只从此文件加载。插件停止读取或创建 `workflows.json`，不会迁移或删除用户原文件。
+通过 `get_network_status` 获取 `files.scenes` 根清单的准确路径，再按 Scene 和资源映射编辑。增量编辑 Scene 后调用 `reload_rules` 更新加载快照；配置无效时保留上一份有效配置。所有操作只从目录资源加载。插件停止读取或创建 `workflows.json`，不会迁移或删除用户原文件。
 
-以下 Key 是格式示例，必须替换为在实际 App 验证过的选择器：
+以下为 v2 自包含导入交换包；运行目录格式见 [目录存储](scene-storage.md)。以下 Key 是格式示例，必须替换为在实际 App 验证过的选择器：
 
 ```json
 {
-  "version": 1,
-  "activeSceneId": null,
+  "version": 2,
   "scenes": [
     {
       "id": "insufficient_balance",
@@ -101,7 +100,7 @@ Mock 场景页的运行状态、场景列表、场景详情、UI 操作、HTTP �
 
 `call.sceneId` 省略时引用当前 Scene；跨 Scene 引用 `{id:"submit",type:"call",sceneId:"common_operations",actionId:"submit_order",inputs:{price:"${inputs.price}"}}` 只复用操作，不切换 Mock。参数必须显式映射。定位支持稳定 Key、文字、语义、类型及祖先范围，原生目标可显式指定 `source:device`；不能持久保存快照 ref、坐标或任意脚本。
 
-每操作最多 500 步、整个文件最多 5000 定义步骤，嵌套最多 16 层，一次展开最多 1000 原子动作；`timeoutMs` 为 100..30000，滚动 `maxSteps` 为 1..30。预检拒绝未知目标、缺失参数、无效引用、循环及超限，在 UI 动作前完成校验。
+每操作最多 500 步；无全库 Scene 数量和步骤总量限制，嵌套最多 16 层，一次展开最多 1000 原子动作；`timeoutMs` 为 100..30000，滚动 `maxSteps` 为 1..30。预检拒绝未知目标、缺失参数、无效引用、循环及超限，在 UI 动作前完成校验。
 
 ## 发现和执行
 
@@ -121,7 +120,7 @@ Mock 场景页的运行状态、场景列表、场景详情、UI 操作、HTTP �
 }
 ```
 
-操作始终使用已加载配置快照，不隐式激活或切换 Mock。Agent 查看 HTTP/WS 状态并决定调用时机；运行器不强制等待所有网络域就绪，因为操作可能负责建立连接。运行记录同时保存操作来源 `sceneId/actionId` 和实际激活的 `mockSceneId`。
+操作开始前按依赖闭包装配不可变快照，不隐式激活或切换 Mock。Agent 查看 HTTP/WS 状态并决定调用时机；运行器不强制等待所有网络域就绪，因为操作可能负责建立连接。运行记录同时保存操作来源 `sceneId/actionId` 和实际激活的 `mockSceneId`。
 
 MCP 启动调用返回或连接结束后，后台运行继续。单设备串行，普通操作与 Test Case 共享设备锁；运行期间拒绝其他 UI 动作和环境修改。失败即停，不更换选择器或输入通道重放。结束保留当前 Mock。
 

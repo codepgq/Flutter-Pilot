@@ -18,6 +18,7 @@ export interface SceneDocument {
 }
 export type SceneDomainStatus = 'unneeded' | 'pending' | 'applied' | 'error' | 'unsupported' | 'paused';
 export interface SceneRuntime {
+  stale?: string;
   revision: number;
   http: { status: SceneDomainStatus; message?: string };
   ws: { status: SceneDomainStatus; message?: string };
