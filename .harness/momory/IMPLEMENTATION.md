@@ -1,5 +1,12 @@
 # 实现与验证结论
 
+## Flutter / Web 路线图建档（2026-11-16，尚未实现）
+
+- 从干净的 main / `efc65160703fdf44aef200751a2dd1dfbb5292df` 创建并切换至 `codex/web-flutter-unified-runtime`。按用户要求保存最终目标、阶段目标、固定验收和 phase 文件，未启动产品实现。
+- [路线图](../../docs/roadmap/web-flutter-runtime/README.md) 共 13 个文件，包含 G01–G10、架构取舍、支持范围、验收报告模板、7 个 phase 和 `progress.json`；36 项实施任务、53 条必需验收，基线 v1。全部 phase 为 `not_started`，下一阶段 phase-01，未创建通过报告。
+- 校验通过：7 阶段依赖顺序、阶段/文档/状态一致性、53 个验收 ID 唯一且与 JSON 一致、10 个目标映射、17 个路线图内链接及 npm 命令分类；7 个拟新增脚本明确标为尚不存在。新增 Markdown / JSON 的 Prettier 检查及 `git diff --check` 通过。
+- README 与项目记忆补充规划入口。此次为文档改动，未运行产品回归，也不宣称 Web、真实浏览器或双端业务验收通过；未提交、推送、发布或安装。
+
 ## 0.0.22 发布、Cursor 安装与验证（2026-11-16）
 
 - 按用户默认发布约定交付 Scene v2 目录存储及子代理审核修复。发布前远端 main、本地 HEAD / 最新标签、Cursor 安装版均为 0.0.21；版本、lockfile、README、CHANGELOG 和 VSIX 路径同步至 0.0.22。下方“源码未发布”章节保留实现和审核期间的历史状态，本节覆盖其发布限制。

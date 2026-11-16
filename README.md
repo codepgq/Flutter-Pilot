@@ -1,5 +1,7 @@
 # Flutter Pilot
 
+**Web 支持规划**：[Flutter / Web 统一运行时路线图](docs/roadmap/web-flutter-runtime/README.md) 已记录最终目标、7 个实施阶段及固定验收标准；全部实现阶段尚未开始，不代表当前版本已具备完整 Web 能力。
+
 <img src="resources/icons/plugin.png" width="96" height="96" alt="Flutter Pilot 折纸导航图标">
 
 **Flutter 运行时调试与 Agent 联调工作台**，面向 **VS Code 和 Cursor**。支持通过 **Flutter VM WebSocket 零源码记录 API、实验性运行时 Dio Mock**，也保留 HTTP/HTTPS 代理、双向修改、转发、手动断点和请求历史。
