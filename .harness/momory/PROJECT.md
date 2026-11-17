@@ -1,5 +1,11 @@
 # Flutter Pilot 项目记忆
 
+## 侧栏状态与启动入口（2026-11-17）
+
+- 0.0.24 安装包激活失败：esbuild 打进了 jsonc-parser 的 UMD 入口，扩展宿主加载时仍执行 `require("./impl/format")`，`flutterPilot.open` 没有注册。侧栏“打开工作台”因此没有反应。生产打包必须解析到该包的 ESM 入口。
+- 活动栏侧栏改为 Webview，在原欢迎内容的位置显示连接/记录状态和项目启动入口。启动只执行 `.flutter-pilot/launch.json` 里已声明的 profile；打开侧栏不自动打开工作台、不额外启动代理或开启 Mock。标题栏快捷按钮仍复用现有命令。
+- 本节覆盖下方活动栏入口里“空树视图 / viewsWelcome”的展示方式；不自动打开工作台的约定保留。
+
 ## Flutter / Web 统一运行时规划（2026-11-16）
 
 - 采用一个仓库、一个 IDE 插件、默认一个 MCP 服务入口；共享 Scene / Mock / actions / tests / 证据核心，Flutter 与 Web 独立适配，浏览器操作放独立 Worker，依赖显式按需准备。保留现有插件、MCP、项目 UUID 与 Scene v2 身份。
@@ -26,7 +32,7 @@
 
 ## 当前发布版本（2026-11-17）
 
-- 当前发布版本为 0.0.24，包含项目启动入口与浏览器准备修复（优先本机 Chrome 隔离 Profile）；保留 Flutter / Web 统一运行时、61 个工具、69 个 Prompts 与 Scene v2。发布、Cursor 安装、验证与远端引用证据见 `IMPLEMENTATION.md` 同版本条目。
+- 当前发布版本为 0.0.25。修复 jsonc-parser 打包导致的扩展激活失败，活动栏侧栏显示连接状态和项目启动入口。保留 0.0.24 的项目启动与浏览器准备、Flutter / Web 统一运行时、61 个工具、69 个 Prompts 与 Scene v2。发布、Cursor 安装、验证与远端引用证据见 `IMPLEMENTATION.md` 同版本条目。
 - 当前仓库自动生成的 `.flutter-pilot/` 是本地项目状态，保留但不提交、不进入 VSIX；可复用分发示例仍位于 `resources/`。
 
 ## Cursor MCP 适配（2026-11-14，0.0.21 已发布）

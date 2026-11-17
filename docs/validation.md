@@ -1,5 +1,11 @@
 # 验收记录
 
+## 0.0.25 发布、Cursor 安装与推送（2026-11-17）
+
+- 按默认发布约定交付侧栏连接状态、项目启动入口，以及 jsonc-parser 打包导致扩展无法激活的修复。发布前远端 main、最新 tag 与 Cursor 安装版为 0.0.24；版本、lockfile、README / CHANGELOG 与 VSIX 路径同步为 0.0.25。
+- 验证：877 项 Vitest、109 项工作台、类型、格式与构建打包通过。产物 `artifacts/flutter-pilot-0.0.25.vsix`，Cursor CLI `--force` 安装；95 个分发文件与源码 / 构建 / 安装一致。离线 SDK stdio 核验 0.0.25、61 工具、69 Prompts、6 资源，报告 `artifacts/v0.0.25-install-report.json`。
+- main 与附注标签 `v0.0.25` 常规推送；远端核验见 `artifacts/v0.0.25-release-report.json`。活动窗口需用户方便时重载并重连 MCP。未复跑 Web 依赖、设备与完整浏览器代理夹具。
+
 ## 0.0.24 发布、Cursor 安装与推送（2026-11-17）
 
 - 按默认发布约定交付项目启动入口与浏览器准备修复。发布前远端 main、最新 tag 与 Cursor 安装版为 0.0.23；版本、lockfile、README / CHANGELOG 与 VSIX 路径同步为 0.0.24。

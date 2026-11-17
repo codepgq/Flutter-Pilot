@@ -1,5 +1,12 @@
 # 问题与验证记录
 
+## 侧栏打不开工作台（2026-11-17）
+
+- 现象：0.0.24 安装后，活动栏“打开工作台”点击无反应。扩展宿主日志是 `Cannot find module './impl/format'`，随后 `command 'flutterPilot.open' not found`。
+- 根因：`jsonc-parser` 的 package main 是 UMD。esbuild 把 `require("./impl/format")` 留在 `dist/extension.js` 里，扩展宿主按扩展目录解析该相对路径并在激活阶段失败，命令没有注册。欢迎页按钮本身没有坏。
+- 修复：Node 包改为解析 `jsonc-parser/lib/esm/main.js`。侧栏改为 Webview，在原欢迎区域显示连接/记录状态和 launch.json 启动入口；打开侧栏仍不自动打开工作台。
+- 验证：jsonc 打包回归确认产物不再残留 `require("./impl/format")` 且能解析带注释的 JSON；扩展整合覆盖侧栏状态、重新读取、编辑、打开工作台和错误启动项。修复已随 0.0.25 打包并安装到 Cursor；活动窗口需重新加载后才加载新扩展。
+
 ## Web 浏览器准备错误与项目启动入口（2026-11-17）
 
 - 现象：工作台显示 `Browser preparation cancelled or timed out.`，Web 托管浏览器无法创建 Context。

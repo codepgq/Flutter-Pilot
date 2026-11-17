@@ -1,30 +1,29 @@
 import * as esbuild from 'esbuild';
 import { mkdir } from 'node:fs/promises';
+import { jsoncParserEsm } from './esbuild-jsonc.mjs';
 await mkdir('dist', { recursive: true });
+const nodeBundle = {
+  bundle: true,
+  platform: 'node',
+  target: 'node20',
+  format: 'cjs',
+  plugins: [jsoncParserEsm],
+};
 const options = [
   {
     entryPoints: ['src/browser/worker.ts'],
     outfile: 'dist/browser-worker.cjs',
-    bundle: true,
-    platform: 'node',
-    target: 'node20',
-    format: 'cjs',
+    ...nodeBundle,
   },
   {
     entryPoints: ['src/mcp/bridge.ts'],
     outfile: 'dist/mcp-bridge.cjs',
-    bundle: true,
-    platform: 'node',
-    target: 'node20',
-    format: 'cjs',
+    ...nodeBundle,
   },
   {
     entryPoints: ['src/extension.ts'],
     outfile: 'dist/extension.js',
-    bundle: true,
-    platform: 'node',
-    target: 'node20',
-    format: 'cjs',
+    ...nodeBundle,
     external: ['vscode'],
     sourcemap: true,
   },

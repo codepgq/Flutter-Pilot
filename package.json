@@ -3,7 +3,7 @@
   "displayName": "Flutter Pilot",
   "icon": "resources/icons/plugin.png",
   "description": "Flutter 运行时调试与 Agent 联调工作台：HTTP/WebSocket 采集与 Mock、UI 精确操作、热重载和 MCP。",
-  "version": "0.0.24",
+  "version": "0.0.25",
   "publisher": "flutter-pilot",
   "license": "MIT",
   "engines": {
@@ -53,16 +53,11 @@
         {
           "id": "flutterPilot.launcher",
           "name": "工作台",
+          "type": "webview",
           "visibility": "visible"
         }
       ]
     },
-    "viewsWelcome": [
-      {
-        "view": "flutterPilot.launcher",
-        "contents": "Flutter 运行时调试与 Agent 联调工作台。\n[打开工作台](command:flutterPilot.open)\n[截取 App / 长截图](command:flutterPilot.screenshot)\n请在受信任的本地 Flutter 工作区中使用。"
-      }
-    ],
     "menus": {
       "view/title": [
         {
@@ -166,7 +161,7 @@
     "test:proxy": "python3 -m unittest discover -s tests/proxy -v",
     "test:ui": "playwright test",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-pilot-0.0.24.vsix",
+    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-pilot-0.0.25.vsix",
     "test:ide": "node scripts/ide-test.mjs",
     "format:check": "prettier --check \"src/**/*.ts\" \"webview/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/*.{mjs,cjs}\" \"*.{json,ts,mts}\"",
     "test:vm": "node scripts/vm-injection-smoke.mjs",

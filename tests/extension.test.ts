@@ -39,6 +39,7 @@ const fake = vi.hoisted(() => ({
   shownDocuments: [] as string[],
   launchConfigurations: [] as Record<string, unknown>[],
   appStarts: [] as { folder: string; name: string; configuration?: Record<string, unknown> }[],
+  webviewProviders: [] as { id: string; provider: { resolveWebviewView: (view: any) => void } }[],
 }));
 vi.mock('vscode', async () => {
   const { join } = await import('node:path');
@@ -124,6 +125,10 @@ vi.mock('vscode', async () => {
     },
     window: {
       registerTreeDataProvider: () => ({ dispose() {} }),
+      registerWebviewViewProvider: (id: string, provider: { resolveWebviewView: (view: any) => void }) => {
+        fake.webviewProviders.push({ id, provider });
+        return { dispose() {} };
+      },
       createOutputChannel: () => ({ appendLine() {}, dispose() {} }),
       createStatusBarItem: () => ({ show() {}, dispose() {} }),
       showErrorMessage: vi.fn(),
@@ -1221,6 +1226,7 @@ beforeEach(async () => {
   fake.shownDocuments = [];
   fake.launchConfigurations = [];
   fake.appStarts = [];
+  fake.webviewProviders = [];
   await mkdir(fake.workspace, { recursive: true });
   await writeFile(
     join(fake.workspace, 'pubspec.yaml'),
@@ -1319,9 +1325,80 @@ describe('扩展与工作台整合', () => {
     }
   });
 
+  it('侧栏显示连接状态和项目启动入口，打开工作台不再依赖静态欢迎按钮', async () => {
+    const manifest = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8'));
+    expect(manifest.contributes.views.flutterPilot[0]).toMatchObject({
+      id: 'flutterPilot.launcher',
+      type: 'webview',
+    });
+    expect(manifest.contributes.viewsWelcome).toBeUndefined();
+    const registered = fake.webviewProviders.find((item) => item.id === 'flutterPilot.launcher');
+    expect(registered).toBeTruthy();
+    const messages: any[] = [];
+    const view = {
+      webview: {
+        options: {},
+        html: '',
+        cspSource: 'csp://test',
+        postMessage(message: unknown) {
+          messages.push(message);
+          return Promise.resolve(true);
+        },
+        onDidReceiveMessage(callback: (message: unknown) => void) {
+          view.receive = callback;
+          return { dispose() {} };
+        },
+      },
+      receive: undefined as ((message: unknown) => void) | undefined,
+      onDidDispose() {
+        return { dispose() {} };
+      },
+    };
+    registered?.provider.resolveWebviewView(view);
+    expect(view.webview.html).toContain('打开工作台');
+    expect(view.webview.html).toContain('启动项目');
+    view.receive?.({ action: 'ready' });
+    const initial = messages.at(-1);
+    expect(initial.sessions[0]).toMatchObject({
+      name: 'project',
+      recording: true,
+      connection: '代理采集中 · 127.0.0.1:18080',
+    });
+    expect(initial.sessions[0].launch.profiles).toEqual([]);
+    await writeFile(
+      join(fake.workspace, '.flutter-pilot', 'launch.json'),
+      JSON.stringify({
+        version: 1,
+        selectedProfileId: 'flutter-app',
+        profiles: [
+          { id: 'flutter-app', name: 'Flutter · app', type: 'flutter', configuration: 'missing-config' },
+        ],
+      }),
+    );
+    view.receive?.({ action: 'launch.reload', folder: fake.workspace });
+    await vi.waitFor(() =>
+      expect(messages.at(-1).sessions[0].launch.profiles[0]).toMatchObject({
+        id: 'flutter-app',
+        name: 'Flutter · app',
+        detail: 'Debug 配置：missing-config',
+      }),
+    );
+    view.receive?.({ action: 'launch.edit', folder: fake.workspace });
+    await vi.waitFor(() =>
+      expect(
+        fake.shownDocuments.some((file) => file.endsWith(`${join('.flutter-pilot', 'launch.json')}`)),
+      ).toBe(true),
+    );
+    view.receive?.({ action: 'open' });
+    await vi.waitFor(() => expect(fake.panels.length).toBe(1));
+    view.receive?.({ action: 'launch.start', folder: fake.workspace, profileId: 'flutter-app' });
+    await vi.waitFor(() => expect(messages.at(-1).actionError).toContain('missing-config'));
+    view.receive?.({ action: 'launch.start', folder: '/tmp/not-a-session', profileId: 'flutter-app' });
+    await vi.waitFor(() => expect(messages.at(-1).actionError).toContain('找不到对应的项目会话'));
+  });
   it('侧栏与工作台截图共用连接校验，未连接时显示明确提示', async () => {
     const manifest = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8'));
-    expect(manifest.contributes.viewsWelcome[0].contents).toContain('command:flutterPilot.screenshot');
+    expect(manifest.contributes.views.flutterPilot[0].type).toBe('webview');
     expect(
       manifest.contributes.commands.some((item: any) => item.command === 'flutterPilot.screenshot'),
     ).toBe(true);

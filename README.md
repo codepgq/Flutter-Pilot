@@ -1,6 +1,6 @@
 # Flutter Pilot
 
-**Web 统一运行时（0.0.24）**：同一插件与 `flutter-pilot` MCP 可明确选择 Flutter、HTTP 代理或托管 Chromium 目标，复用 Scene v2、HTTP/WS Mock、操作与业务测试。`.flutter-pilot/launch.json` 提供 Web/Flutter 项目启动入口；浏览器依赖显式按需准备，并优先复用本机 Chrome 的隔离 Profile。Context/Page、历史、Mock 和执行锁隔离。接入与限制见 [Web 使用指南](docs/web-runtime.md)，阶段证据见 [路线图](docs/roadmap/web-flutter-runtime/README.md)。安装新版后，在调试方便时重载 IDE 窗口并重连 MCP，加载统一运行时。
+**Web 统一运行时（0.0.25）**：同一插件与 `flutter-pilot` MCP 可明确选择 Flutter、HTTP 代理或托管 Chromium 目标，复用 Scene v2、HTTP/WS Mock、操作与业务测试。`.flutter-pilot/launch.json` 提供 Web/Flutter 项目启动入口；活动栏侧栏可查看连接状态并直接启动。浏览器依赖显式按需准备，并优先复用本机 Chrome 的隔离 Profile。Context/Page、历史、Mock 和执行锁隔离。接入与限制见 [Web 使用指南](docs/web-runtime.md)，阶段证据见 [路线图](docs/roadmap/web-flutter-runtime/README.md)。安装新版后，在调试方便时重载 IDE 窗口并重连 MCP。
 
 <img src="resources/icons/plugin.png" width="96" height="96" alt="Flutter Pilot 折纸导航图标">
 
@@ -8,7 +8,9 @@
 
 配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key、文字或语义定位页面，通过 VM 或设备输入操作，减少逐步截图识别的耗时与 token 消耗。
 
-当前版本为 **0.0.24**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+当前版本为 **0.0.25**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+
+**0.0.25 更新**：修复扩展激活失败导致侧栏无法打开工作台；侧栏显示连接状态，并可从 `.flutter-pilot/launch.json` 启动或停止项目。
 
 **0.0.24 更新**：新增项目启动入口；浏览器准备优先本机 Chrome 隔离 Profile，并区分取消、超时与下载失败。
 
@@ -181,7 +183,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 
 ### 从 VSIX 安装
 
-1. 获取 `flutter-pilot-0.0.24.vsix`。从源码构建见下方步骤。
+1. 获取 `flutter-pilot-0.0.25.vsix`。从源码构建见下方步骤。
 2. 在 VS Code 或 Cursor 扩展面板右上角菜单选择 **Install from VSIX… / 从 VSIX 安装…**。
 3. 选择安装包，按 IDE 提示重新加载窗口。
 4. 打开包含 `pubspec.yaml` 的 Flutter 项目根目录，并信任工作区。
@@ -191,13 +193,13 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 安装当前 Flutter Pilot 包，例如：
 
 ```sh
-cursor --install-extension artifacts/flutter-pilot-0.0.24.vsix --force
+cursor --install-extension artifacts/flutter-pilot-0.0.25.vsix --force
 # VS Code 使用 code --install-extension 同一 VSIX 文件 --force
 ```
 
 命令在仓库根目录执行，并要求对应 IDE 的 CLI 可用。安装后执行 **Developer: Reload Window / 重新加载窗口**。
 
-插件显示名称为 **Flutter Pilot**，扩展 ID 为 `flutter-pilot.flutter-pilot`。重新加载后通过命令面板搜索 **Flutter Pilot: 打开工作台**，或点击状态栏 **Flutter Pilot**。也可点击活动栏的 **Flutter Pilot** 图标，在侧栏点击 **打开工作台**。如果图标藏在活动栏的“更多”列表中，找到 **Flutter Pilot** 并点击图钉固定；固定状态与位置由 IDE 保存。
+插件显示名称为 **Flutter Pilot**，扩展 ID 为 `flutter-pilot.flutter-pilot`。重新加载后通过命令面板搜索 **Flutter Pilot: 打开工作台**，或点击状态栏 **Flutter Pilot**。也可点击活动栏的 **Flutter Pilot** 图标：侧栏显示当前项目的连接状态，并能从 `.flutter-pilot/launch.json` 启动或停止项目，再点击 **打开工作台**。如果图标藏在活动栏的“更多”列表中，找到 **Flutter Pilot** 并点击图钉固定；固定状态与位置由 IDE 保存。
 
 打开项目或工作台不会静默下载引擎。以下自动启动说明仅适用于代理模式：已安装或显式配置兼容引擎后，默认在受信任的本地 Flutter 工作区打开时自动启动，无需打开面板。首次仍需完成引擎安装、设备连接及 Flutter 接入；未经过代理的请求无法被记录。
 
@@ -214,7 +216,7 @@ npm test
 npm run package
 ```
 
-产物为 `artifacts/flutter-pilot-0.0.24.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
+产物为 `artifacts/flutter-pilot-0.0.25.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
 
 ### 使用已有引擎
 
@@ -815,7 +817,7 @@ python3 tool/device_smoke.py --mitmdump /absolute/path/to/mitmdump --ios YOUR_SI
 
 ```sh
 npm run package
-shasum -a 256 artifacts/flutter-pilot-0.0.24.vsix
+shasum -a 256 artifacts/flutter-pilot-0.0.25.vsix
 ```
 
 VSIX 包含扩展构建产物、VM 注入模板、代理 addon、引擎清单及文档，不包含 Node 开发依赖、Flutter 示例构建结果或真实证书。首次引擎下载单独发生。源码中的 README 修改后，应重新打包，安装包内的文档才会更新。

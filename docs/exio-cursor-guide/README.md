@@ -19,7 +19,7 @@
 
 ## 1. 打开插件
 
-在 Cursor 按 **⌘ ⇧ P**，输入 `Flutter Pilot`，执行 **Flutter Pilot: 打开工作台**。也可点击底部状态栏的 **Flutter Pilot**。当前版本也提供独立活动栏图标，点击 **Flutter Pilot → 打开工作台** 即可进入；下方历史截图未包含该入口。
+在 Cursor 按 **⌘ ⇧ P**，输入 `Flutter Pilot`，执行 **Flutter Pilot: 打开工作台**。也可点击底部状态栏的 **Flutter Pilot**。活动栏 **Flutter Pilot** 侧栏会显示连接状态和项目启动入口，点击 **打开工作台** 进入；下方历史截图未包含该入口。
 
 ![命令面板打开插件](01-open-command.png)
 

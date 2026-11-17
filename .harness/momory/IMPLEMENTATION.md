@@ -1,5 +1,12 @@
 # 实现与验证结论
 
+## 0.0.25 发布、Cursor 安装与推送（2026-11-17）
+
+- 按用户默认发布约定交付侧栏状态/启动入口，以及 0.0.24 扩展无法激活的修复。发布前远端 main、最新 tag 与 Cursor 安装版均为 0.0.24；版本、lockfile、README / CHANGELOG 和 VSIX 路径同步为 0.0.25。
+- 本轮验证：56 个测试文件 / 877 项 Vitest、109 项工作台 Playwright、类型、格式、diff 检查与打包通过。日志 `artifacts/v0.0.25-{unit,ui,typecheck,format,package}.log`。未复跑 Web 依赖、浏览器代理夹具、Flutter 模拟器或真实模型客户端。
+- 发布产物 `artifacts/flutter-pilot-0.0.25.vsix`（SHA-256 `c34edcd6570a83f987e3ecfa72fa646f776ef440f48783cdc7a4547d6ee512c1`）。Cursor CLI `--force` 安装成功，列表为 `flutter-pilot.flutter-pilot@0.0.25`。95 个分发文件与源码 / 构建、VSIX、安装目录一致；vsce 将 `LICENSE` 记为 `LICENSE.txt`，内容一致，安装 manifest 仅排除 Cursor `__metadata`。构建与安装桥接经真实 SDK stdio 离线核验 0.0.25、61 工具、69 Prompts、6 资源。报告 `artifacts/v0.0.25-install-report.json`。
+- main 提交与附注标签 `v0.0.25` 常规推送；远端引用核验见 `artifacts/v0.0.25-release-report.json`。不发布扩展商店。活动 IDE 由用户方便时 Reload Window 并重连 MCP；不自动重载。
+
 ## 0.0.24 发布、Cursor 安装与推送（2026-11-17）
 
 - 按用户默认发布约定交付项目启动入口与浏览器准备修复。发布前远端 main、最新 tag 与 Cursor 安装版均为 0.0.23；版本、lockfile、README / CHANGELOG 和 VSIX 路径同步为 0.0.24。下方“源码未发布”章节保留实现期间历史状态，本节覆盖其发布限制。

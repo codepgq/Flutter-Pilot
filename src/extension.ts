@@ -48,6 +48,7 @@ import type { WsRule, WsMessage, WsMessageQuery } from './ws/model';
 import { openProjectBinding, type ProjectBinding, type ProjectSettings } from './project';
 import { prepareProjectStorage } from './projectStorage';
 import { ProjectLaunchController } from './project-launch';
+import { LauncherView, launcherSessionFrom } from './launcher-view';
 import {
   ApiCatalogQuery,
   ApiCatalogResult,
@@ -66,6 +67,7 @@ import * as devices from './devices';
 let active: Workbench | undefined;
 let output: vscode.OutputChannel;
 let status: vscode.StatusBarItem;
+let launcherView: LauncherView | undefined;
 let shuttingDown = false;
 let lifecycle = 0;
 let vmDiscovery: VmDiscovery | undefined;
@@ -81,6 +83,7 @@ function updateStatus() {
   status.tooltip = running.length
     ? running.map((session) => session.summary).join('\n') + '\n点击打开工作台；关闭工作台仍继续记录。'
     : '打开 Flutter Pilot 工作台；连接当前项目的 Flutter VM WS 开始记录。';
+  launcherView?.refresh();
 }
 export async function activate(context: vscode.ExtensionContext) {
   shuttingDown = false;
@@ -202,16 +205,26 @@ export async function activate(context: vscode.ExtensionContext) {
         : 'Scene v2 预检通过，详情已写入 Flutter Pilot 输出。',
     );
   });
-  command('flutterPilot.screenshot', async () => {
+  const screenshot = async () => {
     const session = await open();
     await session?.screenshot();
+  };
+  command('flutterPilot.screenshot', screenshot);
+  const sessionByFolder = (folder: string) => {
+    const session = [...sessions.values()].find((item) => item.workspaceUri.fsPath === folder);
+    if (!session) throw new Error('找不到对应的项目会话，请先打开受信任的本地工作区。');
+    return session;
+  };
+  launcherView = new LauncherView({
+    sessions: () => [...sessions.values()].map((session) => session.launcherState()),
+    open,
+    screenshot,
+    start: (folder, profileId) => sessionByFolder(folder).launchStart(profileId),
+    stop: (folder) => sessionByFolder(folder).launchStop(),
+    reload: (folder) => sessionByFolder(folder).launchReload(),
+    edit: (folder) => sessionByFolder(folder).openLaunchFile(),
   });
-  context.subscriptions.push(
-    vscode.window.registerTreeDataProvider('flutterPilot.launcher', {
-      getTreeItem: (item: vscode.TreeItem) => item,
-      getChildren: () => [],
-    }),
-  );
+  launcherView.register(context);
   command('flutterPilot.start', async () => {
     const session = await open();
     await session?.start();
@@ -293,6 +306,7 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 export async function deactivate() {
   shuttingDown = true;
+  launcherView = undefined;
   lifecycle++;
   vmDiscovery?.dispose();
   vmDiscovery = undefined;
@@ -948,6 +962,46 @@ class Workbench {
     if (this.mode === 'vm')
       return `${this.folder.name} · VM ${this.vm.state.endpoint ?? '未连接'}${this.proxyActive ? ' · 代理仍在运行' : ''}`;
     return `${this.folder.name} · ${this.connectionHost}:${this.engine.state.proxyPort ?? 8080}`;
+  }
+  launcherState() {
+    return launcherSessionFrom({
+      folder: this.folder.uri.fsPath,
+      name: this.folder.name,
+      recording: this.recording,
+      mode: this.mode,
+      connection: this.connectionLabel(),
+      launch: this.projectLaunch.snapshot(),
+    });
+  }
+  private connectionLabel() {
+    const vm =
+      this.vm.state.status === 'connected'
+        ? 'VM 已连接'
+        : this.vm.state.status === 'connecting'
+          ? 'VM 连接中'
+          : 'VM 未连接';
+    if (this.mode === 'vm') return this.proxyActive ? `${vm} · 代理仍在采集` : vm;
+    if (this.proxyActive) {
+      const port = this.engine.state.proxyPort;
+      return port ? `代理采集中 · ${this.connectionHost}:${port}` : '代理采集中';
+    }
+    return this.engine.state.status === 'running' ? '代理已就绪，未采集' : '代理未启动';
+  }
+  async launchStart(profileId: string) {
+    await this.initialize();
+    await this.projectLaunch.start(profileId);
+  }
+  async launchStop() {
+    await this.initialize();
+    await this.projectLaunch.stop();
+  }
+  async launchReload() {
+    await this.initialize();
+    await this.projectLaunch.reload();
+  }
+  async openLaunchFile() {
+    await this.initialize();
+    await vscode.window.showTextDocument(vscode.Uri.file(this.project.launchFile), { preview: false });
   }
   async reveal() {
     if (this.disposed) return;
