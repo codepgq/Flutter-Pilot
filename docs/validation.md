@@ -1,5 +1,11 @@
 # 验收记录
 
+## 0.0.24 发布、Cursor 安装与推送（2026-11-17）
+
+- 按默认发布约定交付项目启动入口与浏览器准备修复。发布前远端 main、最新 tag 与 Cursor 安装版为 0.0.23；版本、lockfile、README / CHANGELOG 与 VSIX 路径同步为 0.0.24。
+- 验证：874 项 Vitest、109 项工作台、类型、格式、构建打包与 Web 依赖 5/5 通过。产物 `artifacts/flutter-pilot-0.0.24.vsix`，Cursor CLI `--force` 安装；95 个分发文件与源码 / 构建 / 安装一致。离线 SDK stdio 核验 0.0.24、61 工具、69 Prompts、6 资源，报告 `artifacts/v0.0.24-install-report.json`。
+- main 与附注标签 `v0.0.24` 常规推送；远端核验见 `artifacts/v0.0.24-release-report.json`。活动窗口需用户方便时重载并重连 MCP。未复跑设备与完整浏览器代理夹具；无绝对 `MITMDUMP` 时未运行 `test:web:proxy`。
+
 ## 0.0.23 审核、发布与 Cursor 安装（2026-11-17）
 
 - 按用户“审核修改，有问题就修复，没问题就发布一个新版本”的授权交付 Flutter / Web 统一运行时。发布前源码、远端最新 tag 和 Cursor 安装版为 0.0.22；版本、lockfile、README / CHANGELOG 和 VSIX 路径同步为 0.0.23。

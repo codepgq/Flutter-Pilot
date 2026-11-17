@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BrowserDependencies } from '../src/browser/dependencies';
@@ -34,6 +34,40 @@ it('dependency preparation respects already cancelled signals and permits explic
   await expect(deps.prepare(signal)).rejects.toBeDefined();
   await expect(deps.prepare(signal)).rejects.toBeDefined();
   expect((await deps.status()).prepared).toBe(false);
+});
+it('reports an installed system browser before preparing the private runtime', async () => {
+  root = await mkdtemp(join(tmpdir(), 'pilot-browser-system-'));
+  const browser = join(root, 'Chrome');
+  await writeFile(browser, 'fixture');
+  await chmod(browser, 0o755);
+  const deps = new BrowserDependencies(join(root, 'private'), join(process.cwd(), 'resources/browser'), {
+    systemBrowsers: [browser],
+  });
+  expect(await deps.status()).toMatchObject({
+    prepared: false,
+    systemBrowserAvailable: true,
+  });
+  await deps.dispose();
+});
+it('distinguishes dependency timeout from a generic browser preparation failure', async () => {
+  root = await mkdtemp(join(tmpdir(), 'pilot-browser-timeout-'));
+  const deps = new BrowserDependencies(join(root, 'private'), join(process.cwd(), 'resources/browser'), {
+    systemBrowsers: [],
+    timeoutMs: 20,
+  });
+  await expect(
+    (deps as any).run(
+      process.execPath,
+      ['-e', 'setTimeout(() => {}, 5000)'],
+      root,
+      undefined,
+      '下载 Chromium',
+    ),
+  ).rejects.toMatchObject({
+    code: 'BROWSER_PREPARE_TIMEOUT',
+    message: expect.stringContaining('下载 Chromium超过'),
+  });
+  await deps.dispose();
 });
 it('browser schema requires exact Context/Page identity and rejects credentials or executable URLs', () => {
   expect(

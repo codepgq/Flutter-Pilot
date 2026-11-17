@@ -1,5 +1,13 @@
 # 问题与验证记录
 
+## Web 浏览器准备错误与项目启动入口（2026-11-17）
+
+- 现象：工作台显示 `Browser preparation cancelled or timed out.`，Web 托管浏览器无法创建 Context。
+- 根因：Playwright 1.65.0 的 Chromium 158 从 `cdn.playwright.dev` 下载时连续返回 `ECONNRESET`；旧 `BrowserDependencies` 对 300 秒计时和 AbortSignal 使用同一句错误，下载失败也未显式归类。npm 安装 Playwright 包本身仅约 0.3 秒。
+- 修复：先安装锁定版 Playwright，再优先使用本机 Chrome/Chromium/Edge/Brave 的受支持绝对路径，仍由 Worker 启动隔离临时 Profile；超时改为 `BROWSER_PREPARE_TIMEOUT`，取消保持 `CANCELLED`，网络失败包含错误码。仅无系统浏览器时下载私有 Chromium。
+- 验证：依赖生命周期 5/5、实际 Web HTTP 31/31、Web UI 74/74、WS 22/22、Web E2E 29/29；实际 receipt `source=system` 且成功创建 Context。代理 smoke 因环境未提供绝对 `MITMDUMP` 未运行，未宣称代理引擎复验。
+- 项目启动：新增 `.flutter-pilot/launch.json`；Web 启动仅执行工作区 package script，禁止 shell 和任意可执行路径；Flutter 只接受 IDE 中已验证的 Debug 配置。当前活动 IDE 安装包未更新，需重新打包/安装并 reload 后才能在该窗口使用。
+
 ## Web 发布审核修复（2026-11-17）
 
 - 直接浏览器只读工具的取消 / 超时被通用执行锁当作未确认输入，后续 Context 一直 WORKFLOW_BUSY。按工具是否只读区分，等待、快照、查找和截图失败释放锁；真实点击未确认继续阻止重放。控制器五类回归及 HTML/React/Vue 真实取消复验覆盖。

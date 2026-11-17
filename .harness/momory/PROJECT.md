@@ -4,7 +4,7 @@
 
 - 采用一个仓库、一个 IDE 插件、默认一个 MCP 服务入口；共享 Scene / Mock / actions / tests / 证据核心，Flutter 与 Web 独立适配，浏览器操作放独立 Worker，依赖显式按需准备。保留现有插件、MCP、项目 UUID 与 Scene v2 身份。
 - 规划分支为 `codex/web-flutter-unified-runtime`。最终目标、方案取舍和范围见 [路线图](../../docs/roadmap/web-flutter-runtime/README.md)，7 个 phase 及 53 条必需验收以该目录文件为准，执行状态统一保存于其 `progress.json`。
-- 2026-11-17 已实现七阶段，最终证据见 `docs/roadmap/web-flutter-runtime/evidence/final.md`，状态以 progress 为准。源码为 61 工具、69 Prompts；托管 Chromium/HTML/React/Vue、独立 iOS 模拟器与真实 Codex 客户端已实测。本轮经用户授权发布为 0.0.23，发布记录见 IMPLEMENTATION；历史阶段证据保留当时状态，活动 IDE 不自动重载。验收基线 v1 保留，未执行或跳过不能判通过。
+- 2026-11-17 已实现七阶段，最终证据见 `docs/roadmap/web-flutter-runtime/evidence/final.md`，状态以 progress 为准。源码为 61 工具、69 Prompts；托管 Chromium/HTML/React/Vue、独立 iOS 模拟器与真实 Codex 客户端已实测。统一运行时曾发布 0.0.23；同日再发布 0.0.24（项目启动入口与浏览器准备修复），发布记录见 IMPLEMENTATION；历史阶段证据保留当时状态，活动 IDE 不自动重载。验收基线 v1 保留，未执行或跳过不能判通过。
 - 浏览器使用独立 Worker、显式私有依赖和临时 Profile；target 固定 runtimeId/generation/pageId，同 Context 串行、跨 Context/Flutter 独立。HTTP 采用 CDP Fetch 双阶段以保留 CORS/预检/TLS；WS route 支持文本处理，Service Worker 阻止、cache 关闭，SSR/Flutter Web DOM 不在范围。
 - Flutter UI 也可显式 target 固定代次；proxy UI/Scene/Test 与失效目标执行前拒绝。浏览器取消只读等待不污染为未确认写锁；真实输入未确认仍保留 uncertain。测试终态在清理结束后发布；断线报告会话内最多 100 条，旧目标只读查询，不复活运行。
 
@@ -26,7 +26,7 @@
 
 ## 当前发布版本（2026-11-17）
 
-- 当前发布版本为 0.0.23，包含 Flutter / Web 统一运行时和发布审核修复；61 个工具、69 个 Prompts，Scene v2 目录存储与既有 Flutter 接口保留。发布、Cursor 安装、验证与远端引用证据见 `IMPLEMENTATION.md` 同版本条目。
+- 当前发布版本为 0.0.24，包含项目启动入口与浏览器准备修复（优先本机 Chrome 隔离 Profile）；保留 Flutter / Web 统一运行时、61 个工具、69 个 Prompts 与 Scene v2。发布、Cursor 安装、验证与远端引用证据见 `IMPLEMENTATION.md` 同版本条目。
 - 当前仓库自动生成的 `.flutter-pilot/` 是本地项目状态，保留但不提交、不进入 VSIX；可复用分发示例仍位于 `resources/`。
 
 ## Cursor MCP 适配（2026-11-14，0.0.21 已发布）

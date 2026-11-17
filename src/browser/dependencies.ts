@@ -1,20 +1,43 @@
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
-import { copyFile, mkdir, readFile, rename, rm, lstat, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { access, copyFile, mkdir, readFile, rename, rm, lstat, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
-import { join, dirname, delimiter } from 'node:path';
+import { join, dirname, delimiter, resolve } from 'node:path';
 import { BrowserError } from './protocol';
 import { sha256File } from '../runtime';
 import { detectNodeRuntime } from '../mcp/adapters';
+
+const systemBrowserCandidates = () => [
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+];
+
+interface DependencyOptions {
+  systemBrowsers?: string[];
+  timeoutMs?: number;
+}
+
+function throwCancelled(): never {
+  throw new BrowserError('CANCELLED', '浏览器依赖准备已取消。');
+}
+
 export class BrowserDependencies extends EventEmitter {
   private task?: Promise<void>;
   private cancellation?: AbortController;
   private nodePath?: string;
+  private readonly systemBrowsers: string[];
+  private readonly timeoutMs: number;
   constructor(
     readonly root: string,
     readonly resources: string,
+    options: DependencyOptions = {},
   ) {
     super();
+    this.systemBrowsers = options.systemBrowsers ?? systemBrowserCandidates();
+    this.timeoutMs = options.timeoutMs ?? 15 * 60_000;
   }
   private async manifestHash() {
     return createHash('sha256')
@@ -30,8 +53,11 @@ export class BrowserDependencies extends EventEmitter {
       if (pkg.version !== receipt.version) throw new Error('package mismatch');
       const stat = await lstat(receipt.executable);
       if (!stat.isFile()) throw new Error('browser missing');
-      if (!receipt.executable.startsWith(this.root + '/'))
-        throw new Error('browser executable outside managed directory');
+      const managed = receipt.executable.startsWith(this.root + '/');
+      const approvedSystem =
+        receipt.source === 'system' &&
+        this.systemBrowsers.some((candidate) => resolve(candidate) === resolve(receipt.executable));
+      if (!managed && !approvedSystem) throw new Error('browser executable outside managed directory');
       const executableHash = await sha256File(receipt.executable);
       if (executableHash !== receipt.executableHash) throw new Error('browser checksum mismatch');
       return {
@@ -40,9 +66,15 @@ export class BrowserDependencies extends EventEmitter {
         lockHash: receipt.lockHash,
         executableHash,
         executable: receipt.executable,
+        source: receipt.source === 'system' ? ('system' as const) : ('managed' as const),
       };
     } catch (error) {
-      return { prepared: false, reason: (error as Error).message };
+      const candidate = await this.findSystemBrowser();
+      return {
+        prepared: false,
+        reason: (error as Error).message,
+        ...(candidate ? { systemBrowserAvailable: true } : {}),
+      };
     }
   }
   async prepare(signal?: AbortSignal) {
@@ -61,7 +93,7 @@ export class BrowserDependencies extends EventEmitter {
     return this.status();
   }
   private async install(signal?: AbortSignal) {
-    signal?.throwIfAborted();
+    if (signal?.aborted) throwCancelled();
     if ((await this.status()).prepared) return;
     this.nodePath = await detectNodeRuntime();
     if (!this.nodePath)
@@ -74,24 +106,53 @@ export class BrowserDependencies extends EventEmitter {
     try {
       for (const file of ['package.json', 'package-lock.json'])
         await copyFile(join(this.resources, file), join(staging, file));
-      await this.run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], staging, signal);
+      this.emit('progress', '准备 Playwright 运行时依赖…');
+      if (signal?.aborted) throwCancelled();
       await this.run(
-        this.nodePath,
-        [join(staging, 'node_modules/playwright/cli.js'), 'install', 'chromium'],
+        'npm',
+        ['ci', '--ignore-scripts', '--no-audit', '--no-fund'],
         staging,
         signal,
+        '安装 Playwright',
       );
-      const executable = (
-        await this.run(
-          this.nodePath,
-          ['-e', "process.stdout.write(require('playwright').chromium.executablePath())"],
-          staging,
-          signal,
-        )
-      ).trim();
-      signal?.throwIfAborted();
-      const relative = executable.slice(staging.length);
-      if (!executable.startsWith(staging + '/'))
+      let executable: string;
+      let source: 'managed' | 'system' = 'managed';
+      const systemBrowser = await this.findSystemBrowser();
+      if (systemBrowser) {
+        executable = systemBrowser;
+        source = 'system';
+        this.emit('progress', '检测到本机浏览器，使用隔离临时 Profile 启动，跳过 Chromium 下载。');
+      } else {
+        this.emit('progress', '未检测到可用系统浏览器，开始下载私有 Chromium…');
+        try {
+          await this.run(
+            this.nodePath,
+            [join(staging, 'node_modules/playwright/cli.js'), 'install', 'chromium'],
+            staging,
+            signal,
+            '下载 Chromium',
+          );
+        } catch (error) {
+          if (error instanceof BrowserError && error.code === 'CANCELLED') throw error;
+          if (error instanceof BrowserError && error.code === 'BROWSER_PREPARE_TIMEOUT') throw error;
+          throw new BrowserError(
+            'BROWSER_DOWNLOAD_FAILED',
+            `Chromium 下载失败：${(error as Error).message}。请安装 Google Chrome 后重试，或检查网络代理。`,
+          );
+        }
+        executable = (
+          await this.run(
+            this.nodePath,
+            ['-e', "process.stdout.write(require('playwright').chromium.executablePath())"],
+            staging,
+            signal,
+            '校验 Chromium',
+          )
+        ).trim();
+      }
+      if (signal?.aborted) throwCancelled();
+      const relativePath = executable.slice(staging.length);
+      if (source === 'managed' && !executable.startsWith(staging + '/'))
         throw new BrowserError(
           'BROWSER_INSTALL_INVALID',
           'Browser executable is outside its managed directory.',
@@ -102,8 +163,9 @@ export class BrowserDependencies extends EventEmitter {
         JSON.stringify({
           version: '1.65.0',
           lockHash: await this.manifestHash(),
-          executable: this.root + relative,
+          executable: source === 'managed' ? this.root + relativePath : executable,
           executableHash,
+          source,
         }),
         { mode: 0o600 },
       );
@@ -113,8 +175,25 @@ export class BrowserDependencies extends EventEmitter {
       await rm(staging, { recursive: true, force: true });
     }
   }
-  private run(file: string, args: string[], cwd: string, signal?: AbortSignal): Promise<string> {
-    signal?.throwIfAborted();
+  private async findSystemBrowser(): Promise<string | undefined> {
+    for (const candidate of this.systemBrowsers) {
+      try {
+        await access(candidate, constants.X_OK);
+        return candidate;
+      } catch {
+        /* Try the next explicitly supported browser path. */
+      }
+    }
+  }
+
+  private run(
+    file: string,
+    args: string[],
+    cwd: string,
+    signal: AbortSignal | undefined,
+    label: string,
+  ): Promise<string> {
+    if (signal?.aborted) throwCancelled();
     return new Promise((resolve, reject) => {
       const child = spawn(file, args, {
         cwd,
@@ -127,11 +206,14 @@ export class BrowserDependencies extends EventEmitter {
         detached: process.platform !== 'win32',
       });
       let output = '',
-        stopped = false;
+        stopped = false,
+        timedOut = false,
+        settled = false;
       let killTimer: ReturnType<typeof setTimeout> | undefined;
-      const stop = () => {
+      const stop = (timeout = false) => {
         if (stopped) return;
         stopped = true;
+        timedOut = timeout;
         try {
           if (child.pid) process.kill(process.platform === 'win32' ? child.pid : -child.pid, 'SIGTERM');
         } catch {}
@@ -141,8 +223,9 @@ export class BrowserDependencies extends EventEmitter {
           } catch {}
         }, 3000);
       };
-      const timer = setTimeout(stop, 300000);
-      signal?.addEventListener('abort', stop, { once: true });
+      const timer = setTimeout(() => stop(true), this.timeoutMs);
+      const onAbort = () => stop(false);
+      signal?.addEventListener('abort', onAbort, { once: true });
       child.stdout.on('data', (data) => {
         output = (output + data).slice(-32768);
         this.emit('progress', data.toString().slice(-2048));
@@ -151,19 +234,34 @@ export class BrowserDependencies extends EventEmitter {
         output = (output + data).slice(-32768);
         this.emit('progress', data.toString().slice(-2048));
       });
-      child.once('error', reject);
-      child.once('close', (code) => {
+      child.once('error', (error) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
         if (killTimer) clearTimeout(killTimer);
-        signal?.removeEventListener('abort', stop);
+        signal?.removeEventListener('abort', onAbort);
+        reject(new BrowserError('BROWSER_PREPARE_FAILED', `${label}无法启动：${error.message}`));
+      });
+      child.once('close', (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (killTimer) clearTimeout(killTimer);
+        signal?.removeEventListener('abort', onAbort);
         code === 0 && !stopped
           ? resolve(output)
           : reject(
               new BrowserError(
-                stopped ? 'CANCELLED' : 'BROWSER_PREPARE_FAILED',
-                stopped
-                  ? 'Browser preparation cancelled or timed out.'
-                  : 'Browser preparation failed; inspect progress and retry explicitly.',
+                timedOut ? 'BROWSER_PREPARE_TIMEOUT' : stopped ? 'CANCELLED' : 'BROWSER_PREPARE_FAILED',
+                timedOut
+                  ? `${label}超过 ${Math.round(this.timeoutMs / 60000)} 分钟，已停止。请检查网络后重试。`
+                  : stopped
+                    ? `${label}已取消。`
+                    : `${label}失败（退出码 ${code ?? '未知'}）。${
+                        /ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN/i.exec(output)?.[0]
+                          ? `网络错误：${/ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN/i.exec(output)?.[0]}。`
+                          : '请查看日志后重试。'
+                      }`,
               ),
             );
       });

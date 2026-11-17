@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "selectedProfileId": "web-dev",
+  "profiles": [
+    {
+      "id": "web-dev",
+      "name": "Web · dev",
+      "type": "web",
+      "root": ".",
+      "packageManager": "pnpm",
+      "script": "dev",
+      "args": [],
+      "url": "http://localhost:5173/",
+      "readyTimeoutMs": 120000
+    },
+    {
+      "id": "flutter-app",
+      "name": "Flutter · App",
+      "type": "flutter",
+      "configuration": "App"
+    }
+  ]
+}

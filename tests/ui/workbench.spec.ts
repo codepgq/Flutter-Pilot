@@ -1399,6 +1399,75 @@ test('Web 接入保存显式 URL/子项目，显示实际代理端口和范围',
   await expect(page.getByText(/HTTP 代理没有页面身份/)).toBeVisible();
 });
 
+test('项目启动卡片支持 Web/Flutter profile、启动停止与手动配置入口', async ({ page }) => {
+  await page.goto('/');
+  await state(page, {
+    project: {
+      id: 'web-project',
+      name: 'Web',
+      configPath: '/workspace/.flutter-pilot/project.json',
+      rulesPath: '/workspace/.flutter-pilot/scenes/index.json',
+    },
+    launch: {
+      file: '/workspace/.flutter-pilot/launch.json',
+      profiles: [
+        {
+          id: 'web-dev',
+          name: 'Web 开发',
+          type: 'web',
+          root: '.',
+          packageManager: 'pnpm',
+          script: 'dev:pilot',
+          url: 'http://localhost:3000/',
+        },
+        {
+          id: 'flutter-app',
+          name: 'Flutter 应用',
+          type: 'flutter',
+          configuration: 'App (local)',
+        },
+      ],
+      status: 'idle',
+    },
+  });
+  await expect(page.getByText('项目启动', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('项目启动项')).toHaveValue('web-dev');
+  await page.getByRole('button', { name: '启动项目', exact: true }).click();
+  expect(await messages(page)).toContainEqual({
+    action: 'launch.start',
+    payload: { profileId: 'web-dev' },
+  });
+  await page.getByRole('button', { name: '编辑 launch.json', exact: true }).click();
+  expect(await messages(page)).toContainEqual({
+    action: 'project.open',
+    payload: { kind: 'launch' },
+  });
+  await state(page, {
+    launch: {
+      file: '/workspace/.flutter-pilot/launch.json',
+      profiles: [
+        {
+          id: 'web-dev',
+          name: 'Web 开发',
+          type: 'web',
+          root: '.',
+          packageManager: 'pnpm',
+          script: 'dev:pilot',
+          url: 'http://localhost:3000/',
+        },
+      ],
+      status: 'running',
+      activeProfileId: 'web-dev',
+      activeType: 'web',
+      url: 'http://localhost:3000/',
+      output: 'Local: http://localhost:3000/',
+    },
+  });
+  await expect(page.getByLabel('项目启动日志')).toContainText('http://localhost:3000/');
+  await page.getByRole('button', { name: '停止', exact: true }).click();
+  expect(await messages(page)).toContainEqual({ action: 'launch.stop', payload: {} });
+});
+
 test('托管浏览器明确列出 Context/Page 并发送固定目标导航', async ({ page }) => {
   await page.goto('/');
   await state(page, {

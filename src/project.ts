@@ -3,6 +3,7 @@ import { link, lstat, mkdir, readFile, realpath, rename, unlink, writeFile } fro
 import { basename, join } from 'node:path';
 import { SceneFiles, safePath } from './scene-files';
 import { validateWebProject, type WebProject } from './discovery';
+import { suggestedLaunchProfiles } from './project-launch';
 
 export interface ProjectConnection {
   mode: 'vm' | 'proxy';
@@ -136,6 +137,7 @@ function serialize(value: unknown) {
 
 export class ProjectBinding {
   readonly file: string;
+  readonly launchFile: string;
   readonly rulesDirectory: string;
   private current: ProjectConfig;
   private operations: Promise<unknown> = Promise.resolve();
@@ -144,6 +146,7 @@ export class ProjectBinding {
     config: ProjectConfig,
   ) {
     this.file = join(directory, 'project.json');
+    this.launchFile = join(directory, 'launch.json');
     this.rulesDirectory = directory;
     this.current = config;
   }
@@ -212,7 +215,7 @@ export class ProjectBinding {
 export async function openProjectBinding(
   workspacePath: string,
   legacyStoragePath: string,
-  options: { defaultMode?: 'vm' | 'proxy' } = {},
+  options: { defaultMode?: 'vm' | 'proxy'; web?: WebProject } = {},
 ): Promise<ProjectBinding> {
   const root = await realpath(workspacePath);
   const directory = join(root, '.flutter-pilot');
@@ -241,6 +244,11 @@ export async function openProjectBinding(
   }
   const config = await readProject(file);
   if (!config) throw new Error('无法创建项目绑定文件，请检查项目写入权限');
+  const launchFile = join(directory, 'launch.json');
+  if ((await readText(launchFile, 1024 * 1024)) === undefined) {
+    const profiles = await suggestedLaunchProfiles(root, options.web ?? config.web).catch(() => []);
+    await createOnce(directory, launchFile, serialize({ version: 1, profiles: profiles.slice(0, 50) }));
+  }
   await mkdir(legacyStoragePath, { recursive: true, mode: 0o700 });
   await checkDirectory(legacyStoragePath);
   await createOnce(legacyStoragePath, claimFile, serialize({ version: 1, projectId: config.projectId }));

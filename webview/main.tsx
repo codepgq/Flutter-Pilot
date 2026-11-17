@@ -927,6 +927,92 @@ function WebConnection({ state }: { state: WorkbenchState }) {
     </details>
   );
 }
+function ProjectLaunch({ state }: { state: WorkbenchState }) {
+  const launch = state.launch;
+  const [selected, setSelected] = useState('');
+  useEffect(() => {
+    const available = launch?.profiles ?? [];
+    const current = launch?.activeProfileId ?? launch?.selectedProfileId ?? available[0]?.id ?? '';
+    setSelected((previous) => (available.some((profile) => profile.id === previous) ? previous : current));
+  }, [launch?.activeProfileId, launch?.selectedProfileId, JSON.stringify(launch?.profiles ?? [])]);
+  const profile = launch?.profiles.find((item) => item.id === selected);
+  const running = launch?.status === 'running' || launch?.status === 'starting';
+  const statusLabel = launch
+    ? { idle: '未启动', starting: '启动中', running: '运行中', stopping: '停止中', failed: '失败' }[
+        launch.status
+      ]
+    : '未读取';
+  return (
+    <details className="card launch-card" open>
+      <summary>项目启动</summary>
+      <p>
+        从 <code>.flutter-pilot/launch.json</code> 选择 Web 或 Flutter 启动项。Web 仅运行当前工作区
+        package.json 中的脚本；Flutter 复用 VS Code/Cursor Debug 配置。
+      </p>
+      {!launch?.profiles.length ? (
+        <div className="notice">
+          尚未配置启动项。打开 launch.json，添加 <code>web</code> 或 <code>flutter</code> 类型 profile
+          后点击“重新读取”。
+        </div>
+      ) : (
+        <>
+          <label>
+            启动项
+            <select
+              aria-label="项目启动项"
+              value={selected}
+              onChange={(event) => setSelected(event.target.value)}
+              disabled={running}
+            >
+              {launch.profiles.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {profile && (
+            <p>
+              <span className="tag">{profile.type === 'web' ? 'WEB' : 'FLUTTER'}</span>{' '}
+              {profile.type === 'web'
+                ? `${profile.packageManager} run ${profile.script} · ${profile.url}`
+                : `Debug 配置：${profile.configuration ?? '自动选择唯一配置'}`}
+            </p>
+          )}
+        </>
+      )}
+      <div className="card-actions">
+        <Button
+          primary
+          onClick={() => send('launch.start', { profileId: selected })}
+          disabled={!selected || state.busy || running}
+        >
+          {launch?.status === 'starting' ? '启动中…' : '启动项目'}
+        </Button>
+        <Button danger action="launch.stop" disabled={state.busy || !running}>
+          停止
+        </Button>
+        <Button action="launch.reload" disabled={state.busy || running}>
+          重新读取
+        </Button>
+        <Button onClick={() => send('project.open', { kind: 'launch' })}>编辑 launch.json</Button>
+      </div>
+      {launch?.status && launch.status !== 'idle' && (
+        <p role="status">
+          状态：{statusLabel}
+          {launch.activeProfileId ? ` · ${launch.activeProfileId}` : ''}
+          {launch.url ? ` · ${launch.url}` : ''}
+        </p>
+      )}
+      {launch?.error && (
+        <div className="notice" role="alert">
+          {launch.error}
+        </div>
+      )}
+      {launch?.output && <pre aria-label="项目启动日志">{launch.output}</pre>}
+    </details>
+  );
+}
 function Connection({
   state,
   preview,
@@ -954,6 +1040,7 @@ function Connection({
         </div>
         <ConnectionMode state={state} />
         <VmConnection state={state} />
+        <ProjectLaunch state={state} />
         <WebConnection state={state} />
         <BrowserPanel state={state} send={send} />
       </div>
@@ -965,6 +1052,7 @@ function Connection({
           <h2>连接与诊断</h2>
         </div>
         <ConnectionMode state={state} />
+        <ProjectLaunch state={state} />
         <WebConnection state={state} />
         <BrowserPanel state={state} send={send} />
       </div>
@@ -978,6 +1066,7 @@ function Connection({
         <span className="platform-badge">macOS · Android / iOS</span>
       </div>
       <ConnectionMode state={state} />
+      <ProjectLaunch state={state} />
       <WebConnection state={state} />
       <BrowserPanel state={state} send={send} />
       <div className="setup-grid">

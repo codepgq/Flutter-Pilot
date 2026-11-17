@@ -47,8 +47,17 @@ describe('project-local identity and configuration', () => {
       version: 2,
       scenes: [],
     });
+    expect(await json(binding.launchFile)).toEqual({ version: 1, profiles: [] });
+    await writeFile(
+      binding.launchFile,
+      JSON.stringify({
+        version: 1,
+        profiles: [{ id: 'manual', name: 'Manual', type: 'flutter', configuration: 'App' }],
+      }),
+    );
     const reopened = await openProjectBinding(workspace, legacy);
     expect(reopened.projectId).toBe(binding.projectId);
+    expect((await json(binding.launchFile)).profiles[0].id).toBe('manual');
     expect((await lstat(binding.file)).mode & 0o777).toBe(0o600);
     expect((await lstat(binding.directory)).mode & 0o777).toBe(0o700);
     const copy = binding.config;
@@ -139,7 +148,7 @@ describe('project-local identity and configuration', () => {
     );
     expect(new Set(bindings.map((binding) => binding.projectId)).size).toBe(1);
     const { readdir } = await import('node:fs/promises');
-    expect((await readdir(bindings[0].directory)).sort()).toEqual(['project.json', 'scenes']);
+    expect((await readdir(bindings[0].directory)).sort()).toEqual(['launch.json', 'project.json', 'scenes']);
   });
 
   it.each([

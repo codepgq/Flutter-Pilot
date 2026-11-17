@@ -30,6 +30,7 @@ export function BrowserPanel({
       <button disabled={state.busy} onClick={() => call('prepare_browser')}>
         准备浏览器依赖
       </button>
+      <button onClick={() => call('get_browser_status')}>检查浏览器状态</button>
       <button disabled={state.busy} onClick={() => call('create_browser_context')}>
         创建浏览器 Context
       </button>
@@ -302,6 +303,9 @@ export function BrowserPanel({
       )}
       {['get_ws_connections', 'get_ws_messages', 'get_browser_ws_message'].includes(result?.tool) && (
         <pre aria-label="Web WS 结果">{JSON.stringify(result.result, null, 2)}</pre>
+      )}
+      {['prepare_browser', 'get_browser_status'].includes(result?.tool) && (
+        <pre aria-label="浏览器依赖状态">{JSON.stringify(result.result, null, 2)}</pre>
       )}
     </details>
   );

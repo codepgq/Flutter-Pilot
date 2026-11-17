@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.24 — 项目启动入口与浏览器准备修复（2026-11-17）
+
+- 新增 `.flutter-pilot/launch.json`：工作台可启动已声明的 Web 脚本或现有 Flutter Debug 配置，关闭工作区时终止自有 Web 进程。
+- 浏览器准备优先使用本机 Chrome/Chromium/Edge/Brave 的隔离 Profile；仅在无受支持系统浏览器时下载私有 Chromium。
+- 区分取消、超时与下载/安装失败，避免将 Playwright CDN 网络错误笼统显示为取消或超时。
+
 ## 0.0.23 — Flutter / Web 统一运行时（2026-11-17）
 
 - 同一插件与 MCP 支持 Flutter、HTTP 代理和托管 Chromium；独立 Worker、私有依赖、Context/Page 身份及运行锁隔离。

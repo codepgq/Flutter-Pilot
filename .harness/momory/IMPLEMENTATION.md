@@ -1,5 +1,13 @@
 # 实现与验证结论
 
+## 0.0.24 发布、Cursor 安装与推送（2026-11-17）
+
+- 按用户默认发布约定交付项目启动入口与浏览器准备修复。发布前远端 main、最新 tag 与 Cursor 安装版均为 0.0.23；版本、lockfile、README / CHANGELOG 和 VSIX 路径同步为 0.0.24。下方“源码未发布”章节保留实现期间历史状态，本节覆盖其发布限制。
+- 本轮验证：130 文件 / 874 项 Vitest、109 项工作台 Playwright、类型、格式、diff 检查与打包通过；Web 依赖生命周期 5/5。日志 `artifacts/v0.0.24-{unit,ui,typecheck,format,package,web-dependencies,verify}.log`。
+- 发布产物 `artifacts/flutter-pilot-0.0.24.vsix`（SHA-256 `1b9a578ad9a62ff805d9f92c7b5a5a4f685ec062c6315b074ed31e904cc80313`）。Cursor CLI `--force` 安装成功，列表为 `flutter-pilot.flutter-pilot@0.0.24`。95 个分发文件与源码 / 构建、VSIX、安装目录一致（manifest 排除 Cursor `__metadata`）。构建与安装桥接经真实 SDK stdio 离线核验 0.0.24、61 工具、69 Prompts、6 资源。报告 `artifacts/v0.0.24-install-report.json`。
+- main 提交与附注标签 `v0.0.24` 常规推送；远端引用核验见 `artifacts/v0.0.24-release-report.json`。不发布扩展商店。活动 IDE 由用户方便时 Reload Window 并重连 MCP；不自动重载。
+- 本轮不复跑 Flutter 模拟器、Android / 真机、完整 Web HTTP/UI/WS/E2E 代理夹具及真实模型客户端；`test:web:proxy` 因未设置绝对 `MITMDUMP` 未运行。先前实现期 Web 依赖与浏览器 receipt 证据保留历史范围。
+
 ## 0.0.23 审核、发布与 Cursor 安装（2026-11-17）
 
 - 按用户“审核修改，有问题就修复，没问题就发布一个新版本”的授权交付 Flutter / Web 统一运行时。发布前源码、远端最新 tag 和 Cursor 安装版为 0.0.22；版本、lockfile、README / CHANGELOG 和 VSIX 路径同步为 0.0.23。
@@ -9,6 +17,21 @@
 - 当前发布分支为 `codex/web-flutter-unified-runtime`，以附注标签 `v0.0.23` 常规推送；远端分支、标签解引用与 HEAD 的核验结果保存 `artifacts/v0.0.23-release-report.json`。本地 VSIX 发布，不涉及扩展商店或合并 main；活动 IDE 由用户方便时重载并重连 MCP。
 - 此轮审核重新验证受控 Chromium 与代理夹具，未复跑 Flutter 模拟器、Android / 真机及真实模型客户端；先前 phase-07 设备 / Agent 证据保留历史范围，不计入本轮复验。不修改业务项目、用户设备、系统代理或系统 CA。
 
+
+## 指定 0.0.23 本地安装（2026-11-17）
+
+- 用户要求将 0.0.23 安装到本地，沿用 Cursor CLI 安装约定。当前 main 仍为 0.0.21，从已有 v0.0.23 标签（`b02fdeabc00c152a257d9a832ca1b6d643c3132b`）导出临时源码，保留工作区及既有修改。
+- 临时目录 npm ci、类型检查、构建和 VSIX 打包通过；Cursor CLI --force 安装成功，列表确认 `flutter-pilot.flutter-pilot@0.0.23`。94 个分发文件与标签源码 / 构建、VSIX、安装目录一致（清单排除 Cursor 元数据，LICENSE 按 VSIX 命名映射）。
+- 安装桥接经真实 SDK stdio 离线验证版本 0.0.23、61 工具、69 Prompts，capabilities 和全部资源读取成功。证据 `artifacts/cursor-install-2026-11-17.json`，包为 `artifacts/flutter-pilot-0.0.23.vsix`。
+- 未重载活动 Cursor 窗口；用户方便时执行 Developer: Reload Window 加载新版，并按需重连 MCP。本轮未提交、推送或进行业务 App / 设备验收。
+
+
+## 项目启动入口与 Web 浏览器接通修复（2026-11-17，源码未发布）
+
+- 新增 `.flutter-pilot/launch.json` v1：`web` profile 只允许工作区内相对目录、固定 npm/pnpm/yarn/bun、`package.json` 已声明脚本和无 shell 参数；`flutter` profile 只引用现有命名且唯一的 Dart Debug 配置。首次创建会从 Web 声明与 `.vscode/launch.json` 生成建议，之后始终以项目文件为准。
+- 工作台「连接与诊断 → 项目启动」可选择 profile、启动/停止、重新读取和打开 launch.json。Web 启动等待配置 URL 就绪并保留有界日志，关闭工作区时终止自有进程；Flutter 复用现有 IDE Debug 启动与活动会话停止。
+- 截图中的 “Browser preparation cancelled or timed out” 已归因：本机访问 Playwright CDN 下载 Chromium 158 时持续 `ECONNRESET`，旧实现最终使用同一句混合取消与超时。现在区分取消、15 分钟超时和下载/安装失败；安装 Playwright 运行时后优先使用本机 Google Chrome/Chromium/Edge/Brave，以隔离临时 Profile 启动并跳过 190 MB Chromium 下载，仅无受支持系统浏览器时下载私有 Chromium。
+- 验证：874 项 Vitest、109 项工作台 Playwright、类型、格式、构建、Web 依赖 5/5、Web HTTP 31/31、Web UI 74/74、WebSocket 22/22、Web E2E 29/29 通过。实际 Chrome fallback receipt 指向 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`，source=system。`test:web:proxy` 因未设置绝对 `MITMDUMP` 未运行；未安装或重载活动 Cursor，需重新打包安装后在工作台验收。
 
 ## Flutter / Web 统一运行时完成（2026-11-17，源码未发布）
 
@@ -51,6 +74,14 @@
 - 验证：47 文件 / 770 项 Vitest 全量通过；102 项 Playwright 全量通过（含 3 项真实 v2 消息夹具）；TypeScript / Webview 类型、全仓格式、构建与 diff 检查通过。冻结测试快照后相关控制器 / 扩展整合 132 项复验通过；Python 代理 51 项检查结束，23 项因环境条件跳过。迁移 CLI 在隔离临时目录完成 --check / --apply（4 Scenes、7 actions），保留源文件；不修改业务项目。
 - 规模数据：1000 Scenes、20000 HTTP 规则、5000 actions、外置正文 84,000,000 字节（约 80.1 MiB）；本机该轮冷加载 2922.5 ms、热加载 1563.4 ms、搜索 1.20 ms。列表正文读取 0；默认页 JSON 23,460 字节；单项编辑读取 8 个源资源，无关资源及根清单未重写；动作闭包仅 2 Scenes。耗时为本地文件系统实测，不承诺 SLA；冷 / 热阶段仍需核对元数据签名和文件状态。
 - 证据：`artifacts/scene-storage-{unit,ui,typecheck,format,build,proxy}.log`、`artifacts/scene-storage-scale.json`、`artifacts/scene-storage-immutable.log`；规范及迁移入口见 `docs/scene-storage.md`。版本保持 0.0.21，未提交、推送、发布或安装；未启动业务 App、真实 IDE GUI 或设备，运行行为依据控制器 / 协议与合成工作台验收，不宣称实际设备业务通过。历史设备和安装证据不代替本轮验证。
+
+
+## 最新源码安装到 Cursor（2026-11-16）
+
+- 用户要求安装最新代码；fetch 确认 main 与 origin/main 同为 `2efc298`，源码版本 0.0.21、工作区干净。本机 Cursor 扩展登记实际为 0.0.14，以本轮读取为准；重新安装当前源码，不递增版本。
+- `npm ci` 补齐本地缺失依赖后，类型检查、构建、VSIX 打包及 48 项 MCP 指南 / 协议测试通过。协议测试首次被沙箱 Unix socket 限制阻止，授权在沙箱外重跑通过。
+- Cursor CLI `--force` 安装 0.0.21 成功，47 个分发文件与当前源码 / 构建、VSIX 和安装目录逐项一致（清单排除安装元数据）。构建与安装桥接均通过真实 SDK stdio 离线核验：0.0.21、51 工具、59 Prompts、6 份指南，读取 capabilities 与全部指南成功。报告 `artifacts/cursor-install-2026-11-16.json`。
+- 未重载活动 Cursor 窗口；用户方便时执行 `Developer: Reload Window` 加载本轮安装，已有 MCP 客户端按需重新连接。本轮只安装，不提交或推送；未进行业务 App / 设备验收。
 
 ## 0.0.21 发布、Cursor 安装与推送（2026-11-14）
 

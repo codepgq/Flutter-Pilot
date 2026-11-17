@@ -120,6 +120,7 @@ export interface ApiCatalogEntry {
 }
 export interface WorkbenchState {
   browser?: ReturnType<import('./browser/controller').BrowserController['snapshot']>;
+  launch?: import('./project-launch').ProjectLaunchSnapshot;
   loadedSceneAction?: import('./workflows/model').SceneAction;
   scenePage?: import('./scene-storage-model').ScenePage;
   sceneDetail?: import('./scene-storage-model').SceneDetail;

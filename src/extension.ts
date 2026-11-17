@@ -47,6 +47,7 @@ import { validateWsRuleDocument, wsUrlMatches } from './ws/rules';
 import type { WsRule, WsMessage, WsMessageQuery } from './ws/model';
 import { openProjectBinding, type ProjectBinding, type ProjectSettings } from './project';
 import { prepareProjectStorage } from './projectStorage';
+import { ProjectLaunchController } from './project-launch';
 import {
   ApiCatalogQuery,
   ApiCatalogResult,
@@ -118,6 +119,7 @@ export async function activate(context: vscode.ExtensionContext) {
       });
       const project = await openProjectBinding(folder.uri.fsPath, legacy, {
         defaultMode: web && !flutter ? 'proxy' : 'vm',
+        web,
       });
       const storage = await prepareProjectStorage(context.globalStorageUri.fsPath, key, project.projectId);
       if (
@@ -336,6 +338,7 @@ class Workbench {
   }
   private readonly mcpLifecycle: McpLifecycleController;
   private readonly mcpAppLaunch: McpAppLaunchController;
+  private readonly projectLaunch: ProjectLaunchController;
   private mcpServer?: McpSessionServer;
   private readonly mcpSessionId = randomUUID();
   private readonly bridgeRoot =
@@ -874,6 +877,27 @@ class Workbench {
       },
       networkStatus: () => this.networks.vm.status(),
     });
+    this.projectLaunch = new ProjectLaunchController({
+      workspace: this.folder.uri.fsPath,
+      file: this.project.launchFile,
+      assertMutable: () => this.ensureEnvironmentMutable(),
+      flutterConfigurations: () => this.mcpAppLaunch.status().configurations,
+      flutterSessions: () =>
+        (vmDiscovery?.debugSessions(this.folder.uri.toString()) ?? []).map((session) => ({
+          id: session.id,
+          configurationName: session.configurationName,
+        })),
+      startFlutter: (configurationName, deviceId) =>
+        this.mcpAppLaunch.execute(configurationName, 30000, undefined, () => !this.disposed, deviceId),
+      stopFlutter: async (configurationName) => {
+        const session = vscode.debug.activeDebugSession;
+        if (!session || session.configuration.name !== configurationName)
+          throw new Error('当前活动调试会话与启动项不一致，请在该 Flutter 调试面板中手动停止');
+        await vscode.debug.stopDebugging(session);
+      },
+    });
+    this.projectLaunch.on('changed', () => this.push());
+    this.projectLaunch.on('log', (message) => this.log(message));
     this.vmAuto.on('change', () => this.push());
     this.vm.on('change', () => {
       this.vmAuto.connectionChanged();
@@ -1237,6 +1261,7 @@ class Workbench {
         rulesPath: this.store.file,
         notice: this.projectNotice,
       },
+      launch: this.projectLaunch.snapshot(),
       browser: this.browser.snapshot(),
       logs: this.logs,
       busy: this.busy > 0 || this.mcpAppLaunch.status().busy,
@@ -1306,6 +1331,7 @@ class Workbench {
     });
     await this.sceneControllers[this.mode].initialize();
     await this.sceneControllers[this.mode === 'vm' ? 'proxy' : 'vm'].initialize();
+    await this.projectLaunch.initialize();
     await this.refreshTests();
     await this.vm.websocket.init();
     // Existing HTTP facts stay intact; only positively identified upgrade records are projected.
@@ -2612,14 +2638,14 @@ class Workbench {
       throw new Error('流程正在运行，请先取消流程再更改连接或探测 UI。');
     if (
       this.mcpAppLaunch.status().busy &&
-      /^(scenes\.(?!select|open)|rules\.(?!open|export)|ws\.|vm\.|connection\.|automation\.|project.reload|install$|start$|stop$|proxy.stop|setLan$|selectHost$|connectAndroid$|setup\.)/.test(
+      /^(scenes\.(?!select|open)|rules\.(?!open|export)|ws\.|vm\.|connection\.|automation\.|project.reload|launch\.(?:start|stop)|install$|start$|stop$|proxy.stop|setLan$|selectHost$|connectAndroid$|setup\.)/.test(
         action,
       )
     )
       this.ensureAppLaunchIdle();
     if (
       this.workflows.snapshot.activeRunId &&
-      /^(scenes\.(?!select|open)|rules\.(?!open|export)|ws\.(rules\.(?!open)|capture|mock|push|send|clear|rescan)|vm\.(capture|rescan)|project.reload|install$|start$|stop$|proxy.stop|setLan$|selectHost$|connectAndroid$|setup\.(apply|revert))/.test(
+      /^(scenes\.(?!select|open)|rules\.(?!open|export)|ws\.(rules\.(?!open)|capture|mock|push|send|clear|rescan)|vm\.(capture|rescan)|project.reload|launch\.(?:start|stop)|install$|start$|stop$|proxy.stop|setLan$|selectHost$|connectAndroid$|setup\.(apply|revert))/.test(
         action,
       )
     )
@@ -2822,7 +2848,12 @@ class Workbench {
           break;
         case 'project.open': {
           await this.project.reload();
-          const file = payload.kind === 'rules' ? this.store.file : this.project.file;
+          const file =
+            payload.kind === 'rules'
+              ? this.store.file
+              : payload.kind === 'launch'
+                ? this.project.launchFile
+                : this.project.file;
           await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: false });
           break;
         }
@@ -2853,6 +2884,15 @@ class Workbench {
             'Web 本地入口已保存。显式准备代理后，将专用浏览器代理指向实际监听端口；不会自动导航或修改系统代理。';
           break;
         }
+        case 'launch.reload':
+          await this.projectLaunch.reload();
+          break;
+        case 'launch.start':
+          await this.projectLaunch.start(String(payload.profileId ?? ''));
+          break;
+        case 'launch.stop':
+          await this.projectLaunch.stop();
+          break;
         case 'connection.mode': {
           const mode = payload.mode === 'vm' ? 'vm' : 'proxy';
           if (mode === this.mode) break;
@@ -3194,6 +3234,7 @@ class Workbench {
     this.disposed = true;
     ++this.mcpGeneration;
     this.mcpAppLaunch.dispose();
+    await this.projectLaunch.dispose();
     await this.workflows.dispose();
     await this.tests.dispose();
     this.testObserver.close();

@@ -5,12 +5,50 @@
 ## 接入
 
 1. React/Vue/Vite package 可被识别。原生 HTML 或混合仓库在「连接与诊断 → Web 项目接入」保存本地 URL，必要时指定相对子项目根；普通 Node package 不自动当作 Web。
-2. 使用已有开发服务器。插件不会代启动 npm dev server。选择托管浏览器时，显式「准备浏览器依赖」，再创建 Context；仅使用 Flutter 无需准备浏览器。
-3. MCP 先 `list_sessions`，再按目标调用 `get_browser_status`、`create_browser_context`。记录返回的 runtimeId/generation；按需激活 Scene 后 `open_browser_page`，后续 UI 固定传 runtimeId/generation/pageId。
-4. 一个项目多个目标时显式选择，不能靠当前窗口、焦点或最近页面推断。纯操作 Scene 的 `call` 不切换 Mock；激活、reload、重连均不操作页面。
-5. 按新请求的 mocked、requestRuleId/responseRuleId、响应内容及最终 UI 验证。动作 completed 仅代表步骤结束；业务测试以 passed 和本轮关联证据为准。
+2. 项目启动配置位于 `.flutter-pilot/launch.json`。「连接与诊断 → 项目启动」可直接启动 Web 开发服务器或现有 Flutter Debug 配置；也可手动编辑该文件后点击「重新读取」。示例见 [example.launch.json](../resources/example.launch.json)。
+3. Web profile 仅接受工作区内相对 `root`、`npm/pnpm/yarn/bun` 与 `package.json` 中存在的脚本，使用无 shell 子进程；Flutter profile 引用 `.vscode/launch.json` 中命名且唯一的 Dart Debug 配置。
+4. 准备浏览器时先安装锁定版 Playwright 运行时；若本机已安装 Chrome/Chromium/Edge/Brave，则以其启动隔离临时 Profile 并跳过 190 MB 的 Chromium 下载。仅在没有受支持系统浏览器时下载私有 Chromium。显式准备后再创建 Context；仅使用 Flutter 无需准备浏览器。
+5. MCP 先 `list_sessions`，再按目标调用 `get_browser_status`、`create_browser_context`。记录返回的 runtimeId/generation；按需激活 Scene 后 `open_browser_page`，后续 UI 固定传 runtimeId/generation/pageId。
+6. 一个项目多个目标时显式选择，不能靠当前窗口、焦点或最近页面推断。纯操作 Scene 的 `call` 不切换 Mock；激活、reload、重连均不操作页面。
+7. 按新请求的 mocked、requestRuleId/responseRuleId、响应内容及最终 UI 验证。动作 completed 仅代表步骤结束；业务测试以 passed 和本轮关联证据为准。
 
 MCP 只读指南与 Prompts 无在线会话前提，入口为 `capabilities`、`overview.browserRuntime`、`http`、`ws`、`ui`、`workflow`。全部工具均有同名 Prompt。可执行 Scene 示例见 `resources/example.web-scenes.json`。
+
+## 项目启动配置
+
+工作台打开项目时会让 `.flutter-pilot/launch.json` 保持存在；首次创建会尽力生成可用的 Web profile 和现有 Dart Debug profile。也可直接手工编辑：
+
+```json
+{
+  "version": 1,
+  "selectedProfileId": "web-dev",
+  "profiles": [
+    {
+      "id": "web-dev",
+      "name": "Web · dev:pilot",
+      "type": "web",
+      "root": ".",
+      "packageManager": "pnpm",
+      "script": "dev:pilot",
+      "args": [],
+      "url": "http://localhost:3000/",
+      "readyTimeoutMs": 120000
+    },
+    {
+      "id": "flutter-ios",
+      "name": "Flutter · iOS",
+      "type": "flutter",
+      "configuration": "App (local)",
+      "deviceId": "simulator-device-id"
+    }
+  ]
+}
+```
+
+- `web.root` 必须是工作区内普通相对目录；`script` 必须存在于该目录 `package.json`。
+- Web 启动只调用固定 package manager 的 `run` 子命令，不经过 shell，不执行 launch.json 中任意可执行路径。
+- Flutter `configuration` 必须来自当前工作区命名且唯一的 Dart Debug 启动配置；省略时要求当前只有一个可用配置。
+- 工作台「项目启动」会等待 Web URL 就绪，展示有界日志并支持停止；手动编辑后点击「重新读取」。
 
 ## 操作与测试
 
