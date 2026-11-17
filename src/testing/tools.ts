@@ -1,6 +1,10 @@
 import { z } from 'zod';
+import { browserPageSchema, browserTargetSchema } from '../browser/protocol';
 
-const session = { sessionId: z.string().min(1).max(256) };
+const session = {
+  sessionId: z.string().min(1).max(256),
+  target: z.union([browserPageSchema, browserTargetSchema]).optional(),
+};
 const run = { ...session, runId: z.string().min(1).max(128) };
 const inputs = z
   .record(

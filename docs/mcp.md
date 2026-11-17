@@ -39,9 +39,25 @@ Cursor 使用独立的 JSON 配置（兼容注释与尾逗号），在 `mcpServe
 
 VM 认证地址不写入 Agent 配置。桥接进程通过私有 Unix socket 访问插件，每次请求校验本地会话凭证与工作区；注册文件、凭证和 socket 不进入项目仓库。
 
+## 运行目标与网络来源
+
+`sessionId` 选择项目；`list_sessions` 的 `runtimeTargets` 提供该项目内运行目标的 `runtimeId`、`generation`、种类、连接状态和能力。网络、Scene 工具可传 `target:{runtimeId,generation}`，同轮状态、历史和规则调用使用同一目标。多个连接目标必须明确指定；仅有一个连接目标时兼容原来的 `sessionId` 调用。离线 Scene 查询与配置可指定目标，旧调用沿用原默认目标。
+
+```json
+{
+  "sessionId": "<从 list_sessions 取得>",
+  "target": { "runtimeId": "<从 runtimeTargets 取得>", "generation": 1 },
+  "limit": 20
+}
+```
+
+以上是 `get_requests` 参数，`generation` 必须使用发现结果中的实际值。同目标工作台和 MCP 查询同一 HTTP 后端：Flutter 使用 VM 历史，代理使用代理历史；查询失败或请求 ID 不存在均不回退另一库。代理 HTTP 采集和 Mock 只改变代理，停用 Mock 后仍可采集。WS、Widget Key、设备和热更新仍有 Flutter 专用语义，代理 WS 调用明确拒绝，不切换到 VM。
+
+激活、临时状态、历史和执行快照按运行目标隔离；切换工作台选择不会重定向已启动运行。失效代次或已断开的运行时在副作用前失败，迟到结果不使旧目标恢复有效。先重新发现目标、核对实际业务结果，再决定下一步，不自动重放。离线指南、schema 和 Prompt 的读取不创建项目状态、不准备依赖、不启动进程。托管浏览器生命周期与 HTTP direct 入口见下方独立浏览器运行时。
+
 ## Agent 能力发现与使用指南
 
-MCP 在连接初始化的 `instructions` 中发送功能介绍和“用户任务 → 工具 → 使用前提”指引，引导 Agent 收到适用任务时优先主动使用 Flutter Pilot。初始化说明、`overview.capabilityRoutes` 和 `capabilities` Prompt 共用 [功能映射](../src/mcp/capabilities.ts)，覆盖当前全部 51 个工具；`tools/list` 提供工具描述及实际参数 schema。
+MCP 在连接初始化的 `instructions` 中发送功能介绍和“用户任务 → 工具 → 使用前提”指引，引导 Agent 收到适用任务时优先主动使用 Flutter Pilot。初始化说明、`overview.capabilityRoutes` 和 `capabilities` Prompt 共用 [功能映射](../src/mcp/capabilities.ts)，覆盖当前源码全部 61 个工具；`tools/list` 提供工具描述及实际参数 schema。
 
 | 用户任务示例                               | 功能与主要入口                                                                    |
 | ------------------------------------------ | --------------------------------------------------------------------------------- |
@@ -70,20 +86,20 @@ MCP 在连接初始化的 `instructions` 中发送功能介绍和“用户任务
 | ------------------ | ------------------------------------------------------------------------------- |
 | `overview`（默认） | 能力场景、Prompt 导航、首次调用、规则文件和运行前提                             |
 | `screenshot`       | App 普通截图、长图目标选择、设备整屏、图片返回与范围限制                        |
-| `http`             | `scenes/` 中 HTTP 规则的字段、完整合法示例、请求／响应修改、转发及验证流程  |
-| `ws`               | `scenes/` 中 WS 规则的 URL、方向、文本匹配、替换／丢弃及双向消息验证        |
+| `http`             | `scenes/` 中 HTTP 规则的字段、完整合法示例、请求／响应修改、转发及验证流程      |
+| `ws`               | `scenes/` 中 WS 规则的 URL、方向、文本匹配、替换／丢弃及双向消息验证            |
 | `ui`               | 快照发现真实 Key、父范围查找、点击／输入／滚动／等待、Key 诊断与修复            |
 | `workflow`         | 保存并复用 Scene 操作、Test Case 关联 HTTP/WS/UI 断言、临时有状态 Mock 与热更新 |
 
 同一份指南还可通过 `resources/list` 发现，URI 为 `flutter-pilot://guides/<topic>`，使用 `resources/read` 读取。工具入口兼容只使用 MCP tools 的 Agent，资源入口方便支持参考资料的客户端；两者返回相同内容。
 
-支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 59 个模板：四个能力入口、原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及全部 51 个工具的同名独立模板。`take_screenshot`、`start_app`、`hide_keyboard`、`hot_reload`、`hot_restart`、Scene 操作和测试工具可以直接按同名 Prompt 查找，无需先打开其他场景模板。
+支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 69 个模板：四个能力入口、原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及全部 61 个工具的同名独立模板。`take_screenshot`、`start_app`、`hide_keyboard`、`hot_reload`、`hot_restart`、Scene 操作和测试工具可以直接按同名 Prompt 查找，无需先打开其他场景模板。
 
-| Prompt                   | 查阅内容                                                                                                                |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `capabilities`           | 用户任务到工具的功能映射，以及由当前注册表生成的全部工具和同名 Prompt 目录；只读查阅，无需任务或会话                    |
-| `app_screenshot`         | 当前 Flutter App 优先截图的最短路径；普通截图、滚动长图与包含键盘／系统 UI 的设备整屏及各自前提                         |
-| `scene_action_quick_run` | 复用或启动 App、发现已有 actions、选择所需 Mock、传参运行、查询／取消、最终 UI 与本轮网络验证；包含工作台手动入口       |
+| Prompt                   | 查阅内容                                                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `capabilities`           | 用户任务到工具的功能映射，以及由当前注册表生成的全部工具和同名 Prompt 目录；只读查阅，无需任务或会话                |
+| `app_screenshot`         | 当前 Flutter App 优先截图的最短路径；普通截图、滚动长图与包含键盘／系统 UI 的设备整屏及各自前提                     |
+| `scene_action_quick_run` | 复用或启动 App、发现已有 actions、选择所需 Mock、传参运行、查询／取消、最终 UI 与本轮网络验证；包含工作台手动入口   |
 | `scene_action_authoring` | `scenes/` 唯一来源、真实 Widget Key、无 target 的 `hide_keyboard`、公共 `call`、秘密参数、预检、归档及 Test Case v2 |
 
 先只查阅能力：
@@ -287,7 +303,7 @@ auto 在设备连接后使用设备输入；失败不会换通道重放。device
 | `get_ws_connections` / `get_ws_messages`           | 查询 WS 连接和消息；`includeBodies` 请求正文                                      |
 | `inject_ws_message`                                | 向 App 注入模拟服务端消息，支持原始文本或 topic/data                              |
 | `send_ws_message`                                  | 经 App 真实 WS 连接发送消息，受当前 outbound 规则影响                             |
-| `reload_rules`                                     | 增量刷新目录摘要并装配当前激活 Scene，无 `domain` 参数                    |
+| `reload_rules`                                     | 增量刷新目录摘要并装配当前激活 Scene，无 `domain` 参数                            |
 | `list_scenes`                                      | 列出场景摘要（ID、名称、规则数量）、激活场景和 HTTP/WS 应用状态，支持 VM 离线查询 |
 | `activate_scene` / `deactivate_scene`              | 持久选择或停用场景；离线待应用，重连自动恢复                                      |
 | `set_capture_enabled`                              | 控制指定 `http`／`ws` 域采集；关闭暂停该域 Mock，重新开启恢复                     |
@@ -315,3 +331,29 @@ MCP 能连接不代表全部运行时能力均可用。请在 Tab 中查看 VM �
 适配卡片提示项目、全局及 Claude local 配置的同名覆盖关系。未知 Codex 握手名只显示实际名称，不推断来自 CLI 还是 App。
 
 MCP 配置和 stdio 连接不需要 macOS 钥匙串。隔离 IDE 验收可能触发宿主自身的钥匙串提示，因此 `test:ide:mcp` 默认跳过 GUI，不能作为日常自动回归运行。
+
+## Web 手动浏览器 HTTP 代理
+
+无 pubspec 的 React/Vue/Vite 项目可发现，普通 Node package.json 不自动识别。原生 HTML 或混合仓库在工作台「连接与诊断 → Web 项目接入」显式保存本地 HTTP/HTTPS URL 与子项目相对根目录，沿用项目 UUID、Scene v2 和同一 MCP。打开、查询状态或读取指南不会准备代理；先显式准备引擎和开启 HTTP 采集，再按实际监听端口配置专用浏览器。HTTPS 在专用测试浏览器信任该项目 CA，不关闭 TLS 校验或改全局证书。
+
+使用 `list_sessions.runtimeTargets` 中的 proxy target 调用网络工具；`get_network_status.proxy` 返回实际端口、CA、错误与 `listener_only_no_page_identity` 归属。保存 Scene 后 `reload_rules`、按需 `activate_scene`，手动触发后用本轮请求 ID 核对工作台和 MCP 的原始/有效快照、mocked 与 requestRuleId/responseRuleId。取消激活保留采集；停采集同时暂停该目标 Mock，恢复采集恢复当前规则。Mock 在 request 阶段返回时记录 requestRuleId；不要假定一定有 responseRuleId。
+
+此入口仅支持经过该监听端口的手动浏览器 HTTP/HTTPS 流量，不支持 WS、网页 UI 或页面业务测试，也不把 SSR/Node 服务端请求归为浏览器流量。缓存或 Service Worker 可能绕过代理；CORS 和 OPTIONS 须配置明确响应。激活、reload 或重连不导航、刷新页面。离线 `overview.webProxy`、`http.webProxy`、`capabilities`、`http_mock` 与同名网络 Prompt 均提供接入导航。
+
+## 独立浏览器运行时
+
+Web 业务测试继续使用 `tests.json` v2 与 `run_test`，固定 Page target。setup、主动作与临时 Mock 使用同一冻结快照；主流程按 Worker 源时钟建立 HTTP/WS 观察边界，排除旧在途、setup 和其他页面记录。HTTP 断言支持原始请求、响应 JSON、mocked、ruleId，提取 orderId 后关联 WS 与最终 UI。运行证据包含目标、定义指纹、规则与业务 ID；清理结束后才暴露终态。清理失败保留 `cleanupPending` 并阻止新运行，`cancel_test_run` 重试清理，不重跑动作。只有 passed 代表测试通过，仍须说明 Mock 夹具范围。
+
+Web WS/WSS 在 Page 创建时安装路由；`get_ws_connections` 返回准确 Context/Page/connectionId，`get_ws_messages` 列摘要，`get_browser_ws_message` 读原始/有效正文。复用 Scene `wsRules` 的优先级、方向、replace/drop；`send_ws_message` 经真实连接和 outbound 规则，`inject_ws_message` 仅投递页面并标记 synthetic。submitted 不代表业务确认；取消、断线不重发。vite-hmr 子协议及常见开发端点不算业务连接；二进制和超过 256 KiB 内容不编辑，关闭采集暂停该域 Mock，重新开启不补抓旧消息。
+
+WSS 默认校验证书。macOS 首个 `create_browser_context` 可传 `trustedCertificates:[PEM CA]`，只写自有临时 Chromium Profile，返回指纹；同 Worker 的 Context 共用这个显式信任范围，不能在已启动 Worker 中变更。不改系统证书、用户浏览器或使用 TLS 绕过；退出删除该 Profile。
+
+网页 UI 使用同名 `get_ui_snapshot/find_widget/tap/enter_text/wait_for_widget/scroll/press_key`，传准确 Page `target`。选择器为 `{source:"web",testId:"entry"}` 或 `{source:"web",role:"button",name:"Submit"}`，可附 `frame:{testId:"checkout"}`。缺失、重复或失效 frame 不回退；点击检查真实可见、启用和遮挡，输入派发浏览器事件。Web 不支持设备手势或 `hide_keyboard`，Scene 会在任何操作前预检拒绝。
+
+`take_screenshot` 使用 `source:web`、`mode:screen/full_page`；最大边长 16384、总计 3200 万像素、PNG 12 MiB，返回 MCP 图片。Scene v2 targets/actions 与跨 Scene call 继续复用，同 Context 操作和运行共用锁、参数 secret 逐层脱敏。示例见 `resources/example.web-scenes.json`。工作台显示明确 Page、截图和运行步骤结果。
+
+`get_browser_status` 只读。显式 `prepare_browser` 安装锁定的私有 Playwright/Chromium 后，用 `create_browser_context` 创建隔离运行目标，再 `activate_scene`、`open_browser_page`。`list_browser_pages` 返回 Context 和 Page 身份；页面调用固定 `target:{runtimeId,generation,pageId}`，不按焦点选页。工作台「连接与诊断」提供相同生命周期控制。
+
+独立 Worker 通过认证 IPC 执行；取消或超时后 Context 保持未确认锁，核对结果后显式关闭重建，不重放。退出清理自有 Chromium 进程组和临时 Profile。只读发现、离线 Prompt、打开 Flutter 项目不安装或启动浏览器。
+
+HTTP direct 使用 Chromium 请求和响应拦截，保留真实 OPTIONS/CORS/TLS 检查，不叠加代理 Mock。显式页面首次导航前就绪；弹窗只承诺接入后的流量。Service Worker 阻止，HTTP cache 关闭。正文快照上限 1 MiB，历史上限 1000 条/32 MiB；上传、二进制、流式和超限响应不编辑，流式直接继续传输。历史保存原始/有效快照、命中规则与目标身份；不覆盖 SSR。生命周期和网络工具均有同名 Prompt，离线导航见 `overview.browserRuntime` 与 `capabilities`。

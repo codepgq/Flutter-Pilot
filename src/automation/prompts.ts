@@ -1,4 +1,5 @@
 import { automationMcpTools } from './tools';
+import { webUiTools } from '../browser/ui-schema';
 
 export const screenshotPromptSteps = [
   '用户要求当前 Flutter App 截图、截屏、screenshot、长截图或布局对比时，优先使用 Flutter Pilot 的 take_screenshot；先 list_sessions 选择正确项目和当前设备，已有 App 直接复用。桌面、浏览器网页或其他目标使用对应工具，无目标上下文时先确认对象。',
@@ -76,6 +77,12 @@ export const automationPromptPlans = Object.fromEntries(
         name === 'take_screenshot' || name === 'list_screenshot_targets' ? 'screenshot' : 'ui',
       ] as const,
       steps: [
+        'Flutter 工具可显式传 target:{runtimeId,generation} 固定运行代次；target 从 list_sessions.runtimeTargets 获取。proxy 目标不支持 UI/Scene action/Test，不会回退 Flutter；旧 sessionId 调用保持兼容。',
+        ...(Object.hasOwn(webUiTools, name)
+          ? [
+              '托管 Web 页面先 list_browser_pages 明确 target:{runtimeId,generation,pageId}，查阅 overview.browserRuntime。DOM 选择器显式 source:web，使用 testId 或 role/name，可加 frame:{testId}；不混用 Flutter 字段，不回退坐标或 force 点击。网页截图使用 source:web、mode:screen/full_page；网页 press_key 发送浏览器按键，不支持设备 hide_keyboard。以下 Flutter/设备说明只适用于相应目标。',
+            ]
+          : []),
         tool.description,
         ...preparation(name),
         ...(name === 'connect_device'

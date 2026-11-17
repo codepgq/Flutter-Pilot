@@ -48,7 +48,7 @@ export class McpNetworkController {
   }
 
   async execute(tool: string, args: Record<string, any>, signal?: AbortSignal) {
-    const { sessionId: _, ...query } = args;
+    const { sessionId: _, target: _target, ...query } = args;
     switch (tool) {
       case 'get_network_status':
         return this.status();

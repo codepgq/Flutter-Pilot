@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.23 — Flutter / Web 统一运行时（2026-11-17）
+
+- 同一插件与 MCP 支持 Flutter、HTTP 代理和托管 Chromium；独立 Worker、私有依赖、Context/Page 身份及运行锁隔离。
+- Web 支持 HTTP/WS 采集与 Mock、稳定 DOM 操作和截图、Scene 操作及 Test v2 业务证据，复用现有目录存储。
+- 补齐 61 个工具、69 个 Prompts、离线指南和工作台入口；保留显式目标代次及断线报告。
+- 发布审核修复直接只读查询取消导致 Context 锁死，以及 MCP Web 运行查询/取消误路由到 Flutter 的问题，增加控制器、真实浏览器和扩展 IPC 回归。
+
 ## 0.0.22 — Scene v2 目录存储（2026-11-16）
 
 - Scene、HTTP / WS 规则、actions 与正文拆为独立资源；列表分页搜索、摘要缓存及依赖闭包快照，普通事件不重复传输定义。

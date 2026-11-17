@@ -110,7 +110,12 @@ describe('MCP file-backed network workflow', () => {
     expect(host.listScenes).toHaveBeenCalledTimes(3);
     await controller.execute('set_capture_enabled', { domain: 'ws', enabled: false });
     expect(host.setCapture).toHaveBeenCalledWith('ws', false);
-    await controller.execute('get_requests', { sessionId: 'private', limit: 20, search: 'orders' });
+    await controller.execute('get_requests', {
+      sessionId: 'private',
+      target: { runtimeId: 'proxy', generation: 3 },
+      limit: 20,
+      search: 'orders',
+    });
     expect(host.listHttp).toHaveBeenCalledWith({ limit: 20, search: 'orders' });
   });
 });

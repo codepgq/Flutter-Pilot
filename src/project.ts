@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { link, lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { SceneFiles, safePath } from './scene-files';
+import { validateWebProject, type WebProject } from './discovery';
 
 export interface ProjectConnection {
   mode: 'vm' | 'proxy';
@@ -24,6 +25,7 @@ export interface ProjectConfig {
   name: string;
   connection: ProjectConnection;
   settings?: ProjectSettings;
+  web?: WebProject;
   [key: string]: unknown;
 }
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -109,7 +111,10 @@ function parseJson(text: string, label: string): unknown {
 }
 async function readProject(file: string): Promise<ProjectConfig | undefined> {
   const text = await readText(file, 1024 * 1024);
-  return text === undefined ? undefined : validateConfig(parseJson(text, '.flutter-pilot/project.json'));
+  if (text === undefined) return undefined;
+  const config = validateConfig(parseJson(text, '.flutter-pilot/project.json'));
+  if (config.web) config.web = await validateWebProject(join(file, '../..'), config.web);
+  return config;
 }
 async function createOnce(directory: string, file: string, content: string): Promise<void> {
   await checkDirectory(directory);
@@ -163,6 +168,13 @@ export class ProjectBinding {
     return this.config;
   }
   saveConnection(connection: ProjectConnection): Promise<void> {
+    return this.savePatch({ connection });
+  }
+  async registerWeb(input: unknown): Promise<void> {
+    const web = await validateWebProject(join(this.directory, '..'), input);
+    await this.savePatch({ web, connection: { mode: 'proxy' } });
+  }
+  private savePatch(patch: { connection?: ProjectConnection; web?: WebProject }): Promise<void> {
     const operation = this.operations.then(async () => {
       await checkDirectory(this.directory);
       const before = await readText(this.file, 1024 * 1024);
@@ -170,10 +182,15 @@ export class ProjectBinding {
       const fresh = validateConfig(parseJson(before, '.flutter-pilot/project.json'));
       if (fresh.projectId !== this.projectId)
         throw new Error('项目 UUID 已变更，请重新打开工作区以切换数据绑定');
-      const patch = Object.fromEntries(
+      const connection: Partial<ProjectConnection> = patch.connection ?? {};
+      const connectionPatch = Object.fromEntries(
         connectionKeys.filter((key) => connection[key] !== undefined).map((key) => [key, connection[key]]),
       );
-      const next = validateConfig({ ...fresh, connection: { ...fresh.connection, ...patch } });
+      const next = validateConfig({
+        ...fresh,
+        ...(patch.web ? { web: patch.web } : {}),
+        connection: { ...fresh.connection, ...connectionPatch },
+      });
       const temporary = join(this.directory, `.project-${randomUUID()}.tmp`);
       try {
         await writeFile(temporary, serialize(next), { flag: 'wx', mode: 0o600 });
@@ -195,6 +212,7 @@ export class ProjectBinding {
 export async function openProjectBinding(
   workspacePath: string,
   legacyStoragePath: string,
+  options: { defaultMode?: 'vm' | 'proxy' } = {},
 ): Promise<ProjectBinding> {
   const root = await realpath(workspacePath);
   const directory = join(root, '.flutter-pilot');
@@ -204,7 +222,7 @@ export async function openProjectBinding(
   const claimFile = join(legacyStoragePath, 'project-binding.json');
   const previousClaim = await readText(claimFile, 1024 * 1024);
   if (!(await readProject(file))) {
-    let connection: ProjectConnection = { mode: 'vm' };
+    let connection: ProjectConnection = { mode: options.defaultMode ?? 'vm' };
     const legacy = await readText(join(legacyStoragePath, 'connection.json'), 1024 * 1024);
     if (legacy !== undefined && previousClaim === undefined) {
       const saved = parseJson(legacy, '旧版连接配置');

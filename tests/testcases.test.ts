@@ -329,7 +329,7 @@ describe('test case execution and network correlation', () => {
     expect(run.assertions.map((v) => v.status)).toEqual(['passed', 'passed', 'passed']);
     expect(run.steps).toHaveLength(4);
     expect(run.steps.every((step) => step.status === 'completed')).toBe(true);
-    expect(run.assertions[0].evidence).toEqual({ httpId: `req-${result.runId}` });
+    expect(run.assertions[0].evidence).toMatchObject({ httpId: `req-${result.runId}`, mocked: true });
     expect(log.indexOf('baseline')).toBeLessThan(log.indexOf('tap:confirm'));
     expect(log.indexOf('inject')).toBeGreaterThan(log.indexOf('tap:confirm'));
     expect(host.injectWs).toHaveBeenCalledTimes(1);

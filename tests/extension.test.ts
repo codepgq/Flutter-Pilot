@@ -376,7 +376,10 @@ describe('Scene 操作与业务测试扩展整合', () => {
       supported: true,
       configurations: [{ name: 'app' }],
     });
-    const network = await call(descriptor, 'get_network_status');
+    const flutterTarget = description.runtimeTargets.find((target: any) => target.kind === 'flutter');
+    const network = await call(descriptor, 'get_network_status', {
+      target: { runtimeId: flutterTarget.runtimeId, generation: flutterTarget.generation },
+    });
     expect(network.http).toMatchObject({
       attachedDioInstances: 0,
       coverage: 'existing_dio_instances',
@@ -549,7 +552,7 @@ describe('Scene 操作与业务测试扩展整合', () => {
       expect((await call(descriptor, 'get_scene_action_run', { runId: start.runId })).run).toMatchObject({
         sceneId: 'operations',
         actionId: 'submit',
-        mockSceneId: 'business',
+        mockSceneId: null,
       });
       for (const [tool, args] of [
         ['reload_rules', {}],
@@ -2142,7 +2145,7 @@ describe('VM 连接模式扩展整合', () => {
     });
   });
 
-  it('代理模式只展示候选，切换VM后自动连接且关闭面板继续记录', async () => {
+  it('代理模式只展示候选，连接VM后切换工作台选择仍保持该目标在线', async () => {
     await withDiscoveredVm(async (emit) => {
       await open();
       emit();
@@ -2155,7 +2158,7 @@ describe('VM 连接模式扩展整合', () => {
       await vi.waitFor(() => expect(latest().state.vm.status).toBe('connected'));
       await message('connection.mode', { mode: 'proxy' });
       await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(latest().state.vm.status).toBe('disconnected');
+      expect(latest().state.vm.status).toBe('connected');
     });
   });
 
@@ -2363,7 +2366,9 @@ describe('项目文件与工作区绑定整合', () => {
     engine.emit('status', engine.state);
     await message('connection.mode', { mode: 'vm' });
     expect(latest().state.mode).toBe('vm');
-    expect(engine.calls.filter((call: any) => call.method === 'rules.sync').at(-1).params.rules).toEqual([]);
+    expect(engine.calls.filter((call: any) => call.method === 'rules.sync').at(-1).params.rules).toEqual([
+      rule,
+    ]);
   });
   it('代理控制连接快速重连后重新同步场景且同步前不显示已应用', async () => {
     await open();
@@ -2634,6 +2639,600 @@ describe('项目文件与工作区绑定整合', () => {
       response: { body: '{"migrated":true}' },
     });
     expect(await readFile(join(legacyStorage(), 'vm-history.sqlite3'))).toBeInstanceOf(Buffer);
+    expect(fake.engines[0].starts).toHaveLength(0);
+  });
+});
+
+describe('runtime target routing through production Host and authenticated MCP IPC', () => {
+  async function withTargets(run: (fixture: any) => Promise<void>) {
+    const { VmSession } = await import('../src/vm/session');
+    let vm: any;
+    const connect = vi.spyOn(VmSession.prototype, 'connect').mockImplementation(async function (this: any) {
+      vm = this;
+      this.state.status = 'connected';
+      this.state.isolates = 1;
+      this.emit('change');
+    });
+    const capture = vi.spyOn(VmSession.prototype, 'setCaptureEnabled').mockImplementation(async function (
+      this: any,
+      enabled,
+    ) {
+      this.state.captureEnabled = enabled;
+    });
+    const mock = vi.spyOn(VmSession.prototype, 'setMockEnabled').mockImplementation(async function (
+      this: any,
+      enabled,
+    ) {
+      this.state.mockEnabled = enabled;
+    });
+    const rules = vi.spyOn(VmSession.prototype, 'updateRules').mockResolvedValue();
+    try {
+      await open();
+      await message('connection.mode', { mode: 'vm' });
+      await message('vm.connect', { url: 'ws://127.0.0.1:12345/ws' });
+      await message('mcp.enable', { enabled: true });
+      const [descriptor] = await discoverSessions(join(directory, 'bridge', 'sessions'), fake.workspace);
+      const describe = async () => (await requestSession(descriptor, { kind: 'describe' })) as any;
+      const targets = (await describe()).runtimeTargets;
+      const ref = (kind: string) => {
+        const target = targets.find((target: any) => target.kind === kind);
+        return { runtimeId: target.runtimeId, generation: target.generation };
+      };
+      const call = async (tool: string, args: any = {}) =>
+        (await requestSession(descriptor, {
+          kind: 'call',
+          tool,
+          args: { sessionId: descriptor.sessionId, ...args },
+        })) as any;
+      await run({
+        vm,
+        engine: fake.engines[0],
+        call,
+        describe,
+        flutter: ref('flutter'),
+        proxy: ref('proxy'),
+        capture,
+        mock,
+        rules,
+      });
+    } finally {
+      connect.mockRestore();
+      capture.mockRestore();
+      mock.mockRestore();
+      rules.mockRestore();
+    }
+  }
+  it.each(['get_scene_action_run', 'cancel_scene_action_run', 'get_test_run', 'cancel_test_run'])(
+    'routes browser %s through authenticated IPC even when the Context is no longer listed',
+    async (tool) => {
+      const { BrowserController } = await import('../src/browser/controller');
+      const execute = vi.spyOn(BrowserController.prototype, 'execute').mockResolvedValue({
+        ok: true,
+        run: { runId: 'web-run', status: 'cancelled' },
+      });
+      try {
+        await withTargets(async ({ call }) => {
+          const target = { runtimeId: 'archived-browser-context', generation: 1 };
+          const result = await call(tool, { target, runId: 'web-run' });
+          expect(result).toMatchObject({ ok: true, run: { runId: 'web-run' } });
+          expect(execute).toHaveBeenCalledWith(
+            tool,
+            expect.objectContaining({ target, runId: 'web-run' }),
+            expect.any(AbortSignal),
+          );
+        });
+      } finally {
+        execute.mockRestore();
+      }
+    },
+  );
+  it('rejects stale Flutter and proxy UI/action/test targets before dispatch', async () => {
+    await withTargets(async ({ call, flutter, proxy }) => {
+      const { AutomationController } = await import('../src/automation/controller');
+      const execute = vi.spyOn(AutomationController.prototype, 'execute').mockResolvedValue({ ok: true });
+      try {
+        await expect(
+          call('tap', { target: { ...flutter, generation: flutter.generation + 1 }, key: 'confirm' }),
+        ).rejects.toHaveProperty('code', 'TARGET_STALE');
+        await expect(call('tap', { target: proxy, key: 'confirm' })).rejects.toHaveProperty(
+          'code',
+          'TARGET_UNSUPPORTED',
+        );
+        await expect(
+          call('run_scene_action', { target: proxy, sceneId: 's', actionId: 'a' }),
+        ).rejects.toHaveProperty('code', 'TARGET_UNSUPPORTED');
+        await expect(call('run_test', { target: proxy, testId: 't' })).rejects.toHaveProperty(
+          'code',
+          'TARGET_UNSUPPORTED',
+        );
+        expect(execute).not.toHaveBeenCalled();
+        await expect(call('tap', { target: flutter, key: 'confirm' })).resolves.toMatchObject({ ok: true });
+      } finally {
+        execute.mockRestore();
+      }
+    });
+  });
+  it('keeps VM and proxy sentinel history and details aligned with the selected workbench, without fallback', async () => {
+    await withTargets(async ({ vm, engine, call, flutter, proxy }: any) => {
+      const request = {
+        method: 'GET',
+        url: 'http://fixture.test/sentinel',
+        headers: [],
+        body: '',
+        bodyBytes: 0,
+        bodyEncoding: 'text',
+        truncated: false,
+        editable: true,
+      };
+      const entry = {
+        id: 'vm-sentinel',
+        startedAt: Date.now(),
+        duration: 1,
+        method: 'GET',
+        host: 'fixture.test',
+        path: '/sentinel',
+        url: request.url,
+        targetUrl: request.url,
+        originalRequest: request,
+        automaticRequest: request,
+        request,
+        mocked: false,
+        note: '',
+        tags: [],
+      };
+      await vm.store.put(entry);
+      const proxyEntry = { ...entry, id: 'proxy-sentinel', mocked: true, responseRuleId: 'proxy-rule' };
+      const original = engine.rpc.bind(engine);
+      engine.rpc = async (method: string, args: any) => {
+        if (method === 'history.list') return { items: [proxyEntry], total: 1 };
+        if (method === 'history.get') {
+          if (args.id !== proxyEntry.id) throw new Error('proxy-only-not-found');
+          return proxyEntry;
+        }
+        return original(method, args);
+      };
+      expect((await call('get_requests', { target: flutter })).items.map((item: any) => item.id)).toEqual([
+        'vm-sentinel',
+      ]);
+      expect((await call('get_requests', { target: proxy })).items.map((item: any) => item.id)).toEqual([
+        'proxy-sentinel',
+      ]);
+      expect((await call('get_request', { target: flutter, id: entry.id })).id).toBe(entry.id);
+      expect((await call('get_request', { target: proxy, id: proxyEntry.id })).id).toBe(proxyEntry.id);
+      await expect(call('get_request', { target: proxy, id: entry.id })).rejects.toThrow(
+        'proxy-only-not-found',
+      );
+      await message('history.query');
+      expect(latest().state.history.items.map((item: any) => item.id)).toEqual(['vm-sentinel']);
+      await message('connection.mode', { mode: 'proxy' });
+      expect(latest().state.history.items.map((item: any) => item.id)).toEqual(['proxy-sentinel']);
+      await expect(call('get_requests')).rejects.toHaveProperty('code', 'TARGET_AMBIGUOUS');
+      await expect(
+        call('get_requests', { target: { ...proxy, generation: proxy.generation - 1 } }),
+      ).rejects.toHaveProperty('code', 'TARGET_STALE');
+    });
+  });
+  it('isolates activation, proxy capture, VM state, and legacy activation ownership across IDE restoration', async () => {
+    await withTargets(async ({ call, flutter, proxy, capture, mock, engine }: any) => {
+      await message('rules.save', { rule });
+      const id = latest().state.scenes.scenes[0].id;
+      await call('activate_scene', { target: flutter, sceneId: id });
+      await call('reload_rules', { target: proxy });
+      expect((await call('list_scenes', { target: proxy })).activeSceneId).toBeNull();
+      const vmCalls = capture.mock.calls.length + mock.mock.calls.length;
+      await call('activate_scene', { target: proxy, sceneId: id });
+      expect(engine.calls.filter((item: any) => item.method === 'rules.sync').at(-1).params.rules).toEqual([
+        rule,
+      ]);
+      expect(capture.mock.calls.length + mock.mock.calls.length).toBe(vmCalls);
+      await call('set_capture_enabled', { target: proxy, domain: 'http', enabled: false });
+      expect(engine.state.proxyActive).toBe(false);
+      expect((await call('get_network_status', { target: proxy })).http.captureEnabled).toBe(false);
+      await call('set_capture_enabled', { target: proxy, domain: 'http', enabled: true });
+      await call('deactivate_scene', { target: proxy });
+      expect((await call('get_network_status', { target: proxy })).http).toMatchObject({
+        captureEnabled: true,
+        mockEnabled: false,
+      });
+      expect(engine.calls.filter((item: any) => item.method === 'rules.sync').at(-1).params.rules).toEqual(
+        [],
+      );
+      expect((await call('list_scenes', { target: flutter })).activeSceneId).toBe(id);
+      expect(capture.mock.calls.length + mock.mock.calls.length).toBe(vmCalls);
+      await expect(
+        call('set_capture_enabled', { target: proxy, domain: 'ws', enabled: true }),
+      ).rejects.toHaveProperty('code', 'TARGET_UNSUPPORTED');
+      await deactivate();
+      await activateCurrent();
+      await open();
+      expect(latest().state.mode).toBe('vm');
+      expect(latest().state.scenes.activeSceneId).toBe(id);
+      await message('connection.mode', { mode: 'proxy' });
+      expect(latest().state.scenes.activeSceneId).toBeNull();
+    });
+  });
+  it('rejects a delayed old-generation result and disconnected side effects without replay', async () => {
+    await withTargets(async ({ call, proxy, engine, describe }: any) => {
+      let finish!: () => void;
+      let entered!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const original = engine.rpc.bind(engine);
+      let calls = 0;
+      engine.rpc = async (method: string, args: any) => {
+        if (method === 'history.list') {
+          calls++;
+          entered();
+          await gate;
+          return { items: [{ id: 'late-proxy' }], total: 1 };
+        }
+        return original(method, args);
+      };
+      const pending = call('get_requests', { target: proxy });
+      const rejected = expect(pending).rejects.toHaveProperty('code', 'TARGET_STALE');
+      await started;
+      engine.emit('event', { event: 'control.disconnected' });
+      finish();
+      await rejected;
+      expect(calls).toBe(1);
+      const count = engine.calls.length;
+      await expect(
+        call('set_capture_enabled', { target: proxy, domain: 'http', enabled: false }),
+      ).rejects.toHaveProperty('code', 'TARGET_STALE');
+      expect(engine.calls).toHaveLength(count);
+      const current = (
+        await call('get_network_status', { target: { ...proxy, generation: proxy.generation + 1 } })
+      ).target;
+      engine.state.status = 'stopped';
+      engine.emit('status', engine.state);
+      await expect(
+        call('set_capture_enabled', {
+          target: { runtimeId: current.runtimeId, generation: current.generation },
+          domain: 'http',
+          enabled: true,
+        }),
+      ).rejects.toHaveProperty('code', 'TARGET_STALE');
+      const disconnected = (await describe()).runtimeTargets.find((target: any) => target.kind === 'proxy');
+      await expect(
+        call('set_capture_enabled', {
+          target: { runtimeId: disconnected.runtimeId, generation: disconnected.generation },
+          domain: 'http',
+          enabled: true,
+        }),
+      ).rejects.toHaveProperty('code', 'TARGET_DISCONNECTED');
+    });
+  });
+  it('stops a Scene Host between HTTP and WS rule projection when the VM generation changes', async () => {
+    await withTargets(async ({ vm, call, flutter, rules }: any) => {
+      const { WsSession } = await import('../src/ws/session');
+      let enter!: () => void;
+      let resume!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const wsRules = vi.spyOn(WsSession.prototype, 'updateRules');
+      try {
+        await message('rules.save', { rule });
+        const sceneId = latest().state.scenes.scenes[0].id;
+        rules.mockImplementationOnce(async () => {
+          enter();
+          await gate;
+        });
+        const pending = call('activate_scene', { target: flutter, sceneId });
+        const rejected = expect(pending).rejects.toHaveProperty('code', 'TARGET_STALE');
+        await entered;
+        const before = wsRules.mock.calls.length;
+        vm.client.emit('disconnected');
+        resume();
+        await rejected;
+        expect(wsRules.mock.calls).toHaveLength(before);
+        expect(latest().state.sceneRuntime.http.status).not.toBe('applied');
+      } finally {
+        resume?.();
+        wsRules.mockRestore();
+      }
+    });
+  });
+  it('stops a Scene Host between enabling HTTP capture and Mock after VM replacement', async () => {
+    await withTargets(async ({ vm, call, flutter, capture, mock }: any) => {
+      let enter!: () => void;
+      let resume!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      try {
+        await message('rules.save', { rule });
+        const sceneId = latest().state.scenes.scenes[0].id;
+        capture.mockImplementationOnce(async () => {
+          enter();
+          await gate;
+        });
+        const pending = call('activate_scene', { target: flutter, sceneId });
+        const rejected = expect(pending).rejects.toHaveProperty('code', 'TARGET_STALE');
+        await entered;
+        const enabledBefore = mock.mock.calls.filter(([enabled]: [boolean]) => enabled).length;
+        vm.client.emit('disconnected');
+        resume();
+        await rejected;
+        expect(mock.mock.calls.filter(([enabled]: [boolean]) => enabled)).toHaveLength(enabledBefore);
+        expect(latest().state.sceneRuntime.http.status).not.toBe('applied');
+      } finally {
+        resume?.();
+      }
+    });
+  });
+  it('releases expired temporary ownership without restoring capture or replaying UI on the replacement VM', async () => {
+    await withTargets(async ({ vm, call, capture, describe }: any) => {
+      const { AutomationController } = await import('../src/automation/controller');
+      const { TestNetworkObserver } = await import('../src/testing/network');
+      let enter!: () => void;
+      let resume!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const baseline = vi.spyOn(TestNetworkObserver.prototype, 'baseline').mockResolvedValue({
+        at: Date.now(),
+        httpIds: [],
+        wsIds: [],
+      });
+      const action = vi
+        .spyOn(AutomationController.prototype, 'executeWorkflow')
+        .mockImplementation(async () => {
+          enter();
+          await gate;
+          return { ok: true };
+        });
+      try {
+        await writeScenes({
+          version: 1,
+          activeSceneId: null,
+          scenes: [
+            {
+              id: 'operations',
+              name: 'Operations',
+              httpRules: [],
+              wsRules: [],
+              targets: { confirm: { source: 'flutter', key: 'confirm' } },
+              actions: [
+                { id: 'submit', name: 'Submit', steps: [{ id: 'tap', type: 'tap', target: 'confirm' }] },
+              ],
+            },
+          ],
+        });
+        await message('project.reload');
+        await writeFile(
+          join(fake.workspace, '.flutter-pilot', 'tests.json'),
+          JSON.stringify({
+            version: 2,
+            tests: [
+              {
+                id: 'expired',
+                name: 'Expired target',
+                action: { sceneId: 'operations', actionId: 'submit' },
+
+                expect: { ui: [{ id: 'visible', selector: { key: 'result' }, state: 'visible' }] },
+              },
+            ],
+          }),
+        );
+        const started = await call('run_test', { testId: 'expired' });
+        await entered;
+        const before = capture.mock.calls.length;
+        vm.client.emit('disconnected');
+        vm.state.status = 'connected';
+        resume();
+        await vi.waitFor(async () => {
+          const result = await call('get_test_run', { runId: started.runId });
+          expect(result.run.status).not.toBe('running');
+          expect(result.run.cleanup.status).toBe('failed');
+        });
+        expect(capture.mock.calls).toHaveLength(before);
+        expect(action.mock.calls.filter(([, tool]) => tool === 'tap')).toHaveLength(1);
+        expect(latest().state.tests).toMatchObject({ locked: false, cleanupPending: [] });
+        const target = (await describe()).runtimeTargets.find((t: any) => t.kind === 'flutter');
+        await call('deactivate_scene', {
+          target: { runtimeId: target.runtimeId, generation: target.generation },
+        });
+        expect(action.mock.calls.filter(([, tool]) => tool === 'tap')).toHaveLength(1);
+      } finally {
+        resume?.();
+        baseline.mockRestore();
+        action.mockRestore();
+      }
+    });
+  });
+  it('reports proxy WS as unsupported without exposing the connected VM WS state', async () => {
+    await withTargets(async ({ vm, call, flutter, proxy }: any) => {
+      vm.websocket.state.captureEnabled = true;
+      vm.websocket.state.mockEnabled = true;
+      vm.websocket.state.ruleSyncError = 'vm-private-sync-error';
+      vm.websocket.state.rules = [
+        {
+          id: 'vm-only-rule',
+          name: 'VM only',
+          enabled: true,
+          priority: 0,
+          match: { connectionId: 'vm-socket' },
+          action: { type: 'replace', text: 'vm-private' },
+        },
+      ];
+      const status = await call('get_network_status', { target: proxy });
+      expect(status.ws).toMatchObject({
+        supported: false,
+        captureEnabled: false,
+        mockEnabled: false,
+        runtimeApplied: false,
+        rules: 0,
+      });
+      expect(JSON.stringify(status.ws)).not.toContain('vm-private');
+      expect(JSON.stringify(status.scene.runtime)).not.toContain('vm-private');
+      expect(status.scene.runtime.ws.status).toBe('unneeded');
+      expect((await call('get_network_status', { target: flutter })).ws).toMatchObject({
+        captureEnabled: true,
+        mockEnabled: true,
+        rules: 1,
+        syncError: 'vm-private-sync-error',
+      });
+    });
+  });
+  it('rechecks the Test Run target after acquiring automation and releases the lock before any UI', async () => {
+    await withTargets(async ({ vm, call, describe }: any) => {
+      const { AutomationController } = await import('../src/automation/controller');
+      const { SceneController } = await import('../src/scene-controller');
+      const acquireOriginal = AutomationController.prototype.acquireWorkflow;
+      let enter!: () => void;
+      let resume!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const acquire = vi
+        .spyOn(AutomationController.prototype, 'acquireWorkflow')
+        .mockImplementationOnce(async function (this: any, owner) {
+          await acquireOriginal.call(this, owner);
+          enter();
+          await gate;
+        });
+      const release = vi.spyOn(AutomationController.prototype, 'releaseWorkflow');
+      const prepare = vi.spyOn(SceneController.prototype, 'beginRun');
+      const execute = vi
+        .spyOn(AutomationController.prototype, 'executeWorkflow')
+        .mockResolvedValue({ ok: true });
+      try {
+        await writeScenes({
+          version: 1,
+          activeSceneId: null,
+          scenes: [
+            {
+              id: 'race-actions',
+              name: 'Race actions',
+              httpRules: [],
+              wsRules: [],
+              targets: { submit: { source: 'flutter', key: 'submit' } },
+              actions: [
+                { id: 'submit', name: 'Submit', steps: [{ id: 'tap', type: 'tap', target: 'submit' }] },
+              ],
+            },
+          ],
+        });
+        await message('project.reload');
+        await writeFile(
+          join(fake.workspace, '.flutter-pilot', 'tests.json'),
+          JSON.stringify({
+            version: 2,
+            tests: [
+              {
+                id: 'race-test',
+                name: 'Race test',
+                action: { sceneId: 'race-actions', actionId: 'submit' },
+                expect: { ui: [{ id: 'done', selector: { key: 'done' }, state: 'visible' }] },
+              },
+            ],
+          }),
+        );
+        const started = await call('run_test', { testId: 'race-test' });
+        await entered;
+        const old = (await describe()).runtimeTargets.find((target: any) => target.kind === 'flutter');
+        vm.state.status = 'disconnected';
+        await describe();
+        vm.state.status = 'connected';
+        const replacement = (await describe()).runtimeTargets.find(
+          (target: any) => target.kind === 'flutter',
+        );
+        expect(replacement.generation).toBeGreaterThan(old.generation);
+        resume();
+        await vi.waitFor(async () => {
+          const result = await call('get_test_run', { runId: started.runId });
+          expect(result.run).toMatchObject({
+            status: 'error',
+            failure: { code: 'SESSION_INVALIDATED' },
+            steps: [],
+            cleanup: { status: 'skipped' },
+          });
+        });
+        expect(prepare).not.toHaveBeenCalled();
+        expect(execute).not.toHaveBeenCalled();
+        expect(release).toHaveBeenCalledExactlyOnceWith(started.runId);
+        expect(latest().state.tests.locked).toBe(false);
+      } finally {
+        resume?.();
+        acquire.mockRestore();
+        release.mockRestore();
+        prepare.mockRestore();
+        execute.mockRestore();
+      }
+    });
+  });
+});
+
+describe('Web proxy project entry', () => {
+  async function reopenWeb(dependencies?: Record<string, string>) {
+    await deactivate();
+    await rm(join(fake.workspace, 'pubspec.yaml'));
+    await rm(join(fake.workspace, '.flutter-pilot'), { recursive: true, force: true });
+    if (dependencies) await writeFile(join(fake.workspace, 'package.json'), JSON.stringify({ dependencies }));
+    fake.engines = [];
+    await activate({
+      subscriptions: [],
+      globalStorageUri: { fsPath: fake.storage },
+      extensionPath: process.cwd(),
+      extensionUri: { fsPath: process.cwd() },
+    } as any);
+  }
+  it.each(['react', 'vue', 'vite'])(
+    'discovers %s without pubspec and keeps cached engine preparation explicit',
+    async (name) => {
+      await reopenWeb({ [name]: '1.0.0' });
+      expect(fake.engines).toHaveLength(1);
+      expect(fake.engines[0].starts).toHaveLength(0);
+      await open();
+      expect(latest().state.mode).toBe('proxy');
+      expect(fake.engines[0].starts).toHaveLength(0);
+      await message('mcp.enable', { enabled: true });
+      const [descriptor] = await discoverSessions(join(directory, 'bridge/sessions'), fake.workspace);
+      expect(descriptor).toBeDefined();
+      const result = (await requestSession(descriptor, {
+        kind: 'call',
+        tool: 'get_network_status',
+        args: { sessionId: descriptor.sessionId },
+      })) as any;
+      expect(result.proxy).toMatchObject({
+        status: 'stopped',
+        attribution: 'listener_only_no_page_identity',
+      });
+      expect(fake.engines[0].starts).toHaveLength(0);
+    },
+  );
+  it('leaves a plain Node package undiscovered and explicitly registers HTML through the workbench', async () => {
+    await reopenWeb({ express: '1.0.0' });
+    expect(fake.engines).toHaveLength(0);
+    await open();
+    const id = latest().state.project.id;
+    await message('web.register', { url: 'http://localhost:4173', root: '.' });
+    await vi.waitFor(() =>
+      expect(latest().state.project.web).toMatchObject({
+        url: 'http://localhost:4173/',
+        root: '.',
+        framework: 'web',
+      }),
+    );
+    expect(latest().state.project.id).toBe(id);
+    expect(latest().state.mode).toBe('proxy');
     expect(fake.engines[0].starts).toHaveLength(0);
   });
 });

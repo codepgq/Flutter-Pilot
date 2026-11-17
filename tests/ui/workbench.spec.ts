@@ -1377,3 +1377,121 @@ for (const width of [1280, 390]) {
     expect(await messages(page)).toContainEqual({ action: 'rules.import', payload: {} });
   });
 }
+
+test('Web 接入保存显式 URL/子项目，显示实际代理端口和范围', async ({ page }) => {
+  await page.goto('/');
+  await state(page, {
+    project: {
+      id: 'web-project',
+      name: 'Web',
+      web: { root: 'frontend', framework: 'vue', url: 'http://localhost:5173/' },
+    },
+    engine: { status: 'running', proxyPort: 19090, caCertPath: '/private/project/ca.pem' },
+  });
+  await expect(page.getByLabel('Web 本地 URL')).toHaveValue('http://localhost:5173/');
+  await expect(page.getByText('http://127.0.0.1:19090', { exact: true })).toBeVisible();
+  await page.getByLabel('Web 本地 URL').fill('http://localhost:4173/');
+  await page.getByRole('button', { name: '保存 Web 接入' }).click();
+  expect(await messages(page)).toContainEqual({
+    action: 'web.register',
+    payload: { url: 'http://localhost:4173/', root: 'frontend' },
+  });
+  await expect(page.getByText(/HTTP 代理没有页面身份/)).toBeVisible();
+});
+
+test('托管浏览器明确列出 Context/Page 并发送固定目标导航', async ({ page }) => {
+  await page.goto('/');
+  await state(page, {
+    browser: {
+      running: true,
+      limitations: [],
+      contexts: [
+        {
+          runtimeId: 'context-a',
+          generation: 2,
+          backend: 'direct',
+          serviceWorkers: 'block',
+          cache: 'routing_disables_http_cache',
+          pages: [{ pageId: 'page-a', url: 'http://localhost:5173/' }],
+        },
+      ],
+    },
+  });
+  await page.getByText('托管浏览器', { exact: true }).click();
+  await expect(page.getByText('Context context-a', { exact: false })).toBeVisible();
+  await page.getByLabel('托管页面 URL').fill('http://localhost:4173/');
+  await page.getByRole('button', { name: '导航', exact: true }).click();
+  expect(await messages(page)).toContainEqual({
+    action: 'browser.call',
+    payload: {
+      tool: 'navigate_browser_page',
+      args: {
+        target: { runtimeId: 'context-a', generation: 2, pageId: 'page-a' },
+        url: 'http://localhost:4173/',
+      },
+    },
+  });
+});
+
+test('Web 运行与截图结果在窄屏深色主题可查看', async ({ page }) => {
+  await page.setViewportSize({ width: 420, height: 850 });
+  await page.goto('/');
+  await page.evaluate(() => document.body.classList.add('vscode-dark'));
+  await state(page, {
+    browser: {
+      running: true,
+      limitations: [],
+      contexts: [
+        {
+          runtimeId: 'c',
+          generation: 1,
+          backend: 'direct',
+          serviceWorkers: 'block',
+          cache: 'routing_disables_http_cache',
+          pages: [{ pageId: 'p', url: 'http://localhost/' }],
+          actions: {
+            recentRuns: [
+              {
+                runId: 'run',
+                name: 'Submit form',
+                status: 'failed',
+                currentStep: 'flow/submit',
+                startedAt: 1,
+                sceneId: 's',
+                actionId: 'a',
+                mockSceneId: null,
+              },
+            ],
+          },
+        },
+      ],
+    },
+  });
+  await page.getByText('托管浏览器', { exact: true }).click();
+  await page.getByRole('button', { name: '网页截图', exact: true }).click();
+  expect(await messages(page)).toContainEqual({
+    action: 'browser.call',
+    payload: {
+      tool: 'take_screenshot',
+      args: { target: { runtimeId: 'c', generation: 1, pageId: 'p' }, source: 'web', mode: 'screen' },
+    },
+  });
+  await page.evaluate(() =>
+    window.postMessage(
+      {
+        type: 'browser.result',
+        tool: 'get_scene_action_run',
+        result: {
+          run: {
+            status: 'failed',
+            failure: { code: 'NOT_ACTIONABLE', message: 'covered' },
+            currentStep: 'flow/submit',
+          },
+        },
+      },
+      '*',
+    ),
+  );
+  await expect(page.getByLabel('Web 运行结果')).toContainText('NOT_ACTIONABLE');
+  await expect(page.getByText('Submit form · failed · flow/submit')).toBeVisible();
+});

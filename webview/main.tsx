@@ -1,3 +1,4 @@
+import { BrowserPanel } from './browser';
 import {
   acceptDetail,
   acceptPage,
@@ -865,6 +866,67 @@ function VmConnection({ state }: { state: WorkbenchState }) {
     </>
   );
 }
+function WebConnection({ state }: { state: WorkbenchState }) {
+  const [url, setUrl] = useState(state.project?.web?.url ?? 'http://localhost:5173/');
+  const [root, setRoot] = useState(state.project?.web?.root ?? '.');
+  const web = state.project?.web;
+  useEffect(() => {
+    if (web) {
+      setUrl(web.url ?? 'http://localhost:5173/');
+      setRoot(web.root);
+    }
+  }, [web?.url, web?.root]);
+  return (
+    <details className="card" open={!!web}>
+      <summary>Web 项目接入</summary>
+      <p>显式登记本地网页；混合仓库填写子项目相对目录。保存不启动或导航浏览器。</p>
+      <label>
+        Web 本地 URL
+        <input aria-label="Web 本地 URL" value={url} onChange={(event) => setUrl(event.target.value)} />
+      </label>
+      <label>
+        Web 子项目根
+        <input aria-label="Web 子项目根" value={root} onChange={(event) => setRoot(event.target.value)} />
+      </label>
+      <Button disabled={state.busy} onClick={() => send('web.register', { url, root })}>
+        保存 Web 接入
+      </Button>
+      {web && (
+        <>
+          <p>
+            {web.framework} · {web.root} · {web.url}
+          </p>
+          <p>
+            手动浏览器 + HTTP 代理。使用专用浏览器配置代理{' '}
+            <code>
+              http://{state.connectionHost}:{state.engine.proxyPort ?? 8080}
+            </code>
+            ；端口以引擎启动后的实际值为准。
+          </p>
+          <Button action="install" disabled={state.busy}>
+            准备代理引擎
+          </Button>
+          <Button action="start" disabled={state.busy || state.proxyActive}>
+            开启 HTTP 采集
+          </Button>
+          <Button action="ca.open" disabled={state.engine.status !== 'running'}>
+            打开 CA 证书位置
+          </Button>
+          <p role="status">
+            {state.engine.status} · HTTP {state.proxyActive ? '采集中' : '未采集'} · Mock{' '}
+            {state.sceneRuntime?.http.status ?? 'pending'}
+          </p>
+          {state.engine.caCertPath && <p>CA 公钥：{state.engine.caCertPath}</p>}
+          <p>
+            仅在专用测试浏览器信任此 CA，保持 TLS 校验。缓存和 Service Worker 可能绕过代理；跨域须显式配置
+            CORS/OPTIONS。HTTP 代理没有页面身份，不用于页面业务测试。WS、网页 UI 自动化、服务端 SSR
+            请求不在此接入范围。
+          </p>
+        </>
+      )}
+    </details>
+  );
+}
 function Connection({
   state,
   preview,
@@ -892,6 +954,19 @@ function Connection({
         </div>
         <ConnectionMode state={state} />
         <VmConnection state={state} />
+        <WebConnection state={state} />
+        <BrowserPanel state={state} send={send} />
+      </div>
+    );
+  if (state.project?.web)
+    return (
+      <div className="connection-page">
+        <div className="page-title">
+          <h2>连接与诊断</h2>
+        </div>
+        <ConnectionMode state={state} />
+        <WebConnection state={state} />
+        <BrowserPanel state={state} send={send} />
       </div>
     );
   return (
@@ -903,6 +978,8 @@ function Connection({
         <span className="platform-badge">macOS · Android / iOS</span>
       </div>
       <ConnectionMode state={state} />
+      <WebConnection state={state} />
+      <BrowserPanel state={state} send={send} />
       <div className="setup-grid">
         <section className="card engine-card">
           <div className="card-heading">

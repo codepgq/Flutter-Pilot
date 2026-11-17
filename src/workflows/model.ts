@@ -2,13 +2,17 @@ import { z } from 'zod';
 import { automationMcpTools, uiSelectorSchema } from '../automation/tools';
 import type { Backend, Selector } from '../automation/model';
 import type { Scene, SceneDocument } from '../scene-model';
+import { webUiTools } from '../browser/ui-schema';
 
 const name = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/);
 const inputName = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/);
 const text = z.string().max(16384);
 const timeout = z.number().int().min(100).max(30000).optional();
 const selector = uiSelectorSchema.superRefine((value, ctx) => {
-  if (value.ref !== undefined || value.ancestor?.ref !== undefined)
+  if (
+    ('ref' in value && value.ref !== undefined) ||
+    ('ancestor' in value && value.ancestor?.ref !== undefined)
+  )
     ctx.addIssue({ code: 'custom', message: '场景操作只能保存稳定选择器，不能保存快照 ref。' });
 });
 const input = z
@@ -320,9 +324,16 @@ export function compileSceneAction(
         if (item.untilTarget)
           args.targetSelector = bindSelector(owner.targets![item.untilTarget] as Selector, inputs);
       }
-      const checked = automationMcpTools[type].schema.safeParse({ sessionId: 'scene-action', ...args });
-      if (!checked.success) invalid(`步骤参数无效：${path}`);
+      const web = (args.selector as Selector | undefined)?.source === 'web';
+      const definition = web ? webUiTools[type as keyof typeof webUiTools] : automationMcpTools[type];
+      const checked = definition?.schema.safeParse({
+        sessionId: 'scene-action',
+        ...(web ? { target: { runtimeId: 'compiled', generation: 1, pageId: 'compiled' } } : {}),
+        ...args,
+      });
+      if (!checked?.success) invalid(`步骤参数无效：${path}`);
       const { sessionId: _session, ...validated } = checked.data;
+      if (web) delete (validated as Record<string, unknown>).target;
       steps.push({
         id: item.id,
         path,

@@ -65,7 +65,10 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
     tools: Object.entries(mcpTools).map(([name, tool]) => ({
       name,
       description: tool.description,
-      inputSchema: z.toJSONSchema(tool.schema) as { type: 'object'; properties?: Record<string, unknown> },
+      inputSchema: { ...z.toJSONSchema(tool.schema), type: 'object' } as {
+        type: 'object';
+        properties?: Record<string, unknown>;
+      },
       annotations: {
         readOnlyHint: [
           'get_usage_guide',
@@ -74,6 +77,7 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
           'list_sessions',
           'get_ui_snapshot',
           'list_screenshot_targets',
+          'get_browser_ws_message',
           'find_widget',
           'wait_for_widget',
           'inspect_key_issues',

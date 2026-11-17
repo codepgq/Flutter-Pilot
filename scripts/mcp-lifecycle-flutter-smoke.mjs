@@ -249,7 +249,7 @@ try {
   };
   await writeHttpRules(document);
   await call('reload_rules');
-  await call('activate_scene', { sceneId: scenes.document.scenes[0].id });
+  await call('activate_scene', { sceneId: store.listScenes().scenes[0].id });
   await call('tap', { key: 'fetch' });
   await wait(async () => (await text('response')) === 'first-state');
   check(true, 'first Mock scenario reaches UI');

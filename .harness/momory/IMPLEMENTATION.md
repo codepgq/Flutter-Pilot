@@ -1,5 +1,23 @@
 # 实现与验证结论
 
+## 0.0.23 审核、发布与 Cursor 安装（2026-11-17）
+
+- 按用户“审核修改，有问题就修复，没问题就发布一个新版本”的授权交付 Flutter / Web 统一运行时。发布前源码、远端最新 tag 和 Cursor 安装版为 0.0.22；版本、lockfile、README / CHANGELOG 和 VSIX 路径同步为 0.0.23。
+- 审核修复两处：直接浏览器只读查询取消 / 超时错误保留 uncertain 锁；扩展 MCP 的 Web 运行查询 / 取消提前进入 Flutter 分支。新增五种直接工具锁回归、四种认证 IPC 分发回归，以及 HTML / React / Vue 真实取消检查。真实写入未确认仍阻止重放，失联报告保留原 target。
+- 本轮验证：54 文件 / 861 项 Vitest、108 项工作台、51 项 Python 代理（显式私有 MITMDUMP，0 skipped）、真实浏览器代理 34、HTTP 31、UI 74、WS 22、业务测试 29、SDK stdio 23 项通过；类型、格式、构建和 diff 检查通过。日志为 `artifacts/v0.0.23-*.log`，浏览器详细结果由日志引用至本轮带时间戳报告。
+- 发布产物为 `artifacts/flutter-pilot-0.0.23.vsix`。Cursor CLI 使用 `--force` 安装；逐项核对源码 / 构建、VSIX 与安装文件（安装 manifest 仅忽略 Cursor 注入的 __metadata），并用真实 SDK 离线读取全部 61 工具 / 69 Prompts。固定 bridge 原子同步，安装哈希与核验结果保存 `artifacts/v0.0.23-install-report.json`。
+- 当前发布分支为 `codex/web-flutter-unified-runtime`，以附注标签 `v0.0.23` 常规推送；远端分支、标签解引用与 HEAD 的核验结果保存 `artifacts/v0.0.23-release-report.json`。本地 VSIX 发布，不涉及扩展商店或合并 main；活动 IDE 由用户方便时重载并重连 MCP。
+- 此轮审核重新验证受控 Chromium 与代理夹具，未复跑 Flutter 模拟器、Android / 真机及真实模型客户端；先前 phase-07 设备 / Agent 证据保留历史范围，不计入本轮复验。不修改业务项目、用户设备、系统代理或系统 CA。
+
+
+## Flutter / Web 统一运行时完成（2026-11-17，源码未发布）
+
+- 七阶段按顺序实现：目标/代次和状态隔离、Web 项目与真实代理、私有 Playwright/Chromium Worker、DOM actions/截图、WS/WSS、Test Case v2、双端与真实 Agent/分发验收。保留用户已有修改及项目身份；运行配置仍仅 Scene v2 目录和 tests.json v2。
+- 全量 54 文件/852 项 Vitest、108 项工作台、Python 代理 51 项无跳过；真实浏览器代理34、HTTP31、UI71、WS22、业务29、依赖5；构建 stdio HTML/React/Vue23，真实 Codex0.167.0 加测后35；双端10项与真实 Flutter MCP19项通过。Flutter3.47.8/iOS27.0 独立模拟器：HTTP8、VM注入32、UI57；WS/WSS dart:io/web_socket_channel 四类连接、25条消息及重启/旧连接拒绝通过。详见阶段报告和最终命令/哈希清单。
+- 独立 VSIX 核对 Worker、资源、锁清单及构建哈希，解包 bridge 离线61工具/69 Prompts；基线/最终启动时间、RSS、包体积保存测量报告，不承诺 SLA。未启用 Web 时不准备或启动浏览器。
+- 本轮自有模拟器 `77F5D8FE-0D9E-4282-86A1-AF9899BBFE6D` 用完关闭删除；临时 App/Profile/CA/端口/Worker 清理，示例 lockfile 恢复。未修改用户业务 App、已有模拟器、系统信任、Agent 配置或活动 IDE。仅复用现有模型连接认证执行受限验收，凭据不写参数或报告。
+- 不宣称 Android/真机、SSR、Flutter Web Canvas、跨端事务或真实后端交易通过；版本仍0.0.22，未提交、推送、tag、安装或发布。
+
 ## Flutter / Web 路线图建档（2026-11-16，尚未实现）
 
 - 从干净的 main / `efc65160703fdf44aef200751a2dd1dfbb5292df` 创建并切换至 `codex/web-flutter-unified-runtime`。按用户要求保存最终目标、阶段目标、固定验收和 phase 文件，未启动产品实现。

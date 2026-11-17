@@ -8,11 +8,11 @@ Test Case v2 在固定浏览器运行时执行 setup、临时 Mock、主流程�
 
 ## 任务与产出
 
-- [ ] P06-T01：将测试环境、时钟/事件基线、网络观察与清理从 VM 依赖分离，实现浏览器观察器。
-- [ ] P06-T02：使用同一冻结快照装配 setup、主动作与临时 Mock；固定运行目标和 Context 锁。
-- [ ] P06-T03：为 Web 接入有状态 HTTP Mock、请求参数断言、响应变量及唯一连接 WS 注入。
-- [ ] P06-T04：建立下单成功/业务拒绝/后台状态变化夹具与旧历史、重复提交、取消、丢事件等反例，新增 `test:web:e2e`。
-- [ ] P06-T05：完善 Test Run 证据、脱敏、清理重试、工作台及 MCP 离线说明。
+- [x] P06-T01：将测试环境、时钟/事件基线、网络观察与清理从 VM 依赖分离，实现浏览器观察器。
+- [x] P06-T02：使用同一冻结快照装配 setup、主动作与临时 Mock；固定运行目标和 Context 锁。
+- [x] P06-T03：为 Web 接入有状态 HTTP Mock、请求参数断言、响应变量及唯一连接 WS 注入。
+- [x] P06-T04：建立下单成功/业务拒绝/后台状态变化夹具与旧历史、重复提交、取消、丢事件等反例，新增 `test:web:e2e`。
+- [x] P06-T05：完善 Test Run 证据、脱敏、清理重试、工作台及 MCP 离线说明。
 
 主要落点：`src/testing/`、`src/workflows/`、SceneController、Adapter 观察接口、Web Worker、Test Case schema 与报告页。
 

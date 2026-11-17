@@ -3,7 +3,7 @@
 创建日期：2026-11-16。验收基线：v1。工作分支：`codex/web-flutter-unified-runtime`。
 起点提交：`efc65160703fdf44aef200751a2dd1dfbb5292df`（0.0.22）。
 
-本目录保存最终目标、架构边界、阶段任务与验收标准。它是开发规划，不表示当前插件已支持 Web。当前只完成分支与规划建档，全部实现阶段均未开始；状态以 [progress.json](progress.json) 为准。
+本目录保存最终目标、架构边界、阶段任务与验收标准。七阶段/53条必需验收已完成，真实双端、Agent 与分发结果见 [最终报告](evidence/final.md)。源码能力、已安装版本和实际验收范围分别报告；状态以 [progress.json](progress.json) 为准。
 
 ## 最终交付
 

@@ -1,6 +1,6 @@
 # Flutter Pilot
 
-**Web 支持规划**：[Flutter / Web 统一运行时路线图](docs/roadmap/web-flutter-runtime/README.md) 已记录最终目标、7 个实施阶段及固定验收标准；全部实现阶段尚未开始，不代表当前版本已具备完整 Web 能力。
+**Web 统一运行时（0.0.23）**：同一插件与 `flutter-pilot` MCP 可明确选择 Flutter、HTTP 代理或托管 Chromium 目标，复用 Scene v2、HTTP/WS Mock、操作与业务测试。浏览器依赖显式按需准备，Context/Page、历史、Mock 和执行锁隔离。接入与限制见 [Web 使用指南](docs/web-runtime.md)，阶段证据见 [路线图](docs/roadmap/web-flutter-runtime/README.md)。安装新版后，在调试方便时重载 IDE 窗口并重连 MCP，加载统一运行时。
 
 <img src="resources/icons/plugin.png" width="96" height="96" alt="Flutter Pilot 折纸导航图标">
 
@@ -8,7 +8,9 @@
 
 配合开发与 Agent 联调，快速构造并验证多种业务状态：通过 API Mock 模拟下单成功、失败、余额不足和不同资产数据，通过 WebSocket 驱动订单或资产事件，再按组件 Key、文字或语义定位页面，通过 VM 或设备输入操作，减少逐步截图识别的耗时与 token 消耗。
 
-当前版本为 **0.0.22**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+当前版本为 **0.0.23**，支持 macOS 本地桌面 IDE。默认使用 **Dart VM WS** 接入正在运行的 Flutter Debug 应用，无需安装代理引擎、CA 或修改应用源码；运行时 Mock 需主动开启，目前实测 Dio 5.9.0 / 5.10.0 / 5.11.1。代理作为备用方案，优先适配 **Dio 5 + IOHttpClientAdapter**，必要时使用可预览、可撤销的开发配置。
+
+**0.0.23 更新**：新增托管 Chromium、Web HTTP/WS Mock、DOM 操作和 Scene/Test 复用，支持显式运行目标及跨端隔离；修复浏览器只读取消锁和 MCP 运行结果/取消路由。
 
 **0.0.22 更新**：Scene 改为目录化 v2 存储，规则、动作和正文按需加载；工作台分页搜索、增量保存及事务恢复。旧 `scenes.json` 请先通过 **Flutter Pilot: 迁移 Scene v1 到 v2** 显式转换，详见 [目录存储与迁移](docs/scene-storage.md)。
 
@@ -32,7 +34,7 @@
 
 **业务测试**：Test Case v2 引用 Scene 操作，组合临时 Scene、有状态 HTTP Mock、本轮请求参数断言、响应变量提取、关联 WS 事件和精确订单行验证。`run_test` 后台执行，`get_test_run` 查询证据，只有 `passed` 表示测试通过；取消和断线不自动重放提交。详见 [测试指南](docs/testing.md)。
 
-**MCP 功能发现与主动调用**：连接初始化即提供十类“用户任务 → 功能 → 工具与前提”介绍。当前 Flutter App 的截图、截屏、长图或布局对比优先使用 `take_screenshot`，`app_screenshot` 提供最短截图路径；`capabilities` 查阅全部能力，`scene_action_quick_run` 运行已有操作，`scene_action_authoring` 编写和归档操作。51 个工具均有同名 Prompt，连同四个能力入口和四个场景模板共 59 个；完整模板按需读取，客户端决定如何向模型提供启动说明。
+**MCP 功能发现与主动调用**：连接初始化提供“用户任务 → 功能 → 工具与前提”介绍。当前 Flutter App 的截图、截屏、长图或布局对比优先使用 `take_screenshot`，`app_screenshot` 提供最短截图路径；`capabilities` 查阅全部能力，`scene_action_quick_run` 运行已有操作，`scene_action_authoring` 编写和归档操作。当前源码 61 个工具均有同名 Prompt，共 69 个 Prompts；完整模板按需读取，客户端决定如何向模型提供启动说明。
 
 **0.0.6 修复 Cursor 设置卡死和已有 VM 会话补查恢复**：打开工作台会重新补查先前已运行的 Flutter Debug 会话；新增 MCP `hot_reload` / `hot_restart`，精确控制当前 VM 绑定的 IDE 调试会话。
 
@@ -75,20 +77,20 @@
 
 **默认推荐 VM WS 接入：输入本次 Flutter VM WS 并连接后即可后台采集，无需代理引擎、CA 或源码补丁；运行时 Mock 默认关闭，按需主动开启。** 代理是备用方案，适用于 VM 无法覆盖的网络场景或手动断点。两种模式关闭工作台都继续记录；无需创建规则也能发现 API。VM 地址不持久化，重开 IDE 需重新输入。已有工作区继续使用保存的模式，旧版没有模式字段的代理配置也会保留。
 
-| 能力 | 具体行为 |
-| --- | --- |
-| 本地 Mock | 匹配请求后直接返回预设状态码、响应头和正文，不访问上游 |
-| 请求修改 | 修改方法、完整 URL、查询参数、请求头及 JSON / 文本正文 |
-| 响应修改 | 修改状态码、响应头及 JSON / 文本正文，支持服务端 4xx / 5xx 响应 |
-| 地址转发 | 改写目标完整 URL，保留请求方法和正文，直接返回目标服务结果 |
-| 手动断点 | 仅代理模式：请求发送前、响应返回前暂停，编辑放行、终止及超时自动放行 |
-| 后台记录 | 代理模式默认随 Flutter 工作区打开启动；VM 模式连接后持续采集，关闭工作台仍继续 |
-| VM 连接 | Flutter Debug VM WS 零源码采集；通过激活场景应用 Dio Mock、双向修改和转发 |
-| App 截图 | 侧栏与工作台标题栏均可截取当前 Flutter App，支持当前屏幕和滚动长图，保存 PNG 后自动预览 |
-| API 请求 | 每次 HTTP 调用单独一行，支持搜索筛选、分页、三阶段快照、规则命中、耗时、备注与标签 |
-| 规则管理 | 新增、查询、编辑、删除、启停、复制、调整顺序、JSON 导入导出；规则保存在项目目录 |
-| 项目绑定 | 项目 UUID 与配置随项目保存；同一 UUID 的不同目录分别记录本机历史 |
-| 开发接入 | 引擎下载管理、设备检测、Android USB 转发、Dio 补丁预览与保护性撤销 |
+| 能力      | 具体行为                                                                                |
+| --------- | --------------------------------------------------------------------------------------- |
+| 本地 Mock | 匹配请求后直接返回预设状态码、响应头和正文，不访问上游                                  |
+| 请求修改  | 修改方法、完整 URL、查询参数、请求头及 JSON / 文本正文                                  |
+| 响应修改  | 修改状态码、响应头及 JSON / 文本正文，支持服务端 4xx / 5xx 响应                         |
+| 地址转发  | 改写目标完整 URL，保留请求方法和正文，直接返回目标服务结果                              |
+| 手动断点  | 仅代理模式：请求发送前、响应返回前暂停，编辑放行、终止及超时自动放行                    |
+| 后台记录  | 代理模式默认随 Flutter 工作区打开启动；VM 模式连接后持续采集，关闭工作台仍继续          |
+| VM 连接   | Flutter Debug VM WS 零源码采集；通过激活场景应用 Dio Mock、双向修改和转发               |
+| App 截图  | 侧栏与工作台标题栏均可截取当前 Flutter App，支持当前屏幕和滚动长图，保存 PNG 后自动预览 |
+| API 请求  | 每次 HTTP 调用单独一行，支持搜索筛选、分页、三阶段快照、规则命中、耗时、备注与标签      |
+| 规则管理  | 新增、查询、编辑、删除、启停、复制、调整顺序、JSON 导入导出；规则保存在项目目录         |
+| 项目绑定  | 项目 UUID 与配置随项目保存；同一 UUID 的不同目录分别记录本机历史                        |
+| 开发接入  | 引擎下载管理、设备检测、Android USB 转发、Dio 补丁预览与保护性撤销                      |
 
 规则通过表单或完整 JSON 配置，首版不执行用户脚本。工作台跟随 IDE 明暗主题，并适配窄面板。
 
@@ -117,26 +119,26 @@ Agent 可按 `ValueKey<String/int>`、文字、语义、类型、祖先或快照
 
 WS 提供两个主动消息工具：`inject_ws_message` 向 App 注入模拟服务端消息，`send_ws_message` 通过 App 当前真实 WS 连接发给服务端。均需开启 WS 采集并确认连接已接入，并选择准确的在线连接；不新建连接。可传原始 `text`，或传 `topic` 和 `data` 组装为 `{"topic": "...", "data": ...}`；自定义业务协议使用完整原始文本。真实发送经过当前 outbound 规则，可能被替换或丢弃；工具调用成功后仍需核对消息和业务结果。
 
-服务提供 `overview`、`screenshot`、`http`、`ws`、`ui`、`workflow` 六个指南主题，以及 59 个 MCP 提示模板：`capabilities` 是离线能力总览，`app_screenshot` 是截图入口，`scene_action_quick_run` 是已有操作的快速运行入口，`scene_action_authoring` 是编写和归档入口；保留 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，全部 51 个工具另有同名模板与生产参数 schema。初始化说明、`overview.capabilityRoutes` 和 `capabilities` 共用十类任务映射，并检查覆盖全部真实工具。启动时自动发送说明，`prompts/list` 只列目录，完整正文由 `prompts/get` 按需读取；指南也可通过工具或资源离线读取。
+服务提供 `overview`、`screenshot`、`http`、`ws`、`ui`、`workflow` 六个指南主题，以及 69 个 MCP 提示模板：`capabilities` 是离线能力总览，`app_screenshot` 是截图入口，`scene_action_quick_run` 是已有操作的快速运行入口，`scene_action_authoring` 是编写和归档入口；保留 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，全部 61 个工具另有同名模板与生产参数 schema。初始化说明、`overview.capabilityRoutes` 和 `capabilities` 共用任务映射，并检查覆盖全部真实工具。启动时自动发送说明，`prompts/list` 只列目录，完整正文由 `prompts/get` 按需读取；指南也可通过工具或资源离线读取。
 
 例如“截一下当前 App”先选项目，再调用 `take_screenshot({sessionId,source:"flutter",mode:"screen"})`，无需 Key、Scene、Mock 或 Appium。长图先查 `list_screenshot_targets`；包含键盘或系统 UI 的整屏使用已绑定设备的 `source:"device",mode:"screen"`。单次截图不推进 Mock 或 Scene，不重启和导航；桌面或浏览器网页使用对应工具，没有对象上下文时先确认目标。详见 [MCP 指南](docs/mcp.md)。
 
 只查阅能力时，通过 `prompts/get` 读取 `{"name":"capabilities"}`，无需任务、在线 IDE 或 `sessionId`。运行已有登录操作时，可读取 `{"name":"scene_action_quick_run","arguments":{"task":"复用当前项目的邮箱登录操作并验证主页与本轮 Mock 命中"}}`；编写或整理 actions 时读取 `scene_action_authoring`。读取 Prompt 只返回指导，不会自行启动 App 或执行 UI。
 
-| 能力 | MCP 工具及同名 Prompt |
-| --- | --- |
-| 指南与会话 | `get_usage_guide`、`list_sessions` |
-| 启动 App | `start_app`（选择项目已保存的 Debug 配置，优先复用已有会话） |
-| 热更新 | `hot_reload`、`hot_restart` |
+| 能力                 | MCP 工具及同名 Prompt                                                                                    |
+| -------------------- | -------------------------------------------------------------------------------------------------------- |
+| 指南与会话           | `get_usage_guide`、`list_sessions`                                                                       |
+| 启动 App             | `start_app`（选择项目已保存的 Debug 配置，优先复用已有会话）                                             |
+| 热更新               | `hot_reload`、`hot_restart`                                                                              |
 | 设备自动化           | `get_automation_status`、`setup_automation`、`connect_device`、`disconnect_device`                       |
 | 手势                 | `double_tap`、`long_press`、`drag`、`swipe`、`pinch`、`rotate_gesture`、`perform_gesture`                |
 | 编辑与系统           | `edit_text`、`press_key`、`get_keyboard_state`、`hide_keyboard`、`editor_action`、`device_action`        |
-| 界面查询与操作 | `get_ui_snapshot`、`find_widget`、`tap`、`enter_text`、`scroll`、`wait_for_widget`、`inspect_key_issues` |
-| App 截图 | `list_screenshot_targets`、`take_screenshot` |
-| 网络状态与 HTTP 记录 | `get_network_status`、`get_requests`、`get_request` |
-| WebSocket | `get_ws_connections`、`get_ws_messages`、`inject_ws_message`、`send_ws_message` |
-| 场景与采集 | `reload_rules`、`set_capture_enabled`、`list_scenes`、`activate_scene`、`deactivate_scene` |
-| Scene 操作           | `list_scene_actions`、`run_scene_action`、`get_scene_action_run`、`cancel_scene_action_run`                              |
+| 界面查询与操作       | `get_ui_snapshot`、`find_widget`、`tap`、`enter_text`、`scroll`、`wait_for_widget`、`inspect_key_issues` |
+| App 截图             | `list_screenshot_targets`、`take_screenshot`                                                             |
+| 网络状态与 HTTP 记录 | `get_network_status`、`get_requests`、`get_request`                                                      |
+| WebSocket            | `get_ws_connections`、`get_ws_messages`、`inject_ws_message`、`send_ws_message`                          |
+| 场景与采集           | `reload_rules`、`set_capture_enabled`、`list_scenes`、`activate_scene`、`deactivate_scene`               |
+| Scene 操作           | `list_scene_actions`、`run_scene_action`、`get_scene_action_run`、`cancel_scene_action_run`              |
 | 业务测试             | `list_tests`、`run_test`、`get_test_run`、`cancel_test_run`                                              |
 
 支持标准 MCP Prompts 的客户端可通过 `prompts/list` 发现这些模板，并用 `prompts/get` 按名称读取；`task` 是可选的提示词参数，不是工具参数。截图示例：先通过 `list_sessions` 选择已连接 VM 的项目，调用 `take_screenshot` 并传入 `sessionId` 和 `mode: "screen"`；需要长图时使用 `mode: "long"`，有多个滚动区域时先通过 `list_screenshot_targets` 选择 `targetId`。结果是 MCP PNG 图片内容，由客户端显示。
@@ -157,19 +159,19 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 
 ## 环境要求与兼容范围
 
-| 项目 | 要求或说明 |
-| --- | --- |
-| 开发电脑 | macOS；提供 Apple Silicon 和 Intel 引擎下载包，Intel 实际运行尚未验收 |
-| IDE | VS Code 扩展 API `^1.96.0` 或兼容的 Cursor 桌面版；需要受信任的本地文件夹 |
-| Flutter 网络库 | Dio 5 的默认原生 `IOHttpClientAdapter`；Retrofit 等封装需接入实际使用的 Dio 实例 |
-| Android USB | Android SDK Platform Tools、USB 调试和设备授权 |
-| iOS 模拟器 | Xcode、对应模拟器运行时及可用的 `xcrun` |
-| iOS 真机 | 设备与电脑网络互通；运行示例需自行配置 Apple 开发团队 |
-| VM 模式 | 可访问的 Flutter VM Service WS，运行时注入限 Debug / JIT；无需引擎或 CA |
-| 首次引擎安装 | 仅代理模式需要；能访问 mitmproxy 官方下载站，也可指定本地兼容 mitmdump |
-| 插件运行 | 不要求安装 Node.js 或 Python；独立引擎缺少 sqlite3 模块时使用 macOS 自带 SQLite |
-| MCP Agent 接入 | 需要本机 Node.js 20+，以及已加载 MCP 配置的目标客户端；默认项目范围 |
-| 源码开发 | Node.js 22.12+、npm；Python 测试需要 Python 3.9+；Flutter 示例要求 Dart `>=3.5.0 <4.0.0` |
+| 项目           | 要求或说明                                                                               |
+| -------------- | ---------------------------------------------------------------------------------------- |
+| 开发电脑       | macOS；提供 Apple Silicon 和 Intel 引擎下载包，Intel 实际运行尚未验收                    |
+| IDE            | VS Code 扩展 API `^1.96.0` 或兼容的 Cursor 桌面版；需要受信任的本地文件夹                |
+| Flutter 网络库 | Dio 5 的默认原生 `IOHttpClientAdapter`；Retrofit 等封装需接入实际使用的 Dio 实例         |
+| Android USB    | Android SDK Platform Tools、USB 调试和设备授权                                           |
+| iOS 模拟器     | Xcode、对应模拟器运行时及可用的 `xcrun`                                                  |
+| iOS 真机       | 设备与电脑网络互通；运行示例需自行配置 Apple 开发团队                                    |
+| VM 模式        | 可访问的 Flutter VM Service WS，运行时注入限 Debug / JIT；无需引擎或 CA                  |
+| 首次引擎安装   | 仅代理模式需要；能访问 mitmproxy 官方下载站，也可指定本地兼容 mitmdump                   |
+| 插件运行       | 不要求安装 Node.js 或 Python；独立引擎缺少 sqlite3 模块时使用 macOS 自带 SQLite          |
+| MCP Agent 接入 | 需要本机 Node.js 20+，以及已加载 MCP 配置的目标客户端；默认项目范围                      |
+| 源码开发       | Node.js 22.12+、npm；Python 测试需要 Python 3.9+；Flutter 示例要求 Dart `>=3.5.0 <4.0.0` |
 
 首版不覆盖 Windows / Linux、Flutter Web、Remote SSH、Dev Containers、浏览器版 IDE，或所有自定义网络适配器。VS Code 与 Cursor 可读取同一项目目录中的配置和规则，各自的请求历史、API 目录与 CA 仍保存在各 IDE 私有目录。
 
@@ -177,7 +179,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 
 ### 从 VSIX 安装
 
-1. 获取 `flutter-pilot-0.0.22.vsix`。从源码构建见下方步骤。
+1. 获取 `flutter-pilot-0.0.23.vsix`。从源码构建见下方步骤。
 2. 在 VS Code 或 Cursor 扩展面板右上角菜单选择 **Install from VSIX… / 从 VSIX 安装…**。
 3. 选择安装包，按 IDE 提示重新加载窗口。
 4. 打开包含 `pubspec.yaml` 的 Flutter 项目根目录，并信任工作区。
@@ -187,7 +189,7 @@ Agent 可通过 `hot_reload` 保留页面状态应用源码变更，或通过 `h
 安装当前 Flutter Pilot 包，例如：
 
 ```sh
-cursor --install-extension artifacts/flutter-pilot-0.0.22.vsix --force
+cursor --install-extension artifacts/flutter-pilot-0.0.23.vsix --force
 # VS Code 使用 code --install-extension 同一 VSIX 文件 --force
 ```
 
@@ -210,7 +212,7 @@ npm test
 npm run package
 ```
 
-产物为 `artifacts/flutter-pilot-0.0.22.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
+产物为 `artifacts/flutter-pilot-0.0.23.vsix`。打包命令自动执行构建，不会发布到商店。`artifacts/` 和 `dist/` 是忽略的生成目录，不随 Git 提交。
 
 ### 使用已有引擎
 
@@ -263,15 +265,15 @@ VM 转发发生在应用的 Dio 中，因此 `127.0.0.1` 指应用所在设备�
 4. 点击 **检测 Flutter 项目**，选择 `lib/main.dart` 中的 `dio`，**预览补丁 → 应用当前预览**。
 5. 在 **Mock 场景** 中选择场景，点击 **直接 Mock**，填写下表后保存、启用规则并激活场景。
 
-   | 字段 | 示例值 |
-   | --- | --- |
-   | 名称 | 第一条 HTTPS Mock |
-   | 方法 | GET |
-   | 主机 | flutter-pilot.test |
-   | 路径 | /hello |
-   | 状态码 | 200 |
-   | Headers JSON | `{"content-type":"application/json"}` |
-   | Body | `{"message":"Hello from Flutter Pilot"}` |
+   | 字段         | 示例值                                   |
+   | ------------ | ---------------------------------------- |
+   | 名称         | 第一条 HTTPS Mock                        |
+   | 方法         | GET                                      |
+   | 主机         | flutter-pilot.test                       |
+   | 路径         | /hello                                   |
+   | 状态码       | 200                                      |
+   | Headers JSON | `{"content-type":"application/json"}`    |
+   | Body         | `{"message":"Hello from Flutter Pilot"}` |
 
 6. 按工作台实际地址运行。下面假设端口为 8080；有多台设备时用 `-d` 指定设备。
 
@@ -288,11 +290,11 @@ VM 转发发生在应用的 Dio 中，因此 `127.0.0.1` 指应用所在设备�
 
 ### 选择接入路线
 
-| 路线 | 项目改动 | 适用情况 |
-| --- | --- | --- |
-| Flutter VM WS | 无源码改动；Debug/JIT 下可主动开启实验性 Dio 运行时 Mock | 调试中采集、Mock 和双向修改；无需代理证书 |
-| 系统代理 + 系统 CA | 可不改源码，但依赖应用是否遵循系统代理及证书信任 | 已确认请求能经过代理的项目 |
-| Dio 最小开发配置 | 新增一个 helper，并在实际 Dio 初始化位置调用一次 | 系统代理不生效、Dio 不信任系统 CA，或希望用 Android USB 接入 |
+| 路线               | 项目改动                                                 | 适用情况                                                     |
+| ------------------ | -------------------------------------------------------- | ------------------------------------------------------------ |
+| Flutter VM WS      | 无源码改动；Debug/JIT 下可主动开启实验性 Dio 运行时 Mock | 调试中采集、Mock 和双向修改；无需代理证书                    |
+| 系统代理 + 系统 CA | 可不改源码，但依赖应用是否遵循系统代理及证书信任         | 已确认请求能经过代理的项目                                   |
+| Dio 最小开发配置   | 新增一个 helper，并在实际 Dio 初始化位置调用一次         | 系统代理不生效、Dio 不信任系统 CA，或希望用 Android USB 接入 |
 
 仅配置设备 Wi-Fi 代理，并不保证 Dart 请求已经进入插件。以请求历史中出现真实流量、HTTPS 没有证书错误为准。当前向导提供指导、项目检测和设备操作，HTTP / HTTPS 验证仍需在应用中实际发请求完成。
 
@@ -341,12 +343,12 @@ helper 同时满足以下条件才启用：**Debug 构建**，且编译时传入
 
 ### 不同设备的地址
 
-| 调试目标 | FLUTTER_PILOT_PROXY 中的地址 | 操作与验证状态 |
-| --- | --- | --- |
-| Android USB 真机 | `127.0.0.1:<端口>` | 启动代理后刷新设备、连接 USB；已实际验证 |
-| Android 模拟器 | 使用插件创建 USB/ADB reverse 后填 `127.0.0.1:<端口>` | 需要设备处于已授权状态；尚未实际验收 |
-| iOS 模拟器 | `127.0.0.1:<端口>` | 启动代理后运行；已实际验证 |
-| Android / iOS Wi-Fi 真机 | `<电脑局域网IPv4>:<端口>` | 开启局域网监听；两端网络互通，iOS 真机路线尚未实际验收 |
+| 调试目标                 | FLUTTER_PILOT_PROXY 中的地址                         | 操作与验证状态                                         |
+| ------------------------ | ---------------------------------------------------- | ------------------------------------------------------ |
+| Android USB 真机         | `127.0.0.1:<端口>`                                   | 启动代理后刷新设备、连接 USB；已实际验证               |
+| Android 模拟器           | 使用插件创建 USB/ADB reverse 后填 `127.0.0.1:<端口>` | 需要设备处于已授权状态；尚未实际验收                   |
+| iOS 模拟器               | `127.0.0.1:<端口>`                                   | 启动代理后运行；已实际验证                             |
+| Android / iOS Wi-Fi 真机 | `<电脑局域网IPv4>:<端口>`                            | 开启局域网监听；两端网络互通，iOS 真机路线尚未实际验收 |
 
 `0.0.0.0` 是代理监听地址，不能作为手机连接目标。Android 模拟器使用 ADB reverse 时也不需要改成宿主机别名。USB 转发只在 Android 上提供，iOS 真机不要套用该方式。
 
@@ -400,17 +402,17 @@ Scene 存储升级到目录 v2，旧 `scenes.json` 必须显式预检并迁移�
 
 持久格式为 `scenes/index.json` v2 根清单及独立资源，详见 [目录存储](docs/scene-storage.md)；导入结构为 `{"version":2,"scenes":[{"id":"default","name":"默认场景","httpRules":[],"wsRules":[]}]}` 自包含交换包。全库不设 Scene 总数限制；单次协议应用仍受规则数及正文限额保护。规则 ID 在同一协议的所有场景中唯一。HTTP 单条规则的字段如下：
 
-| 字段 | 含义 |
-| --- | --- |
-| `id`、`name` | 非空 ID 和名称，ID 最长 128 字符 |
-| `enabled` | 是否启用，布尔值 |
-| `priority` | 整数，值越大优先级越高 |
-| `match` | 匹配原始请求；空对象表示匹配所有请求 |
-| `request` | 修改方法、URL、头部、查询参数或正文 |
-| `redirect` | `{ "url": "/目标路径 或 完整HTTP/HTTPS URL" }` |
-| `mock` | `{ "status": 200, "headers": {}, "body": "正文字符串" }` |
-| `response` | 修改状态码、头部或正文 |
-| `breakpoint` | 选择请求 / 响应阶段及可选等待秒数 |
+| 字段         | 含义                                                     |
+| ------------ | -------------------------------------------------------- |
+| `id`、`name` | 非空 ID 和名称，ID 最长 128 字符                         |
+| `enabled`    | 是否启用，布尔值                                         |
+| `priority`   | 整数，值越大优先级越高                                   |
+| `match`      | 匹配原始请求；空对象表示匹配所有请求                     |
+| `request`    | 修改方法、URL、头部、查询参数或正文                      |
+| `redirect`   | `{ "url": "/目标路径 或 完整HTTP/HTTPS URL" }`           |
+| `mock`       | `{ "status": 200, "headers": {}, "body": "正文字符串" }` |
+| `response`   | 修改状态码、头部或正文                                   |
+| `breakpoint` | 选择请求 / 响应阶段及可选等待秒数                        |
 
 每条规则至少包含一个动作；`mock` 与 `redirect` 不能同时存在。状态码为 200–599。未知字段会在插件侧拒绝保存或导入。
 
@@ -566,16 +568,16 @@ Scene 存储升级到目录 v2，旧 `scenes.json` 必须显式预检并迁移�
 
 项目配置优先保存在下述 `.flutter-pilot/project.json`；没有指定的设置使用 IDE 工作区 / 用户设置。可在 IDE 设置中搜索 `Flutter Pilot`。外部修改后点击工作台的 **读取项目文件**，规则校验后同步；接入方式和采集参数在重新加载 IDE 窗口后生效，仅关闭工作台不会重启后台会话。
 
-| 设置 | 默认值 | 有效范围与说明 |
-| --- | --- | --- |
-| `flutterPilot.autoStart` | `true` | 仅已选择代理模式时，随受信任的本地 Flutter 工作区启动已安装 / 配置的引擎 |
-| `flutterPilot.autoConnectVm` | `true` | VM 模式自动发现 Flutter Debug 会话；唯一会话自动连接并记录 HTTP，多个会话由用户选择 |
-| `flutterPilot.enginePath` | `""` | 本地 mitmdump 绝对路径；留空使用插件管理的引擎 |
-| `flutterPilot.proxyPort` | `8080` | 1024–65535；初始端口占用时选择其他可用端口 |
-| `flutterPilot.retentionDays` | `7` | 1–365 天 |
-| `flutterPilot.maxRecords` | `10000` | 1–100000 条历史 |
-| `flutterPilot.maxBodyBytes` | `1048576` | 1024–10485760 字节；代理 / VM 观察的本地正文保存上限；VM 注入另有 256 KiB 上限 |
-| `flutterPilot.breakpointTimeout` | `60` | 10–300 秒；规则内可单独设置 |
+| 设置                             | 默认值    | 有效范围与说明                                                                      |
+| -------------------------------- | --------- | ----------------------------------------------------------------------------------- |
+| `flutterPilot.autoStart`         | `true`    | 仅已选择代理模式时，随受信任的本地 Flutter 工作区启动已安装 / 配置的引擎            |
+| `flutterPilot.autoConnectVm`     | `true`    | VM 模式自动发现 Flutter Debug 会话；唯一会话自动连接并记录 HTTP，多个会话由用户选择 |
+| `flutterPilot.enginePath`        | `""`      | 本地 mitmdump 绝对路径；留空使用插件管理的引擎                                      |
+| `flutterPilot.proxyPort`         | `8080`    | 1024–65535；初始端口占用时选择其他可用端口                                          |
+| `flutterPilot.retentionDays`     | `7`       | 1–365 天                                                                            |
+| `flutterPilot.maxRecords`        | `10000`   | 1–100000 条历史                                                                     |
+| `flutterPilot.maxBodyBytes`      | `1048576` | 1024–10485760 字节；代理 / VM 观察的本地正文保存上限；VM 注入另有 256 KiB 上限      |
+| `flutterPilot.breakpointTimeout` | `60`      | 10–300 秒；规则内可单独设置                                                         |
 
 ```json
 {
@@ -594,11 +596,11 @@ Scene 存储升级到目录 v2，旧 `scenes.json` 必须显式预检并迁移�
 
 命令面板入口：
 
-| 命令 ID | 显示名称 |
-| --- | --- |
-| `flutterPilot.open` | Flutter Pilot: 打开工作台 |
-| `flutterPilot.start` | Flutter Pilot: 启动代理 |
-| `flutterPilot.stop` | Flutter Pilot: 停止代理 |
+| 命令 ID              | 显示名称                  |
+| -------------------- | ------------------------- |
+| `flutterPilot.open`  | Flutter Pilot: 打开工作台 |
+| `flutterPilot.start` | Flutter Pilot: 启动代理   |
+| `flutterPilot.stop`  | Flutter Pilot: 停止代理   |
 
 ## 项目绑定与配置文件
 
@@ -636,13 +638,13 @@ Scene 存储升级到目录 v2，旧 `scenes.json` 必须显式预检并迁移�
 
 `settings` 可省略；其中字段使用不带 `flutterPilot.` 前缀的名称，优先于对应 IDE 设置。引擎路径仍使用本机 IDE 的 `flutterPilot.enginePath`。运行配置使用 Scene 目录，导入 / 导出使用 v2 自包含 JSON 交换包。单项编辑只写相应资源，激活选择保存在 IDE 私有存储。
 
-| 修改内容 | 生效方式 |
-| --- | --- |
-| 工作台编辑规则 | 保存到项目文件，并同步运行中的会话；以同步结果为准 |
-| 外部编辑 `scenes/` | 保存文件后点击 **读取项目文件**，校验并同步 |
-| 外部编辑项目名称 | 保存后点击 **读取项目文件**，更新项目显示名称 |
-| 外部编辑接入方式、端口、采集参数 | 保存后重新加载窗口；当前会话继续使用启动时的配置 |
-| 修改 `projectId` | 重新加载窗口建立新绑定；当前会话拒绝直接切换 UUID |
+| 修改内容                         | 生效方式                                           |
+| -------------------------------- | -------------------------------------------------- |
+| 工作台编辑规则                   | 保存到项目文件，并同步运行中的会话；以同步结果为准 |
+| 外部编辑 `scenes/`               | 保存文件后点击 **读取项目文件**，校验并同步        |
+| 外部编辑项目名称                 | 保存后点击 **读取项目文件**，更新项目显示名称      |
+| 外部编辑接入方式、端口、采集参数 | 保存后重新加载窗口；当前会话继续使用启动时的配置   |
+| 修改 `projectId`                 | 重新加载窗口建立新绑定；当前会话拒绝直接切换 UUID  |
 
 如果规则文件已被外部修改，工作台会提示先读取，避免旧内存内容覆盖磁盘。非法 JSON、未知版本或无效字段需要先修复，插件不会用默认文件覆盖；读取操作不会自动保存尚未保存的编辑器内容。
 
@@ -679,13 +681,13 @@ macOS 默认 VS Code 用户数据下通常为 `~/Library/Application Support/Cod
 
 ## 停止代理与恢复联网
 
-| 操作 | 结果 |
-| --- | --- |
-| 停用场景 / 断开 VM | 正常操作尽量立即卸载本插件拦截器；异常断连依赖最长约 15 秒租约到期后旁路，已发出的请求改写无法撤回 |
-| 停止代理 | 关闭流量监听、释放等待断点并尝试清理本会话 Android 转发；引擎管理通道和历史查询保留 |
-| 关闭工作台 | 关闭界面；VM 连接 / Mock 或后台代理继续记录，代理人工断点释放并停用 |
-| 退出 IDE / 移除 Flutter 工作区 | 断开 VM 或退出后台引擎，释放断点并清理本会话转发；规则、API 目录和历史保留 |
-| 撤销接入 | 恢复向导记录的项目补丁；不会替你移除手机系统代理或证书 |
+| 操作                           | 结果                                                                                               |
+| ------------------------------ | -------------------------------------------------------------------------------------------------- |
+| 停用场景 / 断开 VM             | 正常操作尽量立即卸载本插件拦截器；异常断连依赖最长约 15 秒租约到期后旁路，已发出的请求改写无法撤回 |
+| 停止代理                       | 关闭流量监听、释放等待断点并尝试清理本会话 Android 转发；引擎管理通道和历史查询保留                |
+| 关闭工作台                     | 关闭界面；VM 连接 / Mock 或后台代理继续记录，代理人工断点释放并停用                                |
+| 退出 IDE / 移除 Flutter 工作区 | 断开 VM 或退出后台引擎，释放断点并清理本会话转发；规则、API 目录和历史保留                         |
+| 撤销接入                       | 恢复向导记录的项目补丁；不会替你移除手机系统代理或证书                                             |
 
 使用 helper 时，去掉 `--dart-define=FLUTTER_PILOT_PROXY=...` 并停止、重新运行应用，即可恢复直接联网。已创建的 `HttpClient` 不会在 IDE 停止代理后自动切换为直连。
 
@@ -701,32 +703,32 @@ adb -s YOUR_ANDROID_SERIAL reverse --remove tcp:8080
 
 ## 故障排查
 
-| 现象 | 优先检查 |
-| --- | --- |
-| 找不到命令 | 确认 VSIX 安装在当前 IDE、本地受信任工作区已打开，必要时重新加载窗口 |
-| 下载失败 / 校验失败 | 检查能否访问官方站点后重试；也可在设置中指定完整包中的 12.3.1 mitmdump 绝对路径 |
-| 找不到 Flutter 项目 | 打开包含 `pubspec.yaml` 的包根目录；monorepo 中应选择真正创建 Dio 的包 |
-| 没发现 Dio 初始化位置 | 确认直接依赖 Dio 5、实际声明位于 `lib/`；工厂、生成代码或复杂结构按手动片段接入 |
-| 预览后不能应用 | 保存相关文件并重新检测；已有 helper、自定义网络配置或源码变化会触发保护 |
-| 未自动启动 | VM 检查项目 / IDE 的 `autoConnectVm`，确认在本地 IDE 内启动或附加 Flutter Debug；多个会话需选择，手动断开后需点击重新连接。DTD 不可用时重新启动调试或手动填写地址；代理模式检查 `autoStart`、工作区信任及可用引擎 |
-| VM 连接失败 | 按具体提示区分端口未监听、超时、认证路径失效或初始化失败；使用本次 Debug 的完整 WS，不要填 DevTools 网页地址。App 重新运行后端口和认证路径可能变化，不能只替换旧地址的端口 |
-| VM 记录正常但 Mock 不生效 | 激活目标场景，检查 HTTP 分域状态、已接入 Dio 数和规则同步状态；新实例可重新发现，不支持所有自定义拦截链 |
-| VM 意外断开后暂不能启用 Mock | 可先重连观察，等待最长约 16 秒冷却，确保旧 15 秒租约已到期；正常显式关闭 / 断开且卸载成功时不受该冷却限制 |
-| 无请求历史 | VM 确认已连接当前 Debug App，并重新触发请求；代理确认已运行、应用使用已接入的 Dio、启动参数地址正确，Android reverse 和设备网络可用。只打开插件不会自动接管全部网络 |
-| HTTPS 握手失败 | helper 是否对应当前工作区 CA；系统代理路线是否信任当前证书；是否有证书固定或自定义校验 |
-| 手机连不上电脑 | 不要使用 `0.0.0.0` 作目标；Wi-Fi 路线开启局域网监听，检查 IP、网络隔离和防火墙；Android USB 检查授权 |
-| 规则没有命中 | 检查启停、方法、主机和原始路径；主机不填协议或端口，查询参数另填；检查更高优先级规则 |
-| 规则已保存但未生效 | 查看激活场景及分域状态；VM 检查已接入 Dio 数并重新发现 / 同步，代理初始化 / 重启引擎后同步 |
-| 只改请求头后正文不对 | 确认未开启“替换正文”；空字符串正文会清空内容 |
-| 断点提前消失 | 应用自己的超时或取消可能早于插件倒计时；也检查是否停止代理、关闭面板或控制断连 |
-| 转发后鉴权失败 | redirect 保留鉴权头；若鉴权签名包含原路径或域名，需由业务侧按目标重新签名 |
-| 撤销提示保留文件 | 接入后源码已被修改，需人工合并；若 `.dart_tool` 记录被清理也要手动移除接入 |
-| 停止后应用无法联网 | 去掉启动参数并重启应用，或移除设备系统代理，已创建客户端不会自动恢复直连 |
-| API 请求列表中的记录减少或消失 | 检查搜索、筛选和分页；记录也可能已达到保留期限、超过条数上限或被清空，再次请求后会出现新记录 |
-| 重启后历史看不到 | 确认同一 IDE、项目 UUID、目录和接入模式，检查保留策略；复制或移动目录不会共享旧路径历史。VM 历史不需初始化引擎，代理历史需对应引擎可用 |
-| 找不到 `.flutter-pilot/` | 确认当前工作区受信任、目录可写且插件已初始化；升级后重新加载窗口，再打开工作台查看项目绑定卡或输出日志 |
-| 提示项目规则文件已被修改 | 保存外部编辑，点击 **连接与诊断 → 读取项目文件**，再继续在工作台编辑 |
-| 修改项目配置后没有变化 | 规则和名称可重新读取；接入方式及采集参数需重新加载窗口，UUID 改动也需建立新会话 |
+| 现象                           | 优先检查                                                                                                                                                                                                          |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 找不到命令                     | 确认 VSIX 安装在当前 IDE、本地受信任工作区已打开，必要时重新加载窗口                                                                                                                                              |
+| 下载失败 / 校验失败            | 检查能否访问官方站点后重试；也可在设置中指定完整包中的 12.3.1 mitmdump 绝对路径                                                                                                                                   |
+| 找不到 Flutter 项目            | 打开包含 `pubspec.yaml` 的包根目录；monorepo 中应选择真正创建 Dio 的包                                                                                                                                            |
+| 没发现 Dio 初始化位置          | 确认直接依赖 Dio 5、实际声明位于 `lib/`；工厂、生成代码或复杂结构按手动片段接入                                                                                                                                   |
+| 预览后不能应用                 | 保存相关文件并重新检测；已有 helper、自定义网络配置或源码变化会触发保护                                                                                                                                           |
+| 未自动启动                     | VM 检查项目 / IDE 的 `autoConnectVm`，确认在本地 IDE 内启动或附加 Flutter Debug；多个会话需选择，手动断开后需点击重新连接。DTD 不可用时重新启动调试或手动填写地址；代理模式检查 `autoStart`、工作区信任及可用引擎 |
+| VM 连接失败                    | 按具体提示区分端口未监听、超时、认证路径失效或初始化失败；使用本次 Debug 的完整 WS，不要填 DevTools 网页地址。App 重新运行后端口和认证路径可能变化，不能只替换旧地址的端口                                        |
+| VM 记录正常但 Mock 不生效      | 激活目标场景，检查 HTTP 分域状态、已接入 Dio 数和规则同步状态；新实例可重新发现，不支持所有自定义拦截链                                                                                                           |
+| VM 意外断开后暂不能启用 Mock   | 可先重连观察，等待最长约 16 秒冷却，确保旧 15 秒租约已到期；正常显式关闭 / 断开且卸载成功时不受该冷却限制                                                                                                         |
+| 无请求历史                     | VM 确认已连接当前 Debug App，并重新触发请求；代理确认已运行、应用使用已接入的 Dio、启动参数地址正确，Android reverse 和设备网络可用。只打开插件不会自动接管全部网络                                               |
+| HTTPS 握手失败                 | helper 是否对应当前工作区 CA；系统代理路线是否信任当前证书；是否有证书固定或自定义校验                                                                                                                            |
+| 手机连不上电脑                 | 不要使用 `0.0.0.0` 作目标；Wi-Fi 路线开启局域网监听，检查 IP、网络隔离和防火墙；Android USB 检查授权                                                                                                              |
+| 规则没有命中                   | 检查启停、方法、主机和原始路径；主机不填协议或端口，查询参数另填；检查更高优先级规则                                                                                                                              |
+| 规则已保存但未生效             | 查看激活场景及分域状态；VM 检查已接入 Dio 数并重新发现 / 同步，代理初始化 / 重启引擎后同步                                                                                                                        |
+| 只改请求头后正文不对           | 确认未开启“替换正文”；空字符串正文会清空内容                                                                                                                                                                      |
+| 断点提前消失                   | 应用自己的超时或取消可能早于插件倒计时；也检查是否停止代理、关闭面板或控制断连                                                                                                                                    |
+| 转发后鉴权失败                 | redirect 保留鉴权头；若鉴权签名包含原路径或域名，需由业务侧按目标重新签名                                                                                                                                         |
+| 撤销提示保留文件               | 接入后源码已被修改，需人工合并；若 `.dart_tool` 记录被清理也要手动移除接入                                                                                                                                        |
+| 停止后应用无法联网             | 去掉启动参数并重启应用，或移除设备系统代理，已创建客户端不会自动恢复直连                                                                                                                                          |
+| API 请求列表中的记录减少或消失 | 检查搜索、筛选和分页；记录也可能已达到保留期限、超过条数上限或被清空，再次请求后会出现新记录                                                                                                                      |
+| 重启后历史看不到               | 确认同一 IDE、项目 UUID、目录和接入模式，检查保留策略；复制或移动目录不会共享旧路径历史。VM 历史不需初始化引擎，代理历史需对应引擎可用                                                                            |
+| 找不到 `.flutter-pilot/`       | 确认当前工作区受信任、目录可写且插件已初始化；升级后重新加载窗口，再打开工作台查看项目绑定卡或输出日志                                                                                                            |
+| 提示项目规则文件已被修改       | 保存外部编辑，点击 **连接与诊断 → 读取项目文件**，再继续在工作台编辑                                                                                                                                              |
+| 修改项目配置后没有变化         | 规则和名称可重新读取；接入方式及采集参数需重新加载窗口，UUID 改动也需建立新会话                                                                                                                                   |
 
 请提供 IDE / macOS / Flutter / Dio 版本、设备类型、接入路线、复现步骤及脱敏日志。不要把 CA 私钥或真实业务凭证放入问题报告。
 
@@ -745,19 +747,19 @@ npm run build
 
 迭代时执行 `npm run watch`。可通过 IDE 的扩展开发宿主加载该仓库，也可重新打包 VSIX 安装。构建使用 esbuild，扩展运行时依赖已打入 `dist/`，不需要用户在 IDE 中运行 npm。
 
-| 命令 | 用途 |
-| --- | --- |
-| `npm run typecheck` | 扩展和 Webview 的 TypeScript 类型检查 |
-| `npm test` | Vitest 单测与扩展整合回归 |
-| `npm run format:check` | 检查 TypeScript / CSS / 构建脚本格式 |
-| `npm run build` / `npm run watch` | 一次构建 / 持续构建 |
-| `npm run test:ui` | 以构建产物运行 Playwright 工作台测试 |
-| `npm run test:proxy` | Python 单测；设置 MITMDUMP 后同时执行真实代理集成 |
-| `npm run test:ide` | 代理模式实际 IDE 扩展宿主 smoke；需设置引擎路径 |
-| `npm run test:vm` | 真实 Dart VM + Dio 运行时注入集成 |
-| `npm run test:vm:flutter` | 真实 Flutter iOS 模拟器零源码 VM 采集 / Mock；设置 VM_FLUTTER_DEVICE |
-| `npm run test:ide:vm` | 无代理引擎的真实 IDE VM 消息链路 smoke |
-| `npm run package` | 构建并生成 VSIX，不发布 |
+| 命令                              | 用途                                                                 |
+| --------------------------------- | -------------------------------------------------------------------- |
+| `npm run typecheck`               | 扩展和 Webview 的 TypeScript 类型检查                                |
+| `npm test`                        | Vitest 单测与扩展整合回归                                            |
+| `npm run format:check`            | 检查 TypeScript / CSS / 构建脚本格式                                 |
+| `npm run build` / `npm run watch` | 一次构建 / 持续构建                                                  |
+| `npm run test:ui`                 | 以构建产物运行 Playwright 工作台测试                                 |
+| `npm run test:proxy`              | Python 单测；设置 MITMDUMP 后同时执行真实代理集成                    |
+| `npm run test:ide`                | 代理模式实际 IDE 扩展宿主 smoke；需设置引擎路径                      |
+| `npm run test:vm`                 | 真实 Dart VM + Dio 运行时注入集成                                    |
+| `npm run test:vm:flutter`         | 真实 Flutter iOS 模拟器零源码 VM 采集 / Mock；设置 VM_FLUTTER_DEVICE |
+| `npm run test:ide:vm`             | 无代理引擎的真实 IDE VM 消息链路 smoke                               |
+| `npm run package`                 | 构建并生成 VSIX，不发布                                              |
 
 ### 工作台与真实代理测试
 
@@ -811,7 +813,7 @@ python3 tool/device_smoke.py --mitmdump /absolute/path/to/mitmdump --ios YOUR_SI
 
 ```sh
 npm run package
-shasum -a 256 artifacts/flutter-pilot-0.0.22.vsix
+shasum -a 256 artifacts/flutter-pilot-0.0.23.vsix
 ```
 
 VSIX 包含扩展构建产物、VM 注入模板、代理 addon、引擎清单及文档，不包含 Node 开发依赖、Flutter 示例构建结果或真实证书。首次引擎下载单独发生。源码中的 README 修改后，应重新打包，安装包内的文档才会更新。
@@ -854,14 +856,14 @@ docs/validation.md    # 实际验收记录与未验证项
 
 下表为代理模式。VM 注入模式只编辑受支持的 JSON / 文本，单正文上限 256 KiB；上传、流和二进制不主动读取。VM 数据为 Dio 层快照，不是原始 wire 数据。
 
-| 内容 | 首版处理 |
-| --- | --- |
-| 上限内 JSON / 文本 | 可查看和完整替换 |
-| 上限内 gzip / deflate | 支持有界解码和正文编辑 |
-| 上传文件、multipart、二进制 | 正文只读直通 |
-| SSE、chunked、无长度流 | 正文只读直通，不为编辑等待完整流 |
-| 超过记录上限 | 只保存前缀并标记截断，真实数据直通 |
-| br / zstd 压缩 | 正文只读直通 |
+| 内容                        | 首版处理                           |
+| --------------------------- | ---------------------------------- |
+| 上限内 JSON / 文本          | 可查看和完整替换                   |
+| 上限内 gzip / deflate       | 支持有界解码和正文编辑             |
+| 上传文件、multipart、二进制 | 正文只读直通                       |
+| SSE、chunked、无长度流      | 正文只读直通，不为编辑等待完整流   |
+| 超过记录上限                | 只保存前缀并标记截断，真实数据直通 |
+| br / zstd 压缩              | 正文只读直通                       |
 
 只读正文仍可按规则修改地址或头部；应避免手动设置与正文不一致的长度或编码头。极端正文转义导致管理帧超限时，详情会明确报错，断点直接放行。
 

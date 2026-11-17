@@ -8,11 +8,11 @@
 
 ## 任务与产出
 
-- [ ] P04-T01：增加 Web selector 判别类型，支持 testId、显式 role/name 及 frame 范围；旧 Flutter Key 保持兼容。
-- [ ] P04-T02：实现 DOM 结构读取、定位、点击、输入、等待、滚动与明确键盘能力；失败不切换选择器或通道重放。
-- [ ] P04-T03：实现 Web 视口/整页截图、尺寸/容量限制和 MCP 图像返回，区分 Flutter 长图语义。
-- [ ] P04-T04：扩展 Scene 预检、编译和运行结果，支持 Web 目标、秘密参数与跨 Scene call。
-- [ ] P04-T05：新增 `test:web:ui` 与原生 HTML/React/Vue 夹具，补工作台、指南和示例。
+- [x] P04-T01：增加 Web selector 判别类型，支持 testId、显式 role/name 及 frame 范围；旧 Flutter Key 保持兼容。
+- [x] P04-T02：实现 DOM 结构读取、定位、点击、输入、等待、滚动与明确键盘能力；失败不切换选择器或通道重放。
+- [x] P04-T03：实现 Web 视口/整页截图、尺寸/容量限制和 MCP 图像返回，区分 Flutter 长图语义。
+- [x] P04-T04：扩展 Scene 预检、编译和运行结果，支持 Web 目标、秘密参数与跨 Scene call。
+- [x] P04-T05：新增 `test:web:ui` 与原生 HTML/React/Vue 夹具，补工作台、指南和示例。
 
 主要落点：`src/automation/`、Web Adapter/Worker、`src/workflows/`、Scene schema、截图、MCP tools/prompts、随包示例。
 

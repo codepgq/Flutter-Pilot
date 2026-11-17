@@ -4,11 +4,14 @@ import { validateWsRuleDocument, type WsRule } from './ws/model';
 import type { Scene, SceneDocument, SceneRuntime } from './scene-model';
 import { cloneScenes, SceneStore } from './scenes';
 import type { SceneDetail, ResourceAddress } from './scene-storage-model';
+import { RuntimeTargetError } from './runtime/targets';
 
 type Domain = 'http' | 'ws';
 export interface SceneHost {
   snapshot(): {
     key: string;
+    /** Fixed runtime identity and generation, excluding capture and Mock state. */
+    targetKey?: string;
     mode: 'vm' | 'proxy';
     connected: boolean;
     /** The proxy may still serve rules, but its control connection is unavailable. */
@@ -42,11 +45,14 @@ export class SceneController {
   private paused = new Set<Domain>();
   private pendingCaptures = new Map<Domain, boolean>();
   private operations: Promise<unknown> = Promise.resolve();
+  private operationTargetKey?: string;
+  private pendingCaptureTargetKey?: string;
   private loaded = false;
   private applying = false;
   private retryTimer?: ReturnType<typeof setTimeout>;
   private run?: {
     id: string;
+    targetKey?: string;
     scene: Scene;
     paused: Set<Domain>;
     pendingCaptures: Map<Domain, boolean>;
@@ -87,9 +93,43 @@ export class SceneController {
     this.host.changed();
   }
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const next = this.operations.then(operation);
+    const targetKey = this.host.snapshot().targetKey;
+    const next = this.operations.then(async () => {
+      this.operationTargetKey = targetKey;
+      try {
+        this.assertTarget();
+        const result = await operation();
+        this.assertTarget();
+        return result;
+      } finally {
+        this.operationTargetKey = undefined;
+      }
+    });
     this.operations = next.catch(() => undefined);
     return next;
+  }
+  private assertTarget(expected = this.operationTargetKey) {
+    if (expected === undefined || expected === this.host.snapshot().targetKey) return;
+    this.appliedKey = undefined;
+    this.pendingCaptures.clear();
+    this.pendingCaptureTargetKey = undefined;
+    this.temporary = [];
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    throw new RuntimeTargetError(
+      'TARGET_STALE',
+      '运行目标代次已失效，操作已停止；请重新发现目标，不会自动重放。',
+    );
+  }
+  private async targetOperation<T>(operation: () => Promise<T>): Promise<T> {
+    this.assertTarget();
+    try {
+      const result = await operation();
+      this.assertTarget();
+      return result;
+    } catch (error) {
+      this.assertTarget();
+      throw error;
+    }
   }
   async initialize() {
     await this.store.load();
@@ -132,7 +172,8 @@ export class SceneController {
       if (!snapshot.connected || snapshot.proxyRulesUnreachable)
         throw new Error('测试环境尚未连接，不能开始测试');
       const mockId = sceneId ?? this.activeSceneId;
-      const snapshotDoc = options.snapshot ?? (await this.store.prepareSnapshot([], mockId));
+      const snapshotDoc =
+        options.snapshot ?? (await this.targetOperation(() => this.store.prepareSnapshot([], mockId)));
       const source = snapshotDoc.scenes.find((scene) => scene.id === mockId);
       if (sceneId !== undefined && !source) throw new Error('测试场景不存在');
       const scene: Scene = source
@@ -149,6 +190,7 @@ export class SceneController {
       }).rules;
       this.run = {
         id: runId,
+        targetKey: this.operationTargetKey,
         scene,
         paused: new Set(this.paused),
         pendingCaptures: new Map(this.pendingCaptures),
@@ -173,6 +215,7 @@ export class SceneController {
     return this.enqueue(async () => {
       if (!this.run || this.run.id !== runId || this.run.restoring)
         throw new Error('当前测试未持有可激活的 WS 场景');
+      this.assertTarget(this.run.targetKey);
       const before = this.host.snapshot();
       if (!before.connected || before.proxyRulesUnreachable) throw new Error('测试 WS 环境尚未连接');
       if (this.appliedKey !== this.applicationKey(before) || this.errors.http)
@@ -183,7 +226,7 @@ export class SceneController {
       const needed = this.wsRules(this.run.scene).some((rule) => rule.enabled);
       if (needed && before.mode !== 'vm') throw new Error('代理模式不支持测试 WS Mock');
       try {
-        if (needed) await this.host.enable('ws');
+        if (needed) await this.targetOperation(() => this.host.enable('ws'));
         const after = this.host.snapshot();
         if (!after.connected || after.key !== before.key || after.proxyRulesUnreachable)
           throw new Error('激活测试 WS 时连接发生变化');
@@ -192,6 +235,7 @@ export class SceneController {
         this.appliedKey = this.applicationKey(after);
         ++this.revision;
       } catch (error) {
+        this.assertTarget();
         this.errors.ws = (error as Error).message;
         throw error;
       } finally {
@@ -205,6 +249,7 @@ export class SceneController {
       if (!this.run) return;
       if (this.run.id !== runId) throw new Error('不能结束其他测试运行的场景');
       const run = this.run;
+      this.assertTarget(run.targetKey);
       run.restoring = true;
       this.paused = new Set(run.paused);
       this.pendingCaptures = new Map(run.pendingCaptures);
@@ -212,7 +257,7 @@ export class SceneController {
       if (this.host.snapshot().proxyRulesUnreachable) {
         if (!this.host.stopUnreachableProxy)
           throw new Error('代理控制连接已断开，无法确认测试规则已移除；请停止代理后重试恢复');
-        await this.host.stopUnreachableProxy();
+        await this.targetOperation(() => this.host.stopUnreachableProxy!());
         if (this.host.snapshot().proxyRulesUnreachable)
           throw new Error('代理仍无法控制，无法确认测试规则已移除');
       }
@@ -225,6 +270,21 @@ export class SceneController {
       this.host.changed();
     });
   }
+  /** Drop only local ownership after its target expires; never restore onto the successor. */
+  abandonInvalidatedRun(runId: string) {
+    if (!this.run || this.run.id !== runId || this.run.targetKey === undefined) return false;
+    if (this.run.targetKey === this.host.snapshot().targetKey) return false;
+    this.run = undefined;
+    this.temporary = [];
+    this.paused.clear();
+    this.pendingCaptures.clear();
+    this.pendingCaptureTargetKey = undefined;
+    this.appliedKey = undefined;
+    this.errors = {};
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.host.changed();
+    return true;
+  }
   private ensureSafeChange() {
     if (this.host.snapshot().proxyRulesUnreachable)
       throw new Error('代理控制连接已断开，旧规则可能仍在生效。请等待重连或停止代理后再更改激活场景。');
@@ -234,7 +294,7 @@ export class SceneController {
       if (!this.host.snapshot().proxyRulesUnreachable) return;
       if (!this.host.stopUnreachableProxy)
         throw new Error('配置已保存，但代理控制连接已断开，旧规则可能仍在生效；请停止代理后重新读取');
-      await this.host.stopUnreachableProxy();
+      await this.targetOperation(() => this.host.stopUnreachableProxy!());
       if (this.host.snapshot().proxyRulesUnreachable)
         throw new Error('配置已保存，但无法确认代理已停止，旧规则可能仍在生效；请停止代理后重新读取');
     } catch (error) {
@@ -280,8 +340,11 @@ export class SceneController {
     return this.enqueue(async () => {
       this.ensureNoRun();
       this.ensureSafeChange();
-      const next = id === null ? undefined : (await this.store.prepareSnapshot([], id)).scenes[0];
-      await this.store.activate(id);
+      const next =
+        id === null
+          ? undefined
+          : (await this.targetOperation(() => this.store.prepareSnapshot([], id))).scenes[0];
+      await this.targetOperation(() => this.store.activate(id));
       await this.confirmCommittedChange();
       this.activeScene = next;
       this.stale = undefined;
@@ -374,18 +437,21 @@ export class SceneController {
       if (domain === 'http' && this.host.snapshot().proxyRulesUnreachable)
         throw new Error('代理控制连接已断开，旧规则可能仍在生效。请等待重连或停止代理后再调整采集。');
       this.pendingCaptures.set(domain, enabled);
+      this.pendingCaptureTargetKey = this.operationTargetKey;
       let failure: unknown;
       try {
         if (!enabled) {
           try {
-            await this.host.disable(domain);
+            await this.targetOperation(() => this.host.disable(domain));
           } catch (error) {
+            this.assertTarget();
             failure = error;
           }
         }
         try {
           await this.applyCapture(domain, enabled);
         } catch (error) {
+          this.assertTarget();
           failure ??= error;
         }
         await this.apply(true);
@@ -401,11 +467,19 @@ export class SceneController {
   }
   reconcile() {
     return this.enqueue(async () => {
+      if (
+        this.pendingCaptureTargetKey !== undefined &&
+        this.pendingCaptureTargetKey !== this.host.snapshot().targetKey
+      ) {
+        this.pendingCaptures.clear();
+        this.pendingCaptureTargetKey = undefined;
+      }
       const failures: Partial<Record<Domain, string>> = {};
       for (const [domain, enabled] of this.pendingCaptures) {
         try {
           await this.applyCapture(domain, enabled);
         } catch (error) {
+          this.assertTarget();
           failures[domain] = (error as Error).message;
         }
       }
@@ -418,7 +492,7 @@ export class SceneController {
     });
   }
   private async applyCapture(domain: Domain, enabled: boolean) {
-    await this.host.capture(domain, enabled);
+    await this.targetOperation(() => this.host.capture(domain, enabled));
     if (enabled) this.paused.delete(domain);
     else this.paused.add(domain);
     this.pendingCaptures.delete(domain);
@@ -427,7 +501,9 @@ export class SceneController {
   private scheduleLeaseRetry() {
     if (!Object.values(this.errors).some((error) => /租约|等待.*秒/.test(error ?? ''))) return;
     if (this.retryTimer) clearTimeout(this.retryTimer);
+    const targetKey = this.host.snapshot().targetKey;
     this.retryTimer = setTimeout(() => {
+      if (targetKey !== this.host.snapshot().targetKey) return;
       this.appliedKey = undefined;
       void this.reconcile().catch(() => undefined);
     }, 16100);
@@ -437,6 +513,7 @@ export class SceneController {
     const scene = this.active;
     return JSON.stringify([
       snapshot.key,
+      snapshot.targetKey,
       snapshot.connected,
       scene?.id,
       scene?.httpRules ?? [],
@@ -446,6 +523,8 @@ export class SceneController {
   }
   private async apply(force = false) {
     if (!this.loaded) return;
+    this.assertTarget();
+    if (this.run) this.assertTarget(this.run.targetKey);
     const snapshot = this.host.snapshot();
     if (snapshot.proxyRulesUnreachable) return;
     const scene = this.active;
@@ -461,14 +540,16 @@ export class SceneController {
       if (this.retryTimer) clearTimeout(this.retryTimer);
       for (const domain of ['http', 'ws'] as const) {
         try {
-          await this.host.disable(domain);
+          await this.targetOperation(() => this.host.disable(domain));
         } catch (error) {
+          this.assertTarget();
           this.errors[domain] = String((error as Error).message);
         }
       }
       try {
-        await this.host.project(http, ws);
+        await this.targetOperation(() => this.host.project(http, ws));
       } catch (error) {
+        this.assertTarget();
         this.errors.http ??= (error as Error).message;
         this.errors.ws ??= (error as Error).message;
       }
@@ -484,8 +565,9 @@ export class SceneController {
         )
           continue;
         try {
-          await this.host.enable(domain);
+          await this.targetOperation(() => this.host.enable(domain));
         } catch (error) {
+          this.assertTarget();
           this.errors[domain] = (error as Error).message;
         }
       }
@@ -513,6 +595,8 @@ export class SceneController {
       if (state.proxyRulesUnreachable && this.active)
         return { status: 'error' as const, message: stale ?? '代理控制连接已断开，旧规则可能仍在生效' };
       if (this.errors[domain]) return { status: 'error' as const, message: this.errors[domain] };
+      const error = domain === 'http' ? state.httpError : state.wsError;
+      if (error) return { status: 'error' as const, message: error };
       if (
         this.active &&
         rules.some((rule) => rule.enabled) &&
@@ -526,8 +610,6 @@ export class SceneController {
         return { status: 'unsupported' as const, message: '代理模式不支持 WS Mock' };
       if (!state.connected) return { status: 'pending' as const, message: '待连接' };
       if (this.applying) return { status: 'pending' as const, message: '正在同步场景' };
-      const error = domain === 'http' ? state.httpError : state.wsError;
-      if (error) return { status: 'error' as const, message: error };
       const applied = domain === 'http' ? state.httpApplied : state.wsApplied;
       return {
         status: applied ? ('applied' as const) : ('pending' as const),

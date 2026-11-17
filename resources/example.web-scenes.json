@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "scenes": [
+    {
+      "id": "web-form",
+      "name": "Web form actions",
+      "httpRules": [],
+      "wsRules": [],
+      "targets": {
+        "entry": { "source": "web", "testId": "entry" },
+        "submit": { "source": "web", "role": "button", "name": "Submit" },
+        "result": { "source": "web", "testId": "result" }
+      },
+      "actions": [
+        {
+          "id": "submit",
+          "name": "Submit form",
+          "description": "Start on the fixture form. No Mock required. Ends with Submitted text; verify business network separately.",
+          "inputs": { "value": { "required": true, "secret": true } },
+          "steps": [
+            { "id": "fill", "type": "enter_text", "target": "entry", "text": "${inputs.value}" },
+            { "id": "submit", "type": "tap", "target": "submit" },
+            {
+              "id": "done",
+              "type": "wait_for_widget",
+              "target": "result",
+              "state": "text_contains",
+              "text": "Submitted"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -45,6 +45,18 @@ flowchart TD
 
 ## 目标身份与状态隔离
 
+Phase-01 的公共边界落在 `src/runtime/targets.ts` 和 `src/runtime/network.ts`：
+`RuntimeTargetRef` 固定 projectId、workspacePath、runtimeId、generation，能力返回 supported 或明确原因；
+`RuntimeHttpAdapter` 提供状态、列表、详情和采集开关，`RuntimeSceneAdapter` 提供激活与重载。
+这些接口仅使用值类型，不导入 VM RPC、设备控制器或浏览器对象。
+`RuntimeTargetRegistry` 负责唯一选择和调用前后校验；错误区分 NOT_FOUND、AMBIGUOUS、DISCONNECTED、STALE、UNSUPPORTED。
+扩展的 Flutter 与代理 Host 分别绑定固定控制器和历史来源，MCP `target:{runtimeId,generation}` 来自 `list_sessions.runtimeTargets`。
+旧 sessionId 在唯一目标时仍可省略 target；同项目多个已连接目标必须显式选择，不能按工作台焦点重定向。
+
+Scene 定义共享，激活文件和控制器按 VM/代理隔离。`runtime-legacy-owner.json` 只将旧激活状态归给首次迁移时的目标，
+另一目标从未激活开始；两个运行时分别保存规则、同步错误和采集状态。Scene 排队、跨 await 调用及测试恢复均固定代次；
+代次变化后停止后续副作用，不能把旧测试的临时规则或采集恢复到新连接。失效运行可释放本地所有权，同时保留结果未确认诊断。
+
 区分项目身份、运行时身份和 UI 页面身份：
 
 - 项目：已有 projectId 加工作区实际路径，用于配置、Scene 库和本机存储隔离。

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { webSelectorSchema } from '../browser/ui-schema';
+import type { Selector } from './model';
 
 const key = z.union([z.string().min(1).max(512), z.number().int().safe()]);
 const match = {
@@ -12,7 +14,7 @@ const match = {
 };
 const nonempty = (s: Record<string, unknown>) => Object.values(s).some((value) => value !== undefined);
 const ancestor = z.object(match).strict().refine(nonempty, '祖先条件不能为空。');
-export const uiSelectorSchema = z
+const nativeSelectorSchema = z
   .object({ source: z.enum(['flutter', 'device']).optional(), ...match, ancestor: ancestor.optional() })
   .strict()
   .refine(
@@ -20,6 +22,7 @@ export const uiSelectorSchema = z
       nonempty(Object.fromEntries(Object.entries(s).filter(([k]) => k !== 'source' && k !== 'ancestor'))),
     '选择器不能为空。',
   );
+export const uiSelectorSchema: z.ZodType<Selector> = z.union([nativeSelectorSchema, webSelectorSchema]);
 const point = z
   .object({ x: z.number().finite().min(0).max(100000), y: z.number().finite().min(0).max(100000) })
   .strict();
@@ -31,12 +34,20 @@ const rect = z
     height: z.number().finite().positive(),
   })
   .strict();
-const session = { sessionId: z.string().min(1).max(256) };
+const session = {
+  sessionId: z.string().min(1).max(256),
+  target: z
+    .object({ runtimeId: z.string().min(1).max(256), generation: z.number().int().min(0) })
+    .strict()
+    .optional(),
+};
 const backend = { backend: z.enum(['auto', 'flutter', 'device']).optional() };
 const timeout = { timeoutMs: z.number().int().min(100).max(30000).optional() };
 const target = { key: key.optional(), ancestorKey: key.optional(), selector: uiSelectorSchema.optional() };
 const duration = { durationMs: z.number().int().min(40).max(10000).optional() };
 function validateTarget(args: Record<string, any>, ctx: z.RefinementCtx, allowPoint = false) {
+  if (args.selector?.source === 'web')
+    ctx.addIssue({ code: 'custom', message: 'Web selectors require an explicit browser Page target.' });
   const count =
     Number(args.key !== undefined) + Number(args.selector !== undefined) + Number(args.point !== undefined);
   if (

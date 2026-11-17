@@ -14,6 +14,47 @@ interface CapabilityRoute {
 /** Task vocabulary shared by initialization, offline discovery and capability prompts. */
 export const capabilityRoutes = [
   {
+    id: 'browser',
+    title: '托管浏览器运行时',
+    requests: ['Web 项目', '浏览器 HTTP Mock', '创建浏览器', '网页导航', '网页截图', '网页操作', 'Web Scene'],
+    tools: [
+      'get_browser_status',
+      'prepare_browser',
+      'create_browser_context',
+      'list_browser_pages',
+      'open_browser_page',
+      'navigate_browser_page',
+      'reload_browser_page',
+      'close_browser_page',
+      'close_browser_context',
+      'get_browser_ws_message',
+      'list_tests',
+      'run_test',
+      'get_test_run',
+      'cancel_test_run',
+      'get_ws_connections',
+      'get_ws_messages',
+      'send_ws_message',
+      'inject_ws_message',
+      'get_ui_snapshot',
+      'find_widget',
+      'tap',
+      'enter_text',
+      'wait_for_widget',
+      'scroll',
+      'press_key',
+      'take_screenshot',
+      'list_scene_actions',
+      'run_scene_action',
+      'get_scene_action_run',
+      'cancel_scene_action_run',
+    ],
+    prompt: 'create_browser_context',
+    topics: ['overview', 'http'],
+    workflow:
+      '先查阅 overview.browserRuntime；显式准备私有依赖，再创建 Context。固定 target 和 pageId，激活 HTTP 规则后首次导航。Web selector 使用 source:web 与 testId 或 role/name，可指定 frame.testId；截图 source:web、mode:screen/full_page。已有动作继续使用 Scene v2 和 run_scene_action，保持当前 Mock；不支持设备手势和 hide_keyboard，整条运行预检拒绝。',
+  },
+  {
     id: 'screenshot',
     title: 'App 截图与长截图',
     requests: ['截图', '截屏', '看当前页面', '长截图', '布局对比', 'screenshot'],
@@ -50,7 +91,7 @@ export const capabilityRoutes = [
     prompt: 'http_mock',
     topics: ['http'],
     workflow:
-      '只查请求无需开启 Mock。需要模拟时按实际接口契约增量编辑 files.scenes，reload_rules 后激活所需场景；检查相关 Dio 接入，以本轮新请求、规则命中与页面验证，不能从 applied 推断命中。',
+      '先从 list_sessions.runtimeTargets 选择运行目标，网络工具可传 target:{runtimeId,generation}；多连接目标必须显式选择，HTTP 查询失败不回退另一库。VM 与代理的历史、采集和 Mock 分别路由。只查请求无需开启 Mock。需要模拟时按实际接口契约增量编辑 files.scenes，reload_rules 后激活所需场景；检查相关 Dio 接入，以本轮新请求、规则命中与页面验证，不能从 applied 推断命中。',
   },
   {
     id: 'ws',
@@ -60,7 +101,7 @@ export const capabilityRoutes = [
     prompt: 'websocket_mock',
     topics: ['ws'],
     workflow:
-      '确认准确业务连接及 WS 采集。inject_ws_message 向 App 注入模拟服务端消息，send_ws_message 经 App 当前真实连接向服务端发送；text 与 topic/data 二选一，仅收发无需激活场景。规则替换/丢弃按场景配置，以本轮消息和业务结果验证。',
+      '从 list_sessions.runtimeTargets 选择 Flutter 目标并固定 target:{runtimeId,generation}；代理 WS 不支持，不切换 VM 重试。确认准确业务连接及 WS 采集。inject_ws_message 向 App 注入模拟服务端消息，send_ws_message 经 App 当前真实连接向服务端发送；text 与 topic/data 二选一，仅收发无需激活场景。规则替换/丢弃按场景配置，以本轮消息和业务结果验证。',
   },
   {
     id: 'ui',

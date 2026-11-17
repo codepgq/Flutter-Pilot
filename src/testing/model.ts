@@ -44,6 +44,7 @@ const http = z
     responseJson: fields.optional(),
     status: z.number().int().min(100).max(599).optional(),
     mocked: z.boolean().optional(),
+    ruleId: z.string().min(1).max(256).optional(),
     extract: z.record(variable, pointer).optional(),
     timeoutMs: duration,
   })

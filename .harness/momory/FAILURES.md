@@ -1,5 +1,19 @@
 # 问题与验证记录
 
+## Web 发布审核修复（2026-11-17）
+
+- 直接浏览器只读工具的取消 / 超时被通用执行锁当作未确认输入，后续 Context 一直 WORKFLOW_BUSY。按工具是否只读区分，等待、快照、查找和截图失败释放锁；真实点击未确认继续阻止重放。控制器五类回归及 HTML/React/Vue 真实取消复验覆盖。
+- MCP 宿主先处理 Flutter 运行查询 / 取消，导致显式浏览器 target 未经过 BrowserController。浏览器分发移至这些快捷分支之前，四种运行工具均经真实认证 IPC 验证；断线运行仍按旧 target 查询归档。只测浏览器控制器或夹具 MCP 服务不能替代扩展分发验证。
+
+## Web 与双端验收发现并闭环（2026-11-17）
+
+- Playwright route 会处理预检并补 CORS，不适合作为保留浏览器安全语义的 HTTP 核心；生产改为 CDP Fetch Request/Response，真实 HTTP/HTTPS/CORS/OPTIONS 回归。SSE 收到响应头立即继续，超限/二进制不改正文。
+- Worker 强杀可能遗留 Chromium 进程树；父进程仅按认证 Worker 报告的 PID 清理自有进程组和临时 Profile，故障注入验证 Flutter 继续工作。断线运行报告单独有界保留，避免故障证据随 Context 消失。
+- TestController 曾在 cleanup 前暴露终态；改为清理/释放完成后可见，清理失败阻止新 run，恢复只清理不重放。只读等待取消不再将整个 Context 标为未确认写锁。
+- 双端真实 MCP 验收发现 Flutter UI schema 缺显式 target，proxy action/test 可误走 native 分支；补 native target schema、代次/能力及队列内检查，协议与宿主回归，双端实测通过。
+- 旧 Flutter smoke 仍用 SceneStore.read/save 和 scenes.document；已迁移真实 v2 resource API。测试夹具必须用正式 AutomationController 执行文本等待，不能绕过路由层。示例缺 package_config 时需先 pub get；启动进程已退出应立即报告原因，不能盲等300秒。
+- 实际 Agent 验收与 SDK 分开：忽略用户配置会丢自定义模型认证；仅复用选定模型端点/认证，固定本地 MCP 工具白名单，并为这些已授权夹具工具声明客户端允许策略。真实模型完成一次提交、查询及清理；不伪造模型返回或用握手替代业务证据。
+
 ## MCP 功能入口与任务范围指引不完整（2026-11-14）
 
 - 状态：源码已修复。截图虽有工具和同名 Prompt，但初始化主要罗列工具，缺少明确用户措辞映射；启动 Prompt 无条件继续 Mock/Scene，状态查询和截图也套用交互步骤，设备验收脚本还保留旧固定数量。

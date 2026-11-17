@@ -10,6 +10,7 @@ export const testPromptPlans = {
   run_test: {
     topics: ['workflow', 'http', 'ws', 'ui'],
     steps: [
+      'Web 测试先 list_browser_pages，固定 target:{runtimeId,generation,pageId}，backend 省略或 auto。复用 Test Case v2 与 Web selectors；setup/主操作/Mock 共用冻结快照，所有步骤预检后再输入。同 Context 锁阻止环境修改；其他 Context 独立。HTTP 可断言 ruleId，响应提取的订单 ID 需同时关联 WS 和最终 UI。',
       '先 list_tests 选择已保存用例，list_scene_actions 传入 action.sceneId 核对操作参数、明确起始页面和登录账号。需要登录时显式配置 setup 操作并验证目标账号，不能把 Mock token 等同 App 已登录。',
       '调用 run_test 传 testId、字符串 inputs 和可选 backend。运行器在触发主流程前建立网络观察基线，持有操作权；临时 Scene 和有状态 Mock 不写入持久激活状态，结束恢复自身环境。',
       '保存 runId，使用 get_test_run 查询终态。事件必须等待指定本轮 HTTP 断言成功再注入，以同一 orderId 关联响应、WS 和订单行；仅存在 pending 或收到工具成功返回不能算通过。',
@@ -27,6 +28,7 @@ export const testPromptPlans = {
   cancel_test_run: {
     topics: ['workflow'],
     steps: [
+      'Web 终态 cleanupPending 时再次 cancel_test_run 仅重试清理，返回 cleanupRecovered；不会重放 UI 或注入。清理失败阻止该 Context 新测试，旧失败运行不能改报 passed。',
       '使用真实 runId 调用 cancel_test_run，随后 get_test_run 等待终态及临时 Mock 清理。当前动作可能已经发出，取消不能回滚登录、真实订单或注入事件。',
       '终态前不要插入 UI 操作或启动另一个运行；uncertain 表示结果未确认，先检查当前页面和本轮记录，不自动重试 confirm、事件或整个用例。',
     ],

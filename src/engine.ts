@@ -19,6 +19,8 @@ export interface EngineStartOptions {
   preferredPort: number;
   settings: EngineSettings;
   startPaused?: boolean;
+  /** Explicit trust bundle for a private upstream CA, retaining TLS verification. */
+  upstreamTrustedCa?: string;
 }
 export interface EngineState {
   status: 'stopped' | 'starting' | 'running' | 'error';
@@ -145,6 +147,8 @@ export class EngineManager extends EventEmitter {
         String(proxyPort),
       ];
       if (options.startPaused) args.push('--set', 'server=false');
+      if (options.upstreamTrustedCa)
+        args.push('--set', `ssl_verify_upstream_trusted_ca=${options.upstreamTrustedCa}`);
       const child = spawn(options.executable, args, {
         env: {
           ...process.env,

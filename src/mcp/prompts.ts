@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { automationPromptPlans } from '../automation/prompts';
 import { sceneActionPromptPlans } from '../workflows/prompts';
 import { testPromptPlans } from '../testing/prompts';
+import { browserMcpTools } from '../browser/protocol';
 
 const templates = {
   ...capabilityPromptTemplates,
@@ -12,6 +13,8 @@ const templates = {
     description: '构造下单成功/失败、资产数据等 API 业务状态，按场景验证规则命中与页面表现。',
     topics: ['http'],
     steps: [
+      '普通 Web 项目先按 overview.webProxy / http.webProxy 在工作台登记本地 URL 与子项目根，显式准备代理，用实际监听端口接入专用浏览器并信任 CA。手动触发网页；HTTP 代理无 page 身份，不覆盖 WS/UI/SSR、缓存或 Service Worker 绕行流量，CORS/OPTIONS 需明确响应。',
+      '先 list_sessions 查看 runtimeTargets；网络工具可传 target:{runtimeId,generation}，多个连接目标必须明确选择。VM 与代理历史、采集和 Mock 分别路由，同目标工作台与 MCP 一致，查询失败不回退其他库。',
       '根据任务确定请求 method、host、path、预期响应和触发方式；先用 get_network_status 查看 files.scenes、采集与 Dio Mock 状态，必要时查询已有请求确认接口，不能猜测业务字段。',
       '任务包含多种状态时，按实际业务协议列出本次需要的场景，例如下单成功、业务失败、余额不足或不同资产信息；区分 HTTP 错误与 HTTP 200 中的业务失败码，逐个切换场景并验证，不同时启用互相冲突的规则。',
       '使用 Agent 文件工具读取 files.scenes，在目标场景的 httpRules 中按 ID 增量修改或追加规则，保留其他场景和规则。核对匹配范围、priority 与 enabled；JSON 正文序列化为字符串，避免空 match 意外匹配全部请求。',
@@ -27,6 +30,8 @@ const templates = {
     description: '模拟 WS 业务事件：替换/丢弃消息、向 App 注入推送或通过真实连接发送 topic/data。',
     topics: ['ws'],
     steps: [
+      '托管 Web 使用 list_browser_pages 固定 Context，连接创建前已安装路由；get_ws_connections/get_ws_messages 与 get_browser_ws_message 读取原始/有效消息。send/inject 传准确 Context target 和 connectionId，不能猜同 URL 连接。HMR 排除，二进制/超限不编辑，关闭采集暂停 Mock；默认验证 WSS TLS，开发 CA 只可显式信任临时 Profile。以下 VM 注入步骤仅用于 Flutter。',
+      '先从 list_sessions.runtimeTargets 选择 Flutter 运行目标并在网络调用传 target:{runtimeId,generation}；代理不支持 WS，不切换到 VM 重试。目标失效或断开先重新发现并核对业务结果，不自动重放。',
       '先用 get_network_status 获取 files.scenes 和 WS 状态，再调用 get_ws_connections 确认业务连接、URL 和方向。业务 WebSocket 与 Dart VM 调试连接不同；没有连接时先完成任务需要的正常业务导航。',
       '确定本次是规则 Mock、向 App 注入模拟服务端事件，还是通过 App 的真实连接发送给服务端；按已知业务协议确定 topic 和 data，例如订单状态变化或资产更新，不凭示例猜测字段。',
       '需要规则 Mock 时，使用 Agent 文件工具增量编辑 files.scenes 中目标场景的 wsRules，保留其他场景和规则；按明确 URL、inbound/outbound 和 contains 缩小匹配范围。replace 为整条文本替换，JSON 必须序列化；drop 为丢弃，二进制消息只读。仅注入或发送消息时无需创建规则或激活场景，只需 WS 采集接入。',
@@ -56,6 +61,7 @@ const templates = {
       '完整业务联调：复用或启动 App、准备 API/WS Mock、执行 Scene 操作、验证 HTTP/WS/UI 或 Test Case，并归档公共 actions。',
     topics: ['workflow'],
     steps: [
+      '通过 list_sessions 选择项目及 runtimeTargets 中的运行目标，网络工具显式传 target:{runtimeId,generation}；多连接目标不能依赖焦点推断。Flutter UI、热更新与设备能力仍属于 Flutter 目标，代理仅提供 HTTP。',
       '重复的登录、填表、下单确认操作优先复用 Scene 操作：先 list_scenes，再按 sceneId 调用 list_scene_actions。首次探索和验证后在 scenes/ 目录 保存 targets 与 actions，reload_rules 更新快照，后续 run_scene_action 一次启动，由插件执行，不逐步重新寻找控件或调用模型；get_scene_action_run 查看进度，cancel_scene_action_run 停止。',
       '需要可重复业务测试时，先 list_tests，按 files.tests 引用同一 Scene 操作，配置本轮 HTTP 参数/响应提取、关联 WS 和精确订单行 UI 断言；run_test 启动、get_test_run 查询，只有 passed 表示通过，cancel_test_run 取消。临时 Scene/有状态 Mock 随本轮恢复；先验证本轮请求，再注入同一订单事件。',
       '把任务拆成接口或消息条件、Mock 预期、界面操作和可观察的通过标准；按实际涉及的域读取 http、ws、ui 指南。不要求不存在的网络事件，不凭空增加测试场景。',
@@ -73,6 +79,19 @@ const templates = {
 
 /** Every runtime capability must have an explicit prompt; new tools fail type checking until mapped. */
 export const toolPromptPlans = {
+  ...(Object.fromEntries(
+    Object.keys(browserMcpTools).map((name) => [
+      name,
+      {
+        topics: ['http', 'overview'] as const,
+        steps: [
+          '查阅 overview.browserRuntime。只读状态和离线指南不启动 Worker；显式 prepare_browser 后 create_browser_context，固定返回的 target:{runtimeId,generation}，再 open_browser_page，页面调用还需 pageId。首次导航前安装规则，禁止附着日常 Profile 或叠加代理 Mock。',
+          '使用 list_browser_pages 核对准确身份、Service Worker/cache 策略；HTTP 共享 Scene 和网络工具，先激活后导航首请求。过期/歧义/不支持在副作用前失败；取消、超时、Worker 退出先核对结果，不重放，关闭自有 Context 恢复。',
+          'Web WS 复用 Scene wsRules 与网络工具；get_browser_ws_message 只读原始/有效消息。Context/Page/connectionId 必须精确，HMR 不纳入业务。首个 Context 可显式 trustedCertificates 信任开发 CA，仅临时 Profile，状态返回指纹；默认 TLS 校验不能跳过。',
+        ],
+      },
+    ]),
+  ) as Record<keyof typeof browserMcpTools, { topics: readonly ['http', 'overview']; steps: string[] }>),
   get_usage_guide: {
     topics: ['overview'],
     steps: [
@@ -83,7 +102,7 @@ export const toolPromptPlans = {
   list_sessions: {
     topics: ['overview'],
     steps: [
-      '调用 list_sessions，按 workspace 与用户任务选择唯一项目，检查 vmConnected、capabilities.appLaunch 的设备/已有会话和保存配置，优先复用已运行 App；不要把调试会话 ID 当作工具 sessionId。没有候选或无法确定时报告阻碍。',
+      '调用 list_sessions，按 workspace 与用户任务选择唯一项目，检查 runtimeTargets 的身份、generation、连接及能力；网络调用选择 target:{runtimeId,generation}，多连接目标必须显式指定。再检查 vmConnected、capabilities.appLaunch 的设备/已有会话和保存配置，优先复用已运行 App；不要把调试会话 ID 当作工具 sessionId。没有候选或无法确定时报告阻碍。',
     ],
   },
   start_app: {
@@ -110,6 +129,7 @@ export const toolPromptPlans = {
   get_network_status: {
     topics: ['http', 'ws'],
     steps: [
+      'Web 手动浏览器代理说明见 http.webProxy：选择 proxy target；实际监听端口、CA 和连接错误在工作台连接与诊断查看。未启动代理只读取状态不准备引擎。',
       '调用 get_network_status 获取 files.scenes、采集/Mock 开关及分域接入状态；HTTP 关注 attachedDioInstances、coverageMessage 与本流程所需客户端，纯操作不要求所有网络域就绪。文件已加载不等于运行时应用，更不等于请求已命中；只查询无需开启 Mock。',
     ],
   },
@@ -187,6 +207,23 @@ export const toolPromptPlans = {
   ...testPromptPlans,
 } as const satisfies Record<McpToolName, Pick<PromptTemplate, 'topics' | 'steps'>>;
 
+const networkTargetTools = new Set([
+  'get_network_status',
+  'get_requests',
+  'get_request',
+  'get_ws_connections',
+  'get_ws_messages',
+  'inject_ws_message',
+  'send_ws_message',
+  'reload_rules',
+  'set_capture_enabled',
+  'list_scenes',
+  'activate_scene',
+  'deactivate_scene',
+]);
+const networkTargetStep =
+  '从 list_sessions.runtimeTargets 选定 target:{runtimeId,generation} 并在同轮网络调用保持一致；多连接目标必须明确选择，旧 sessionId 仅在唯一连接目标时兼容。离线 Scene 查阅和配置可选择明确目标或原默认目标。HTTP 不回退其他库；WS 支持 Flutter 和托管浏览器，proxy 不支持；失效代次或断开运行时在副作用前拒绝，不自动重放。';
+
 const toolTemplates: Record<string, PromptTemplate> = Object.fromEntries(
   Object.keys(mcpTools).map((name) => {
     const plan = toolPromptPlans[name as McpToolName];
@@ -195,7 +232,7 @@ const toolTemplates: Record<string, PromptTemplate> = Object.fromEntries(
       {
         description: `${name}：${mcpTools[name as McpToolName].description}`,
         topics: plan.topics,
-        steps: plan.steps,
+        steps: networkTargetTools.has(name) ? [networkTargetStep, ...plan.steps] : plan.steps,
       },
     ];
   }),

@@ -87,7 +87,9 @@ processChild.stdout.on('data', (chunk) => {
     }
   }
 });
-processChild.stderr.on('data', () => undefined);
+processChild.stderr.on('data', (value) =>
+  logs.push(String(value).replace(/(?:ws|http):\/\/\S+/g, '[endpoint]')),
+);
 const waitFor = async (predicate, timeout = 15000) => {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
@@ -167,6 +169,8 @@ try {
   console.log('Building unchanged Flutter example; waiting for VM…');
   await waitFor(() => {
     if (processError) throw processError;
+    if (processChild.exitCode !== null)
+      throw new Error(`Flutter exited ${processChild.exitCode}: ${logs.slice(-12).join('\n')}`);
     return uri && started;
   }, 300000);
   await session.connect(uri, []);

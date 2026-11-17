@@ -3,6 +3,7 @@ export const sceneActionPromptPlans = {
   list_scene_actions: {
     topics: ['workflow'],
     steps: [
+      'Web 操作先 list_browser_pages 固定 Context/Page，传 target:{runtimeId,generation,pageId}；targets 保存 source:web 的 testId 或 role/name，可含 frame.testId。纯动作与公共 call 保持当前 Mock。浏览器不支持 hide_keyboard/设备步骤，整条预检拒绝；以下 Key/设备约束仅适用 Flutter。',
       '调用 list_scene_actions 取得指定 sceneId 的共享 targets、命名操作 actionId、说明及参数。优先按起始页和参数复用现有操作；只读查询不会开启 Mock 或连接 VM。',
       'steps[].target 引用 targets 中的别名，执行器自动解析为真实 Widget Key 并匹配当前已挂载控件，无需每步额外 find_widget 或截图。仅缺少操作或定义失效时探索；任务允许改源码时补稳定 Key 并复验，禁止临时 ref 和坐标。',
       '只在 scenes/ 目录 增量保存 targets/actions，保留其他场景；公共步骤归档为纯操作 Scene，业务入口通过 call 和显式 inputs 复用。说明列起始页、账号、参数和预期终点，归档文档只索引 sceneId/actionId。保存后 reload_rules，再次 list_scene_actions 确认。',
@@ -11,6 +12,7 @@ export const sceneActionPromptPlans = {
   run_scene_action: {
     topics: ['workflow', 'ui'],
     steps: [
+      '托管 Web 页面必须传准确 Page target，backend 省略或 auto；复用 Scene v2 Web targets 与公共 call。整条展开预检后才输入，同 Context 锁阻止环境修改与插入点击，secret 逐层脱敏。Web 不执行 hide_keyboard/设备手势，预检失败不会先提交前面的步骤。',
       '先 list_sessions 确认项目和设备并复用已有 App；未运行时按已保存配置 start_app，TIMEOUT 先查会话不重复启动。list_scene_actions 选择已有流程，核对输入、起始页、登录账号和通道。需要 Mock 时另行 reload_rules、activate_scene 并检查相关域与 Dio 接入，不等待无关域；操作来源 Scene 与当前 Mock 可不同，不隐式切换环境。',
       '记录触发前的请求/消息基线，传 sceneId、actionId、字符串 inputs 和可选 backend。全部步骤及子流程预检后返回 runId，插件自动按 targets 的真实 Key 每步重新定位和执行，无需每步 find_widget、整页快照或模型判断；输入后 hide_keyboard 确认键盘稳定收起再继续。',
       '使用 get_scene_action_run 查询直到终态；单次 MCP 调用返回后流程继续运行。WORKFLOW_BUSY 时查询已有运行，不能插入点击、输入或热重启。需要停止时 cancel_scene_action_run。',

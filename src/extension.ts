@@ -14,13 +14,19 @@ import * as vscode from 'vscode';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { readFile, mkdir, writeFile, rename, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { EngineManager } from './engine';
 import { RuntimeManager } from './runtime';
+import { RuntimeTargetRegistry, runtimeGenerationKey, type RuntimeTarget } from './runtime/targets';
+import type { RuntimeHttpAdapter } from './runtime/network';
+import { BrowserController } from './browser/controller';
+import { browserMcpTools } from './browser/protocol';
+import { webUiTools } from './browser/ui-schema';
 import { SceneStore } from './scenes';
 import type { SceneDocument } from './scene-model';
 import { migrateScenes } from './scene-migration';
 import { SceneController } from './scene-controller';
-import { isFlutterWorkspace } from './discovery';
+import { discoverWebProject, isFlutterWorkspace } from './discovery';
 import { VmSession } from './vm/session';
 import { VmUiController } from './vm/ui';
 import { executeMcpScreenshot, takeAppScreenshot } from './screenshot';
@@ -105,7 +111,14 @@ export async function activate(context: vscode.ExtensionContext) {
         'workspaces',
         createHash('sha256').update(key).digest('hex').slice(0, 24),
       );
-      const project = await openProjectBinding(folder.uri.fsPath, legacy);
+      const web = await discoverWebProject(folder.uri.fsPath);
+      const flutter = await isFlutterWorkspace(folder.uri.fsPath).catch((error) => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+        throw error;
+      });
+      const project = await openProjectBinding(folder.uri.fsPath, legacy, {
+        defaultMode: web && !flutter ? 'proxy' : 'vm',
+      });
       const storage = await prepareProjectStorage(context.globalStorageUri.fsPath, key, project.projectId);
       if (
         shuttingDown ||
@@ -220,7 +233,11 @@ export async function activate(context: vscode.ExtensionContext) {
       folders.map(async (folder) => {
         try {
           if (
-            !(await isFlutterWorkspace(folder.uri.fsPath)) ||
+            (!(await isFlutterWorkspace(folder.uri.fsPath).catch((error) => {
+              if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+              throw error;
+            })) &&
+              !(await discoverWebProject(folder.uri.fsPath))) ||
             shuttingDown ||
             !vscode.workspace.workspaceFolders?.some(
               (current) => current.uri.toString() === folder.uri.toString(),
@@ -298,17 +315,25 @@ class Workbench {
   private workflowRunId?: string;
   private workflowError?: string;
   private executionEpoch = 0;
-  private workflowLaunch?: { key: string; signal?: AbortSignal };
-  private testLaunch?: { key: string; signal?: AbortSignal };
+  private workflowLaunch?: { key: string; store: SceneStore; signal?: AbortSignal };
+  private testLaunch?: { key: string; store: SceneStore; signal?: AbortSignal };
   private readonly tests: TestController;
   private readonly testStore: TestStore;
   private readonly testObserver: TestNetworkObserver;
   private testRunId?: string;
   private testList: Awaited<ReturnType<TestController['list']>> | undefined;
   private testError?: string;
-  private readonly testEnvironments = new Map<string, { http: boolean; ws: boolean; needsWs: boolean }>();
+  private readonly testEnvironments = new Map<
+    string,
+    { target: RuntimeTarget; http: boolean; ws: boolean; needsWs: boolean }
+  >();
   private readonly testCleanup = new Map<string, Promise<void>>();
-  private readonly mcpNetwork: McpNetworkController;
+  private readonly networks = {} as Record<'vm' | 'proxy', McpNetworkController>;
+  private readonly targetRegistry = new RuntimeTargetRegistry();
+  private readonly targetEpochs = new Map<string, number>();
+  private get mcpNetwork() {
+    return this.networks[this.mode];
+  }
   private readonly mcpLifecycle: McpLifecycleController;
   private readonly mcpAppLaunch: McpAppLaunchController;
   private mcpServer?: McpSessionServer;
@@ -332,8 +357,16 @@ class Workbench {
   private initialized = false;
   private readonly engine = new EngineManager();
   private readonly runtime: RuntimeManager;
-  private readonly store: SceneStore;
-  private readonly scenes: SceneController;
+  private readonly browser: BrowserController;
+  private readonly legacySceneOwner: 'vm' | 'proxy';
+  private readonly stores = {} as Record<'vm' | 'proxy', SceneStore>;
+  private readonly sceneControllers = {} as Record<'vm' | 'proxy', SceneController>;
+  private get store() {
+    return this.stores[this.mode];
+  }
+  private get scenes() {
+    return this.sceneControllers[this.mode];
+  }
   private sceneQuery: { offset?: number; limit?: number; search?: string } = {};
   private sceneQueryRequestId = 0;
   private sceneRequestId = 0;
@@ -347,7 +380,10 @@ class Workbench {
   private preferredPort?: number;
   private readonly projectSettings: ProjectSettings;
   private readonly configuredPort?: number;
-  private rules: Rule[] = [];
+  private readonly targetRules: Record<'vm' | 'proxy', Rule[]> = { vm: [], proxy: [] };
+  private get rules() {
+    return this.targetRules[this.mode];
+  }
   private pending = new Map<string, PendingBreakpoint>();
   private history: HistoryResult = { items: [], total: 0 };
   private selected?: HistoryEntry;
@@ -363,6 +399,7 @@ class Workbench {
   private query: HistoryQuery = { limit: 30, offset: 0 };
   private proxyActive = false;
   private engineEpoch = 0;
+  private engineConnected = false;
   private lan = false;
   private connectionHost = '127.0.0.1';
   private addresses = devices.discoverConnectionAddresses();
@@ -370,7 +407,13 @@ class Workbench {
   private logs: string[] = [];
   private busy = 0;
   private lastError?: string;
-  private ruleSyncError?: string;
+  private readonly targetErrors: Partial<Record<'vm' | 'proxy', string>> = {};
+  private get ruleSyncError() {
+    return this.targetErrors[this.mode];
+  }
+  private set ruleSyncError(value: string | undefined) {
+    this.targetErrors[this.mode] = value;
+  }
   private projectNotice?: string;
   private inspection?: setup.FlutterInspection;
   private preview?: setup.SetupPreview;
@@ -389,7 +432,31 @@ class Workbench {
   ) {
     this.projectSettings = { ...project.config.settings };
     this.configuredPort = project.config.connection.configuredPort;
-    this.store = new SceneStore(project.rulesDirectory, storage);
+    this.mode = project.config.connection.mode;
+    this.browser = new BrowserController({
+      project: { projectId: project.projectId, workspacePath: folder.uri.fsPath },
+      rulesDirectory: project.rulesDirectory,
+      storage,
+      resources: join(context.extensionPath, 'resources/browser'),
+      workerPath: join(context.extensionPath, 'dist/browser-worker.cjs'),
+    });
+    this.browser.on('changed', () => this.push());
+    this.browser.on('log', (message) => this.log(message));
+    let owner = this.mode;
+    try {
+      const saved = JSON.parse(readFileSync(join(storage, 'runtime-legacy-owner.json'), 'utf8'));
+      if (saved.version !== 1 || !['vm', 'proxy'].includes(saved.mode))
+        throw new Error('运行目标激活归属记录无效');
+      owner = saved.mode;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    this.legacySceneOwner = owner;
+    for (const mode of ['vm', 'proxy'] as const)
+      this.stores[mode] = new SceneStore(
+        project.rulesDirectory,
+        mode === this.legacySceneOwner ? storage : join(storage, 'targets', mode),
+      );
     this.vm = new VmSession(
       this.storage,
       {
@@ -429,7 +496,10 @@ class Workbench {
     this.workflows = new WorkflowController(
       {
         read: async (sceneId, actionId) =>
-          this.store.prepareSnapshot(sceneId && actionId ? [{ sceneId, actionId }] : []),
+          (this.workflowLaunch?.store ?? this.store).prepareSnapshot(
+            sceneId && actionId ? [{ sceneId, actionId }] : [],
+            this.sceneControllers.vm.activeSceneId,
+          ),
         list: async (sceneId) => {
           const detail = this.store.getScene(sceneId);
           return {
@@ -444,14 +514,15 @@ class Workbench {
             actions: detail.actions,
             health: detail.health,
             errors: detail.errors,
-            mockSceneId: this.scenes.activeSceneId,
+            mockSceneId: this.sceneControllers.vm.activeSceneId,
             ...this.workflows.snapshot,
           };
         },
       },
       {
-        mockSceneId: () => this.scenes.activeSceneId,
+        mockSceneId: () => this.sceneControllers.vm.activeSceneId,
         acquire: async (owner) => {
+          const launch = this.workflowLaunch;
           if (
             this.workflowLaunch &&
             (this.workflowLaunch.key !== this.executionKey() || this.workflowLaunch.signal?.aborted)
@@ -467,6 +538,10 @@ class Workbench {
           this.workflowOwner = owner;
           try {
             await this.automation.acquireWorkflow(owner);
+            if (launch && (launch.key !== this.executionKey() || launch.signal?.aborted)) {
+              await this.automation.releaseWorkflow(owner);
+              throw new McpToolError('SESSION_INVALIDATED', '获取设备锁期间目标已变更或取消，未执行 UI。');
+            }
           } catch (error) {
             if (this.workflowOwner === owner) this.workflowOwner = undefined;
             throw error;
@@ -480,70 +555,99 @@ class Workbench {
         changed: () => this.push(),
       },
     );
-    this.scenes = new SceneController(this.store, {
-      snapshot: () => ({
-        key: `${this.mode}:${this.vmEpoch}:${this.vm.state.status}:${this.vm.state.isolates}:${this.engineEpoch}:${this.proxyActive}`,
-        mode: this.mode,
-        connected:
-          this.mode === 'vm'
-            ? this.vm.state.status === 'connected'
-            : this.engine.state.status === 'running' && this.proxyActive,
-        proxyRulesUnreachable: this.proxyActive && this.engine.state.status !== 'running',
-        httpApplied:
-          this.mode === 'vm'
-            ? this.vm.state.mockEnabled && this.vm.state.instances > 0
-            : this.proxyActive && !this.ruleSyncError,
-        wsApplied:
-          this.vm.websocket.state.mockEnabled &&
-          this.vm.websocket.state.connections.some(
-            (connection) =>
-              connection.status === 'open' &&
-              connection.capture === 'attached' &&
-              this.vm.websocket.state.rules.some(
-                (rule) =>
-                  rule.enabled &&
-                  (rule.match.connectionId === connection.id ||
-                    (!!connection.url && !!rule.match.url && wsUrlMatches(rule.match.url, connection.url))),
-              ),
-          ),
-        httpError: this.ruleSyncError,
-        wsError: this.vm.websocket.state.ruleSyncError ?? this.vm.websocket.state.error,
-      }),
-      disable: async (domain) => {
-        if (domain === 'http') {
-          await this.vm.setMockEnabled(false);
-          if (this.engine.state.status === 'running') {
-            try {
-              await this.engine.rpc('rules.sync', { version: 1, rules: [], revision: ++this.ruleRevision });
-            } catch (error) {
-              await this.engine.stop();
-              throw error;
-            }
-          } else if (this.proxyActive) await this.engine.stop();
-        } else await this.vm.websocket.setMockEnabled(false);
-      },
-      project: async (http, ws) => {
-        this.rules = http;
-        this.ruleSyncError = undefined;
-        await this.vm.updateRules(http);
-        await this.vm.websocket.updateRules(ws);
-      },
-      enable: async (domain) => {
-        if (domain === 'http') {
-          if (this.mode === 'vm') {
-            await this.vm.setCaptureEnabled(true);
-            await this.vm.setMockEnabled(true);
-          } else await this.syncRules();
-        } else {
-          await this.vm.websocket.setCaptureEnabled(true);
-          await this.vm.websocket.setMockEnabled(true);
-        }
-      },
-      capture: (domain, enabled) =>
-        domain === 'http' ? this.vm.setCaptureEnabled(enabled) : this.vm.websocket.setCaptureEnabled(enabled),
-      stopUnreachableProxy: () => this.engine.stop(),
-      changed: () => this.push(),
-    });
+    for (const mode of ['vm', 'proxy'] as const)
+      this.sceneControllers[mode] = new SceneController(this.stores[mode], {
+        snapshot: () => ({
+          targetKey: runtimeGenerationKey(this.runtimeTarget(mode)),
+          key:
+            mode === 'vm'
+              ? `vm:${this.vmEpoch}:${this.vm.state.status}:${this.vm.state.isolates}`
+              : `proxy:${this.engineEpoch}:${this.engine.state.status}:${this.proxyActive}`,
+          mode,
+          connected:
+            mode === 'vm'
+              ? this.vm.state.status === 'connected'
+              : this.engine.state.status === 'running' && this.proxyActive,
+          proxyRulesUnreachable:
+            mode === 'proxy' && this.proxyActive && this.engine.state.status !== 'running',
+          httpApplied:
+            mode === 'vm'
+              ? this.vm.state.mockEnabled && this.vm.state.instances > 0
+              : this.proxyActive && !this.targetErrors[mode],
+          wsApplied:
+            mode === 'vm' &&
+            this.vm.websocket.state.mockEnabled &&
+            this.vm.websocket.state.connections.some(
+              (connection) =>
+                connection.status === 'open' &&
+                connection.capture === 'attached' &&
+                this.vm.websocket.state.rules.some(
+                  (rule) =>
+                    rule.enabled &&
+                    (rule.match.connectionId === connection.id ||
+                      (!!connection.url && !!rule.match.url && wsUrlMatches(rule.match.url, connection.url))),
+                ),
+            ),
+          httpError: this.targetErrors[mode],
+          wsError:
+            mode === 'vm'
+              ? (this.vm.websocket.state.ruleSyncError ?? this.vm.websocket.state.error)
+              : undefined,
+        }),
+        disable: async (domain) => {
+          const target = this.runtimeTarget(mode);
+          if (domain === 'http') {
+            if (mode === 'vm') await this.vm.setMockEnabled(false);
+            if (mode === 'proxy' && this.engine.state.status === 'running') {
+              try {
+                await this.engine.rpc('rules.sync', { version: 1, rules: [], revision: ++this.ruleRevision });
+              } catch (error) {
+                this.assertRuntimeCurrent(target);
+                this.targetErrors.proxy = `代理规则未能安全清除，引擎已停止：${messageOf(error)}`;
+                await this.engine.stop();
+                throw error;
+              }
+            } else if (mode === 'proxy' && this.proxyActive) await this.engine.stop();
+          } else if (mode === 'vm') await this.vm.websocket.setMockEnabled(false);
+        },
+        project: async (http, ws) => {
+          const target = this.runtimeTarget(mode);
+          this.targetRules[mode] = http;
+          this.targetErrors[mode] = undefined;
+          if (mode === 'vm') {
+            await this.vm.updateRules(http);
+            this.assertRuntimeCurrent(target);
+            await this.vm.websocket.updateRules(ws);
+          }
+        },
+        enable: async (domain) => {
+          const target = this.runtimeTarget(mode);
+          if (domain === 'http') {
+            if (mode === 'vm') {
+              await this.vm.setCaptureEnabled(true);
+              this.assertRuntimeCurrent(target);
+              await this.vm.setMockEnabled(true);
+            } else await this.syncRules();
+          } else if (mode === 'vm') {
+            await this.vm.websocket.setCaptureEnabled(true);
+            this.assertRuntimeCurrent(target);
+            await this.vm.websocket.setMockEnabled(true);
+          }
+        },
+        capture: async (domain, enabled) => {
+          const target = this.runtimeTarget(mode);
+          if (mode === 'proxy') {
+            if (domain !== 'http') throw new McpToolError('TARGET_UNSUPPORTED', 'HTTP 代理不支持 WS 采集。');
+            this.requireEngine();
+            await this.engine.rpc(enabled ? 'proxy.start' : 'proxy.stop', {});
+            this.assertRuntimeCurrent(target);
+            await this.health();
+          } else if (domain === 'http') await this.vm.setCaptureEnabled(enabled);
+          else await this.vm.websocket.setCaptureEnabled(enabled);
+        },
+        stopUnreachableProxy: () => this.engine.stop(),
+        changed: () => this.push(),
+      });
     this.testStore = new TestStore(project.rulesDirectory);
     this.testObserver = new TestNetworkObserver({
       clock: () => readVmClock(this.vm.client),
@@ -565,8 +669,9 @@ class Workbench {
       connections: () => this.vm.websocket.store.connections(),
     });
     this.tests = new TestController(this.testStore, {
-      mockSceneId: () => this.scenes.active?.id ?? null,
+      mockSceneId: () => this.sceneControllers.vm.active?.id ?? null,
       acquire: async (owner) => {
+        const launch = this.testLaunch;
         if (
           this.testLaunch &&
           (this.testLaunch.key !== this.executionKey() || this.testLaunch.signal?.aborted)
@@ -577,6 +682,10 @@ class Workbench {
         this.workflowOwner = owner;
         try {
           await this.automation.acquireWorkflow(owner);
+          if (launch && (launch.key !== this.executionKey() || launch.signal?.aborted)) {
+            await this.automation.releaseWorkflow(owner);
+            throw new McpToolError('SESSION_INVALIDATED', '获取设备锁期间目标已变更或取消，未执行 UI。');
+          }
         } catch (error) {
           if (this.workflowOwner === owner) this.workflowOwner = undefined;
           throw error;
@@ -590,10 +699,10 @@ class Workbench {
       changed: () => this.push(),
       loadScenes: async (test, resolveMock) => {
         if (!test) throw new Error('测试快照需要明确操作引用');
-        return this.store.prepareSnapshot(
+        return (this.testLaunch?.store ?? this.store).prepareSnapshot(
           [test.action, ...(test.setup ?? []).map((s) => s.action)],
           null,
-          (actions) => resolveMock?.(actions) ?? this.scenes.activeSceneId,
+          (actions) => resolveMock?.(actions) ?? this.sceneControllers.vm.activeSceneId,
         );
       },
       prepare: (runId, sceneId, mock, requirements, snapshot) =>
@@ -604,67 +713,97 @@ class Workbench {
       http: (baseline) => this.testObserver.http(baseline),
       ws: (baseline) => this.testObserver.ws(baseline),
       injectWs: async (url, text, signal) => {
+        const target = this.runtimeTarget('vm');
         const connectionId = await this.resolveTestSocket(url, signal);
+        this.assertRuntimeCurrent(target);
         await this.vm.websocket.push(connectionId, text, signal);
+        this.assertRuntimeCurrent(target);
         return { connectionId };
       },
     });
-    this.mcpNetwork = new McpNetworkController({
-      scenesPath: this.store.file,
-      testsPath: this.testStore.file,
-      listScenes: (query) => this.scenes.summary(query),
-      activateScene: (id) => this.scenes.activate(id),
-      reloadScenes: () => this.scenes.reload(),
-      status: () => ({
-        vmConnected: this.vm.state.status === 'connected',
-        scene: { activeSceneId: this.scenes.activeSceneId, runtime: this.scenes.runtime },
-        http: {
-          captureEnabled: this.mode === 'proxy' ? this.proxyActive : !!this.vm.state.captureEnabled,
-          mockEnabled:
-            this.mode === 'proxy' ? this.scenes.runtime.http.status === 'applied' : this.vm.state.mockEnabled,
-          runtimeApplied: this.scenes.runtime.http.status === 'applied',
-          rules: this.rules.length,
-          syncError: this.ruleSyncError,
-          ...(this.mode === 'vm'
+    for (const mode of ['vm', 'proxy'] as const) {
+      const scenes = this.sceneControllers[mode];
+      this.networks[mode] = new McpNetworkController({
+        scenesPath: this.store.file,
+        testsPath: this.testStore.file,
+        listScenes: (query) => scenes.summary(query),
+        activateScene: (id) => scenes.activate(id),
+        reloadScenes: () => scenes.reload(),
+        status: () => ({
+          target: this.runtimeTarget(mode),
+          ...(mode === 'proxy'
             ? {
-                attachedDioInstances: this.vm.state.instances,
-                coverage: 'existing_dio_instances',
-                coverageMessage:
-                  '仅覆盖已接入的 Dio 实例。惰性创建客户端的首请求可能早于扫描；自动操作前应在 App 启动阶段创建所需客户端，再 reload_rules 同步，并以本轮请求验证命中。',
-                warnings: this.vm.state.warnings,
+                proxy: {
+                  ...this.engine.state,
+                  address: this.engine.state.proxyPort
+                    ? `http://${this.connectionHost}:${this.engine.state.proxyPort}`
+                    : undefined,
+                  web: this.project.config.web,
+                  attribution: 'listener_only_no_page_identity',
+                },
               }
             : {}),
+          vmConnected: this.vm.state.status === 'connected',
+          scene: { activeSceneId: scenes.activeSceneId, runtime: scenes.runtime },
+          http: {
+            captureEnabled: mode === 'proxy' ? this.proxyActive : !!this.vm.state.captureEnabled,
+            mockEnabled:
+              mode === 'proxy' ? scenes.runtime.http.status === 'applied' : this.vm.state.mockEnabled,
+            runtimeApplied: scenes.runtime.http.status === 'applied',
+            rules: this.targetRules[mode].length,
+            syncError: this.targetErrors[mode],
+            ...(mode === 'vm'
+              ? {
+                  attachedDioInstances: this.vm.state.instances,
+                  coverage: 'existing_dio_instances',
+                  coverageMessage:
+                    '仅覆盖已接入的 Dio 实例。惰性创建客户端的首请求可能早于扫描；自动操作前应在 App 启动阶段创建所需客户端，再 reload_rules 同步，并以本轮请求验证命中。',
+                  warnings: this.vm.state.warnings,
+                }
+              : {}),
+          },
+          ws:
+            mode === 'proxy'
+              ? {
+                  supported: false,
+                  captureEnabled: false,
+                  mockEnabled: false,
+                  runtimeApplied: false,
+                  rules: 0,
+                  reason: 'HTTP 代理不支持 WS。',
+                }
+              : {
+                  captureEnabled: this.vm.websocket.state.captureEnabled,
+                  mockEnabled: this.vm.websocket.state.mockEnabled,
+                  runtimeApplied: scenes.runtime.ws.status === 'applied',
+                  rules: this.vm.websocket.state.rules.length,
+                  syncError: this.vm.websocket.state.ruleSyncError,
+                },
+        }),
+        listHttp: (query) =>
+          this.historyCall<HistoryResult>('history.list', query as Record<string, unknown>, mode),
+        getHttp: (id) => this.historyCall<HistoryEntry>('history.get', { id }, mode),
+        connections: () => this.vm.websocket.store.connections(),
+        messages: async (query) => {
+          const { includeBodies, ...filters } = query as typeof query & { includeBodies?: boolean };
+          const result = await this.vm.websocket.store.list(filters);
+          return includeBodies
+            ? {
+                ...result,
+                items: await Promise.all(
+                  result.items.map(async (item) => ({
+                    ...item,
+                    ...(await this.vm.websocket.store.get(item.id)),
+                  })),
+                ),
+              }
+            : result;
         },
-        ws: {
-          captureEnabled: this.vm.websocket.state.captureEnabled,
-          mockEnabled: this.vm.websocket.state.mockEnabled,
-          runtimeApplied: this.scenes.runtime.ws.status === 'applied',
-          rules: this.vm.websocket.state.rules.length,
-          syncError: this.vm.websocket.state.ruleSyncError,
-        },
-      }),
-      listHttp: (query) => this.vm.store.list(query),
-      getHttp: (id) => this.vm.store.get(id),
-      connections: () => this.vm.websocket.store.connections(),
-      messages: async (query) => {
-        const { includeBodies, ...filters } = query as typeof query & { includeBodies?: boolean };
-        const result = await this.vm.websocket.store.list(filters);
-        return includeBodies
-          ? {
-              ...result,
-              items: await Promise.all(
-                result.items.map(async (item) => ({
-                  ...item,
-                  ...(await this.vm.websocket.store.get(item.id)),
-                })),
-              ),
-            }
-          : result;
-      },
-      setCapture: (domain, enabled) => this.scenes.setCapture(domain, enabled),
-      injectWs: (connectionId, text, signal) => this.vm.websocket.push(connectionId, text, signal),
-      sendWs: (connectionId, text, signal) => this.vm.websocket.send(connectionId, text, signal),
-    });
+        setCapture: (domain, enabled) => scenes.setCapture(domain, enabled),
+        injectWs: (connectionId, text, signal) => this.vm.websocket.push(connectionId, text, signal),
+        sendWs: (connectionId, text, signal) => this.vm.websocket.send(connectionId, text, signal),
+      });
+    }
     this.vm.client.on('disconnected', () => {
       this.vmEpoch++;
       this.ui.invalidate();
@@ -674,7 +813,7 @@ class Workbench {
     this.vmAuto = new VmAutoConnector({
       status: () => this.vm.state.status,
       connect: async (url) => {
-        await this.vm.connect(url, this.rules);
+        await this.vm.connect(url, this.targetRules.vm);
         await this.reloadHistory().catch((error) => this.report(error));
       },
       disconnect: () => this.vm.disconnect(),
@@ -701,7 +840,7 @@ class Workbench {
         this.mcpState.ui = { supported: false, reason: '热更新后请重新探测并读取界面' };
       },
       refresh: (signal) => this.vm.refreshAfterLifecycle(signal),
-      networkStatus: () => this.mcpNetwork.status(),
+      networkStatus: () => this.networks.vm.status(),
     });
     this.mcpAppLaunch = new McpAppLaunchController({
       workspace: this.folder.uri.fsPath,
@@ -733,12 +872,12 @@ class Workbench {
       connect: async (id) => {
         if (this.vm.state.status === 'disconnected') await this.vmAuto.select(id);
       },
-      networkStatus: () => this.mcpNetwork.status(),
+      networkStatus: () => this.networks.vm.status(),
     });
     this.vmAuto.on('change', () => this.push());
     this.vm.on('change', () => {
       this.vmAuto.connectionChanged();
-      this.scenes.expireTemporary(
+      this.sceneControllers.vm.expireTemporary(
         this.vm.websocket.state.connections
           .filter((connection) => connection.status === 'open')
           .map((connection) => connection.id),
@@ -762,6 +901,8 @@ class Workbench {
     });
     this.engine.on('log', (text: string) => this.log(text));
     this.engine.on('status', (state) => {
+      if (this.engineConnected && state.status !== 'running') ++this.engineEpoch;
+      this.engineConnected = state.status === 'running';
       this.proxyActive = state.proxyActive;
       if (state.status !== 'running') this.pending.clear();
       this.scheduleSceneRestore();
@@ -881,6 +1022,115 @@ class Workbench {
     this.messageQueue = next.catch(() => undefined);
     return next;
   }
+  /** Describes a backend without preparing dependencies or opening a connection. */
+  private runtimeTarget(mode: 'vm' | 'proxy'): RuntimeTarget {
+    const runtimeId = `${this.mcpSessionId}:${mode}`;
+    const epoch = mode === 'vm' ? this.vmEpoch : this.engineEpoch;
+    const connected =
+      !this.disposed &&
+      (mode === 'vm' ? this.vm.state.status === 'connected' : this.engine.state.status === 'running');
+    const previous = this.targetRegistry.list({ runtimeId })[0];
+    if (!previous || this.targetEpochs.get(runtimeId) !== epoch || (connected && !previous.connected)) {
+      this.targetEpochs.set(runtimeId, epoch);
+      return this.targetRegistry.register({
+        runtimeId,
+        projectId: this.project.config.projectId,
+        workspacePath: this.folder.uri.fsPath,
+        kind: mode === 'vm' ? 'flutter' : 'proxy',
+        connected,
+        ...(mode === 'vm'
+          ? { sessionId: this.mcpSessionId, executionScope: `flutter:${this.folder.uri.fsPath}` }
+          : {}),
+        capabilities: {
+          'http.history': { supported: true },
+          'http.capture': { supported: true },
+          'http.mock': { supported: true },
+          ...Object.fromEntries(
+            [
+              'ws.history',
+              'ws.capture',
+              'ws.mock',
+              'ws.send',
+              'ws.inject',
+              'ui.actions',
+              'ui.screenshot',
+            ].map((name) => [
+              name,
+              mode === 'vm'
+                ? { supported: true }
+                : { supported: false, reason: 'HTTP 代理目标仅支持 HTTP；请明确选择 Flutter 目标。' },
+            ]),
+          ),
+        },
+      });
+    }
+    if (!connected) this.targetRegistry.invalidate(previous);
+    return this.targetRegistry.list({ runtimeId })[0];
+  }
+  private assertRuntimeCurrent(target: RuntimeTarget) {
+    const current = this.runtimeTarget(target.kind === 'flutter' ? 'vm' : 'proxy');
+    if (current.generation !== target.generation || current.connected !== target.connected || this.disposed)
+      throw new McpToolError('TARGET_STALE', '运行目标已换代或断开，旧操作已停止，不自动重放。');
+  }
+  private networkMode(args: Record<string, unknown>): 'vm' | 'proxy' {
+    const targets = [this.runtimeTarget('vm'), this.runtimeTarget('proxy')];
+    const selector = args.target as { runtimeId: string; generation: number } | undefined;
+    if (selector) {
+      const target = targets.find((target) => target.runtimeId === selector.runtimeId);
+      if (!target) throw new McpToolError('TARGET_NOT_FOUND', '运行目标不属于此项目会话。');
+      if (target.generation !== selector.generation)
+        throw new McpToolError('TARGET_STALE', '运行目标代次已失效，请重新 list_sessions。');
+      return target.kind === 'flutter' ? 'vm' : 'proxy';
+    }
+    const connected = targets.filter((target) => target.connected);
+    if (connected.length > 1)
+      throw new McpToolError(
+        'TARGET_AMBIGUOUS',
+        '项目有多个运行目标，请从 list_sessions.runtimeTargets 显式传入 target。',
+      );
+    return connected.length ? (connected[0].kind === 'flutter' ? 'vm' : 'proxy') : this.mode;
+  }
+  private assertNetworkTarget(target: RuntimeTarget, tool: string, args: Record<string, unknown>) {
+    const mode = target.kind === 'flutter' ? 'vm' : 'proxy';
+    const current = this.runtimeTarget(mode);
+    if (current.generation !== target.generation || this.disposed)
+      throw new McpToolError('TARGET_STALE', '运行目标代次已失效，未重放操作，请重新发现目标。');
+    if (
+      !current.connected &&
+      !['get_network_status', 'list_scenes', 'reload_rules', 'activate_scene', 'deactivate_scene'].includes(
+        tool,
+      )
+    )
+      throw new McpToolError('TARGET_DISCONNECTED', '运行目标已断开，请重新发现并连接目标。');
+    if (
+      mode === 'proxy' &&
+      (tool.includes('_ws_') || (tool === 'set_capture_enabled' && args.domain === 'ws'))
+    )
+      throw new McpToolError('TARGET_UNSUPPORTED', 'HTTP 代理不支持 WS，请明确选择 Flutter 目标。');
+  }
+  private httpAdapter(mode: 'vm' | 'proxy'): RuntimeHttpAdapter {
+    const target = this.runtimeTarget(mode);
+    return {
+      target,
+      status: () => ({
+        target,
+        connected: target.connected,
+        captureEnabled: mode === 'vm' ? !!this.vm.state.captureEnabled : this.proxyActive,
+        mockEnabled:
+          mode === 'vm'
+            ? this.vm.state.mockEnabled
+            : this.sceneControllers.proxy.runtime.http.status === 'applied',
+        applied: this.sceneControllers[mode].runtime.http.status === 'applied',
+        error: this.targetErrors[mode],
+      }),
+      listHttp: (query) =>
+        mode === 'vm'
+          ? this.vm.store.list(query)
+          : this.engine.rpc('history.list', query as Record<string, unknown>),
+      getHttp: (id) => (mode === 'vm' ? this.vm.store.get(id) : this.engine.rpc('history.get', { id })),
+      setCapture: (enabled) => this.sceneControllers[mode].setCapture('http', enabled),
+    };
+  }
   private config() {
     const base = vscode.workspace.getConfiguration('flutterPilot', this.folder.uri);
     return {
@@ -909,7 +1159,7 @@ class Workbench {
     );
   }
   updateVmAutoConnect() {
-    this.vmAuto.setMode(this.mode);
+    this.vmAuto.setMode(this.vm.state.status === 'connected' ? 'vm' : this.mode);
     this.vmAuto.setEnabled(this.initialized && this.config().get<boolean>('autoConnectVm', true));
   }
   private log(text: string) {
@@ -982,10 +1232,12 @@ class Workbench {
       project: {
         id: this.project.projectId,
         name: this.project.config.name,
+        web: this.project.config.web,
         configPath: this.project.file,
         rulesPath: this.store.file,
         notice: this.projectNotice,
       },
+      browser: this.browser.snapshot(),
       logs: this.logs,
       busy: this.busy > 0 || this.mcpAppLaunch.status().busy,
       lastError: this.lastError,
@@ -1044,7 +1296,16 @@ class Workbench {
   }
   private async initializeSession() {
     await mkdir(this.storage, { recursive: true, mode: 0o700 });
-    await this.scenes.initialize();
+    await mkdir(join(this.storage, 'targets'), { recursive: true, mode: 0o700 });
+    await writeFile(
+      join(this.storage, 'runtime-legacy-owner.json'),
+      JSON.stringify({ version: 1, mode: this.legacySceneOwner }),
+      { flag: 'wx', mode: 0o600 },
+    ).catch((error) => {
+      if (error.code !== 'EEXIST') throw error;
+    });
+    await this.sceneControllers[this.mode].initialize();
+    await this.sceneControllers[this.mode === 'vm' ? 'proxy' : 'vm'].initialize();
     await this.refreshTests();
     await this.vm.websocket.init();
     // Existing HTTP facts stay intact; only positively identified upgrade records are projected.
@@ -1057,7 +1318,7 @@ class Workbench {
     }
     const connection = this.project.config.connection;
     this.mode = connection.mode;
-    this.vmAuto.setMode(this.mode);
+    this.vmAuto.setMode(this.vm.state.status === 'connected' ? 'vm' : this.mode);
     this.lan = connection.lan === true;
     if (connection.connectionHost && this.addresses.some((a) => a.host === connection.connectionHost))
       this.connectionHost = this.lan ? connection.connectionHost : '127.0.0.1';
@@ -1088,6 +1349,19 @@ class Workbench {
       this.updateVmAutoConnect();
       return;
     }
+    // Web proxy preparation is always explicit, including when an engine is cached.
+    if (
+      this.project.config.web ||
+      !(await isFlutterWorkspace(this.folder.uri.fsPath).catch((error) => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+        throw error;
+      }))
+    ) {
+      this.initialized = true;
+      this.updateVmAutoConnect();
+      this.push();
+      return;
+    }
     const executable = await this.runtime.findExecutable(
       this.config().get<string>('enginePath') || undefined,
     );
@@ -1103,7 +1377,15 @@ class Workbench {
   async applyAutoStart() {
     await this.initialize();
     this.ensureEnvironmentMutable();
-    if (this.mode === 'vm') return;
+    if (
+      this.mode === 'vm' ||
+      this.project.config.web ||
+      !(await isFlutterWorkspace(this.folder.uri.fsPath).catch((error) => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+        throw error;
+      }))
+    )
+      return;
     if (!this.config().get<boolean>('autoStart', true)) {
       await this.stop();
       return;
@@ -1201,18 +1483,27 @@ class Workbench {
     await this.health();
   }
   private async health() {
+    const target = this.runtimeTarget('proxy');
     const h = await this.engine.rpc<{ proxyActive: boolean; caCertPath?: string }>('health', {});
+    this.assertRuntimeCurrent(target);
     this.proxyActive = h.proxyActive;
     this.scheduleSceneRestore();
     this.push();
     return h;
   }
   private async syncRules() {
+    const target = this.runtimeTarget('proxy');
     try {
-      await this.engine.rpc('rules.sync', { version: 1, rules: this.rules, revision: ++this.ruleRevision });
-      this.ruleSyncError = undefined;
+      await this.engine.rpc('rules.sync', {
+        version: 1,
+        rules: this.targetRules.proxy,
+        revision: ++this.ruleRevision,
+      });
+      this.assertRuntimeCurrent(target);
+      this.targetErrors.proxy = undefined;
     } catch (e) {
-      this.ruleSyncError = `已保存，但未生效：${messageOf(e)}`;
+      this.assertRuntimeCurrent(target);
+      this.targetErrors.proxy = `已保存，但未生效：${messageOf(e)}`;
       throw e;
     }
   }
@@ -1280,7 +1571,7 @@ class Workbench {
     if (testId) this.tests.cancel(testId);
   }
   private executionKey() {
-    return `${this.mcpGeneration}:${this.vmEpoch}:${this.executionEpoch}`;
+    return `${this.mode}:${this.mcpGeneration}:${runtimeGenerationKey(this.runtimeTarget('vm'))}:${this.executionEpoch}`;
   }
   private ensureEnvironmentMutable() {
     this.ensureAppLaunchIdle();
@@ -1318,7 +1609,9 @@ class Workbench {
         'TEST_VM_REQUIRED',
         '业务测试需要当前已连接的 Flutter Debug VM，并使用 VM 模式采集本轮网络。',
       );
+    const target = this.runtimeTarget('vm');
     this.testEnvironments.set(runId, {
+      target,
       http: this.vm.state.captureEnabled === true,
       ws: this.vm.websocket.state.captureEnabled,
       needsWs: requirements.ws,
@@ -1337,19 +1630,22 @@ class Workbench {
         ),
     );
     this.testEnvironments.get(runId)!.needsWs ||= wsRules.length > 0;
-    await this.scenes.beginRun(runId, sceneId, mock ? compileTestMock(mock, runId) : [], {
+    await this.sceneControllers.vm.beginRun(runId, sceneId, mock ? compileTestMock(mock, runId) : [], {
       deferWs,
       snapshot,
     });
+    this.assertRuntimeCurrent(target);
     if (requirements.http) await this.vm.setCaptureEnabled(true);
+    this.assertRuntimeCurrent(target);
     if (this.testEnvironments.get(runId)!.needsWs) {
       await this.vm.websocket.setCaptureEnabled(true);
     }
     const deadline = Date.now() + 10000;
     while (true) {
+      this.assertRuntimeCurrent(this.testEnvironments.get(runId)!.target);
       if (this.disposed || this.tests.get(runId).run.cancelRequested || this.vm.state.status !== 'connected')
         throw new McpToolError('TEST_PREPARATION_CANCELLED', '测试准备已取消或 VM 已断开。');
-      const runtime = this.scenes.runtime;
+      const runtime = this.sceneControllers.vm.runtime;
       const pending = [runtime.http].filter((domain) => domain.status === 'pending');
       if (!pending.length) {
         const failure = [runtime.http].find((domain) =>
@@ -1361,19 +1657,23 @@ class Workbench {
       if (Date.now() >= deadline)
         throw new McpToolError('TEST_MOCK_NOT_READY', '临时 Mock 接入超时，尚未执行测试流程。');
       await new Promise((resolve) => setTimeout(resolve, 100));
-      await this.scenes.reconcile();
+      await this.sceneControllers.vm.reconcile();
     }
   }
   private async prepareTestReady(runId: string, signal: AbortSignal) {
     if (!this.testEnvironments.get(runId)?.needsWs) return;
     const deadline = Date.now() + 10000;
     while (true) {
+      this.assertRuntimeCurrent(this.testEnvironments.get(runId)!.target);
       signal.throwIfAborted();
       if (this.vm.state.status !== 'connected')
         throw new McpToolError('VM_DISCONNECTED', '等待 WS 接入时 VM 已断开。');
       await this.vm.websocket.rescan();
+      this.assertRuntimeCurrent(this.testEnvironments.get(runId)!.target);
       signal.throwIfAborted();
-      const rules = this.scenes.wsRules(this.scenes.active).filter((rule) => rule.enabled);
+      const rules = this.sceneControllers.vm
+        .wsRules(this.sceneControllers.vm.active)
+        .filter((rule) => rule.enabled);
       const socketsReady = () => {
         const sockets = this.vm.websocket.state.connections.filter(
           (connection) => connection.status === 'open' && connection.capture === 'attached',
@@ -1390,9 +1690,9 @@ class Workbench {
         );
       };
       if (socketsReady()) {
-        await this.scenes.activateRunWs(runId);
+        await this.sceneControllers.vm.activateRunWs(runId);
         signal.throwIfAborted();
-        const runtime = this.scenes.runtime.ws;
+        const runtime = this.sceneControllers.vm.runtime.ws;
         if (['error', 'unsupported', 'paused'].includes(runtime.status))
           throw new McpToolError('TEST_WS_NOT_READY', '测试 WS 规则未实际应用，未执行主流程。');
         if (socketsReady() && (!rules.length || runtime.status === 'applied')) return;
@@ -1403,8 +1703,10 @@ class Workbench {
     }
   }
   private async resolveTestSocket(url: string, signal: AbortSignal): Promise<string> {
+    const target = this.runtimeTarget('vm');
     const deadline = Date.now() + 10000;
     while (true) {
+      this.assertRuntimeCurrent(target);
       signal.throwIfAborted();
       if (this.vm.state.status !== 'connected')
         throw new McpToolError('VM_DISCONNECTED', '等待事件目标时 VM 已断开。');
@@ -1418,6 +1720,7 @@ class Workbench {
       if (Date.now() >= deadline)
         throw new McpToolError('WS_CONNECTION_NOT_READY', '事件 URL 未匹配已接入在线连接，未投递事件。');
       await this.vm.websocket.rescan();
+      this.assertRuntimeCurrent(target);
       signal.throwIfAborted();
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
@@ -1435,8 +1738,18 @@ class Workbench {
   private async restoreTestEnvironment(runId: string) {
     this.testObserver.close();
     const capture = this.testEnvironments.get(runId);
-    const results = await Promise.allSettled([this.scenes.endRun(runId)]);
+    const results = await Promise.allSettled([this.sceneControllers.vm.endRun(runId)]);
     if (capture) {
+      try {
+        this.assertRuntimeCurrent(capture.target);
+      } catch {
+        this.sceneControllers.vm.abandonInvalidatedRun(runId);
+        this.testEnvironments.delete(runId);
+        throw new McpToolError(
+          'TEST_TARGET_INVALIDATED',
+          '测试目标已换代，本地占用已释放；旧目标业务和清理结果未确认，未向新目标恢复采集或重放操作。',
+        );
+      }
       // Restore both domains even if restoring one fails or the VM disconnected.
       results.push(
         ...(await Promise.allSettled([
@@ -1444,6 +1757,18 @@ class Workbench {
           this.vm.websocket.setCaptureEnabled(capture.ws),
         ])),
       );
+    }
+    if (capture) {
+      try {
+        this.assertRuntimeCurrent(capture.target);
+      } catch {
+        this.sceneControllers.vm.abandonInvalidatedRun(runId);
+        this.testEnvironments.delete(runId);
+        throw new McpToolError(
+          'TEST_TARGET_INVALIDATED',
+          '恢复期间目标已换代，本地占用已释放；旧目标清理结果未确认，未向新目标重试恢复。',
+        );
+      }
     }
     const failures = results.filter((result) => result.status === 'rejected');
     if (failures.length)
@@ -1463,7 +1788,7 @@ class Workbench {
         this.ensureAppLaunchIdle();
         if (!this.tests.snapshot.activeRunId)
           for (const id of this.testEnvironments.keys()) await this.cleanupTest(id);
-        this.testLaunch = { key: this.executionKey(), signal };
+        this.testLaunch = { key: this.executionKey(), store: this.store, signal };
         let result;
         try {
           result = await this.tests.start(
@@ -1497,7 +1822,7 @@ class Workbench {
       if (tool === 'run_scene_action') {
         this.ensureAppLaunchIdle();
         this.workflowError = undefined;
-        this.workflowLaunch = { key: this.executionKey(), signal };
+        this.workflowLaunch = { key: this.executionKey(), store: this.store, signal };
         let result;
         try {
           result = await this.workflows.start(
@@ -1599,8 +1924,27 @@ class Workbench {
   private requireHistory() {
     if (this.mode === 'proxy') this.requireEngine();
   }
-  private async historyCall<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-    if (this.mode === 'proxy') return this.engine.rpc<T>(method, params);
+  private async historyCall<T = unknown>(
+    method: string,
+    params: Record<string, unknown> = {},
+    mode = this.mode,
+  ): Promise<T> {
+    const target = this.runtimeTarget(mode);
+    const result = await this.backendHistoryCall<T>(method, params, mode);
+    const current = this.runtimeTarget(mode);
+    if (target.generation !== current.generation || (target.connected && !current.connected))
+      throw new McpToolError('TARGET_STALE', '历史查询目标已失效，已丢弃迟到结果。');
+    return result;
+  }
+  private async backendHistoryCall<T = unknown>(
+    method: string,
+    params: Record<string, unknown> = {},
+    mode = this.mode,
+  ): Promise<T> {
+    const http = this.httpAdapter(mode);
+    if (method === 'history.list') return (await http.listHttp(params as HistoryQuery)) as T;
+    if (method === 'history.get') return (await http.getHttp(String(params.id))) as T;
+    if (mode === 'proxy') return this.engine.rpc<T>(method, params);
     const db = this.vm.store;
     let result: unknown;
     switch (method) {
@@ -1710,7 +2054,9 @@ class Workbench {
     this.sceneTimer = setTimeout(() => {
       this.sceneTimer = undefined;
       if (!this.disposed)
-        void this.enqueue(() => this.scenes.reconcile()).catch((error) => this.report(error));
+        void this.enqueue(async () => {
+          for (const scenes of Object.values(this.sceneControllers)) await scenes.reconcile();
+        }).catch((error) => this.report(error));
     }, 500);
     this.sceneTimer.unref?.();
   }
@@ -1908,6 +2254,13 @@ class Workbench {
           name: this.project.config.name,
           describe: () => ({
             vmConnected: this.vm.state.status === 'connected',
+            web: this.project.config.web,
+            runtimeTargets: [
+              this.runtimeTarget('vm'),
+              this.runtimeTarget('proxy'),
+              ...this.browser.targets(),
+            ],
+            browser: this.browser.snapshot(),
             capabilities: {
               ui: this.mcpState.ui,
               automation: this.automation.snapshot,
@@ -1931,10 +2284,64 @@ class Workbench {
             )
               return { ok: false, code: 'SESSION_INVALIDATED', message: 'MCP 会话已关闭，操作未执行。' };
             if (tool === 'get_automation_status') return this.automation.execute(tool, args, context.signal);
+            const isNetwork = [
+              'get_network_status',
+              'get_requests',
+              'get_request',
+              'get_ws_connections',
+              'get_ws_messages',
+              'inject_ws_message',
+              'send_ws_message',
+              'reload_rules',
+              'set_capture_enabled',
+              'list_scenes',
+              'activate_scene',
+              'deactivate_scene',
+            ].includes(tool);
+            if (isNetwork && !args.target && this.browser.targets().length) {
+              const connected = [
+                this.runtimeTarget('vm'),
+                this.runtimeTarget('proxy'),
+                ...this.browser.targets(),
+              ].filter((target) => target.connected);
+              if (connected.length !== 1)
+                throw new McpToolError(
+                  'TARGET_AMBIGUOUS',
+                  'Multiple runtime targets are connected; specify target explicitly.',
+                );
+              args = {
+                ...args,
+                target: { runtimeId: connected[0].runtimeId, generation: connected[0].generation },
+              };
+            }
+            const targetId = (args.target as any)?.runtimeId;
+            if (
+              Object.hasOwn(browserMcpTools, tool) ||
+              (targetId &&
+                targetId !== `${this.mcpSessionId}:vm` &&
+                targetId !== `${this.mcpSessionId}:proxy`)
+            )
+              return this.browser.execute(tool, args, context.signal);
             if (['get_scene_action_run', 'cancel_scene_action_run'].includes(tool))
               return this.executeSceneActionTool(tool, args);
             if (['get_test_run', 'cancel_test_run'].includes(tool)) return this.executeTestTool(tool, args);
+            const networkMode = isNetwork ? this.networkMode(args) : undefined;
+            const networkTarget = networkMode ? this.runtimeTarget(networkMode) : undefined;
+            const nativeTarget = targetId && !isNetwork ? this.runtimeTarget('vm') : undefined;
+            if (nativeTarget) {
+              if (targetId !== nativeTarget.runtimeId)
+                throw new McpToolError(
+                  'TARGET_UNSUPPORTED',
+                  'HTTP proxy targets do not support UI, Scene actions or tests.',
+                );
+              if ((args.target as any).generation !== nativeTarget.generation)
+                throw new McpToolError(
+                  'TARGET_STALE',
+                  'Flutter runtime generation expired; discover the target again.',
+                );
+            }
             const run = this.messageQueue.then(async () => {
+              if (nativeTarget) this.assertRuntimeCurrent(nativeTarget);
               if (
                 this.disposed ||
                 context.signal.aborted ||
@@ -2027,7 +2434,11 @@ class Workbench {
                   ].includes(tool)
                 )
                   this.ensureAppLaunchIdle();
-                return await this.mcpNetwork.execute(tool, args, context.signal);
+                if (!networkMode || !networkTarget) throw new McpToolError('UNKNOWN_TOOL', '未知工具');
+                this.assertNetworkTarget(networkTarget, tool, args);
+                const result = await this.networks[networkMode].execute(tool, args, context.signal);
+                this.assertNetworkTarget(networkTarget, tool, args);
+                return result;
               } finally {
                 this.push();
               }
@@ -2036,7 +2447,9 @@ class Workbench {
               () => undefined,
               () => undefined,
             );
-            return run;
+            const result = await run;
+            if (nativeTarget) this.assertRuntimeCurrent(nativeTarget);
+            return result;
           },
           onClient: (client) => {
             if (epoch !== this.mcpGeneration || /selftest/i.test(client.name)) return;
@@ -2243,6 +2656,21 @@ class Workbench {
       )
         throw new Error('目标场景已切换，请重新打开规则编辑器');
       switch (action) {
+        case 'browser.call': {
+          const tool = String(payload.tool);
+          if (
+            !Object.hasOwn(browserMcpTools, tool) &&
+            !Object.hasOwn(webUiTools, tool) &&
+            !Object.hasOwn(sceneActionMcpTools, tool) &&
+            !Object.hasOwn(testMcpTools, tool) &&
+            !['get_ws_connections', 'get_ws_messages', 'set_capture_enabled'].includes(tool)
+          )
+            throw new Error('Unknown browser tool');
+          const args = parseTool(tool, { sessionId: this.mcpSessionId, ...((payload.args as object) ?? {}) });
+          const result = await this.browser.execute(tool, args);
+          void this.panel?.webview.postMessage({ type: 'browser.result', tool, target: args.target, result });
+          break;
+        }
         case 'scenes.select':
           this.sceneRequestId = Number(payload.requestId ?? 0);
           this.scenes.select(String(payload.id));
@@ -2409,15 +2837,27 @@ class Workbench {
             '项目文件已读取，规则和 VM 自动连接设置已同步；接入方式和采集参数的变更在重新加载窗口后生效。';
           break;
         }
+        case 'web.register': {
+          this.ensureEnvironmentMutable();
+          await this.project.registerWeb({ url: payload.url, root: payload.root ?? '.' });
+          this.mode = 'proxy';
+          this.updateVmAutoConnect();
+          this.selected = undefined;
+          this.history = { items: [], total: 0 };
+          this.apis = [];
+          this.apiTotal = 0;
+          await this.scenes.reload();
+          this.sentScenePage = undefined;
+          this.sentSceneDetail = undefined;
+          this.projectNotice =
+            'Web 本地入口已保存。显式准备代理后，将专用浏览器代理指向实际监听端口；不会自动导航或修改系统代理。';
+          break;
+        }
         case 'connection.mode': {
           const mode = payload.mode === 'vm' ? 'vm' : 'proxy';
           if (mode === this.mode) break;
           if (this.proxyActive && this.engine.state.status !== 'running')
             throw new Error('代理控制连接已断开，旧规则可能仍在生效。请等待重连或停止代理后再切换连接模式。');
-          if (mode === 'proxy') {
-            this.vmAuto.setMode('proxy');
-            await this.vm.disconnect();
-          }
           if (this.engine.state.status === 'running')
             await this.engine.rpc('breakpoint.setInteractive', { enabled: mode === 'proxy' && !!this.panel });
           this.mode = mode;
@@ -2431,7 +2871,9 @@ class Workbench {
           this.apiTotal = 0;
           if (mode === 'vm') await this.vm.store.init();
           await this.saveConnection();
-          await this.scenes.reconcile();
+          await this.scenes.reload();
+          this.sentScenePage = undefined;
+          this.sentSceneDetail = undefined;
           await this.reloadHistory();
           break;
         }
@@ -2440,7 +2882,7 @@ class Workbench {
           if (this.vm.state.status !== 'disconnected')
             throw new Error('VM 已连接或正在连接，请先断开当前连接后再更换地址。');
           await this.vmAuto.manualConnect();
-          await this.vm.connect(String(payload.url ?? ''), this.rules);
+          await this.vm.connect(String(payload.url ?? ''), this.targetRules.vm);
           await this.scenes.reconcile();
           await this.reloadHistory();
           break;
@@ -2758,9 +3200,10 @@ class Workbench {
     this.ui.invalidate();
     await this.mcpServer?.stop().catch(() => undefined);
     await this.automation.dispose();
+    await this.browser.dispose();
     await this.ui.dispose();
     this.vmAuto.dispose();
-    this.scenes.dispose();
+    for (const scenes of Object.values(this.sceneControllers)) scenes.dispose();
     if (this.sceneTimer) clearTimeout(this.sceneTimer);
     if (this.historyTimer) clearTimeout(this.historyTimer);
     if (this.eventTimer) clearTimeout(this.eventTimer);

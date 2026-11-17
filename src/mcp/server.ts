@@ -20,6 +20,7 @@ const MAX_SCREENSHOT_BYTES = 32 * 1024 * 1024;
 const MAX_REQUEST = 512 * 1024;
 function callTimeoutMs(tool?: string): number {
   if (tool === 'setup_automation') return 660000;
+  if (tool === 'prepare_browser') return 660000;
   if (tool === 'connect_device') return 240000;
   if (tool === 'take_screenshot') return 85000;
   return 40000;

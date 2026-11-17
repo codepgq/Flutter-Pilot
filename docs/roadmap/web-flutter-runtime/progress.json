@@ -3,15 +3,15 @@
   "roadmapId": "web-flutter-runtime",
   "acceptanceBaseline": "v1",
   "createdOn": "2026-11-16",
-  "updatedOn": "2026-11-16",
+  "updatedOn": "2026-11-17",
   "branch": "codex/web-flutter-unified-runtime",
   "baseCommit": "efc65160703fdf44aef200751a2dd1dfbb5292df",
-  "status": "planned",
+  "status": "completed",
   "currentPhase": null,
-  "nextPhase": "phase-01",
+  "nextPhase": null,
   "goalsDocument": "goals.md",
   "verificationDocument": "verification.md",
-  "finalEvidence": null,
+  "finalEvidence": "evidence/final.md",
   "phases": [
     {
       "id": "phase-01",
@@ -20,10 +20,10 @@
       "dependsOn": [],
       "goals": ["G01", "G02", "G08", "G09"],
       "acceptanceIds": ["P01-A01", "P01-A02", "P01-A03", "P01-A04", "P01-A05", "P01-A06", "P01-A07"],
-      "status": "not_started",
-      "startedAt": null,
-      "completedAt": null,
-      "evidence": null,
+      "status": "passed",
+      "startedAt": "2026-11-16T21:15:00+08:00",
+      "completedAt": "2026-11-17T10:44:44.365947+08:00",
+      "evidence": "evidence/phase-01.md",
       "blockers": []
     },
     {
@@ -33,10 +33,10 @@
       "dependsOn": ["phase-01"],
       "goals": ["G03", "G08", "G09"],
       "acceptanceIds": ["P02-A01", "P02-A02", "P02-A03", "P02-A04", "P02-A05", "P02-A06", "P02-A07"],
-      "status": "not_started",
-      "startedAt": null,
-      "completedAt": null,
-      "evidence": null,
+      "status": "passed",
+      "startedAt": "2026-11-17T10:44:44.366123+08:00",
+      "completedAt": "2026-11-17T10:54:07.575408+08:00",
+      "evidence": "evidence/phase-02.md",
       "blockers": []
     },
     {
@@ -55,10 +55,10 @@
         "P03-A07",
         "P03-A08"
       ],
-      "status": "not_started",
-      "startedAt": null,
-      "completedAt": null,
-      "evidence": null,
+      "status": "passed",
+      "startedAt": "2026-11-17T10:54:07.575408+08:00",
+      "completedAt": "2026-11-17T03:18:37.478125+00:00",
+      "evidence": "evidence/phase-03.md",
       "blockers": []
     },
     {
@@ -77,10 +77,10 @@
         "P04-A07",
         "P04-A08"
       ],
-      "status": "not_started",
-      "startedAt": null,
-      "completedAt": null,
-      "evidence": null,
+      "status": "passed",
+      "startedAt": "2026-11-17T03:18:37.478125+00:00",
+      "completedAt": "2026-11-17T03:31:26.739618+00:00",
+      "evidence": "evidence/phase-04.md",
       "blockers": []
     },
     {
@@ -90,10 +90,10 @@
       "dependsOn": ["phase-04"],
       "goals": ["G06", "G08", "G09"],
       "acceptanceIds": ["P05-A01", "P05-A02", "P05-A03", "P05-A04", "P05-A05", "P05-A06", "P05-A07"],
-      "status": "not_started",
-      "startedAt": null,
-      "completedAt": null,
-      "evidence": null,
+      "status": "passed",
+      "startedAt": "2026-11-17T03:31:26.739618+00:00",
+      "completedAt": "2026-11-17T03:40:25.445348+00:00",
+      "evidence": "evidence/phase-05.md",
       "blockers": []
     },
     {
@@ -112,10 +112,10 @@
         "P06-A07",
         "P06-A08"
       ],
-      "status": "not_started",
-      "startedAt": null,
-      "completedAt": null,
-      "evidence": null,
+      "status": "passed",
+      "startedAt": "2026-11-17T03:40:25.445348+00:00",
+      "completedAt": "2026-11-17T03:52:40.048778+00:00",
+      "evidence": "evidence/phase-06.md",
       "blockers": []
     },
     {
@@ -134,10 +134,10 @@
         "P07-A07",
         "P07-A08"
       ],
-      "status": "not_started",
-      "startedAt": null,
-      "completedAt": null,
-      "evidence": null,
+      "status": "passed",
+      "startedAt": "2026-11-17T03:52:40.048778+00:00",
+      "completedAt": "2026-11-17T04:16:20.414935+00:00",
+      "evidence": "evidence/phase-07.md",
       "blockers": []
     }
   ]

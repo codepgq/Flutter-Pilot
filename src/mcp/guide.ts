@@ -11,7 +11,7 @@ export const agentInstructions = `Flutter Pilot 是当前 Flutter Debug App 的�
 截图优先：用户说“截图”“截屏”“screenshot”“长截图”或要求查看布局，且上下文指向当前 Flutter App 时，先选择正确项目，再用 take_screenshot；普通截图 source=flutter、mode=screen。只有长图才先 list_screenshot_targets。截图无需先查 Key、运行 Scene、激活 Mock 或准备 Appium。桌面、浏览器网页和其他目标使用对应工具；没有目标上下文时先确认截图对象，不截取无关 App。
 按用户意图选择能力（只执行当前任务需要的步骤）：
 ${describeCapabilityRoutes()}
-首次运行时调用 list_sessions，按 workspace、设备和用户上下文选择 sessionId；所有有目标的工具都显式传 sessionId，不猜 ID。已有 App 直接复用；未运行且任务需要时才 start_app，启动 TIMEOUT 先查询会话和 IDE，不重复启动、不改设备、不清数据。只截图不重启 App、不导航页面、不切换 Mock；前提不满足时报告诊断，不自动换通道或改用其他工具截图。
+首次运行时调用 list_sessions，按 workspace、设备和用户上下文选择 sessionId；网络工具从 runtimeTargets 选择 target:{runtimeId,generation}，多个连接目标必须明确选择，不能用工作台焦点猜测。只有唯一连接目标时兼容旧 sessionId；失效代次、断开或不支持的运行时操作在副作用前拒绝，HTTP 查询失败不回退其他库。离线 Scene 配置仍可查阅和准备。所有有目标的工具都显式传 sessionId，不猜 ID。已有 App 直接复用；未运行且任务需要时才 start_app，启动 TIMEOUT 先查询会话和 IDE，不重复启动、不改设备、不清数据。只截图不重启 App、不导航页面、不切换 Mock；前提不满足时报告诊断，不自动换通道或改用其他工具截图。
 按需 get_usage_guide 读取 overview/screenshot/http/ws/ui/workflow；无需 sessionId 或在线 IDE。也可 resources/list → resources/read。prompts/list 仅列目录，prompts/get 按需读取完整模板；capabilities 查阅全部功能，app_screenshot 提供截图最短路径，scene_action_quick_run 复用操作，scene_action_authoring 编写归档。全部工具均有同名 Prompt 和生产 schema。初始化仅提供本说明，不自动读取所有 Prompt，也不执行任何运行时操作。
 重复操作先 list_scenes → list_scene_actions；targets 别名自动按当前挂载真实 Key 重新匹配，无需 Agent 每步 find_widget 或截图。缺少操作或定位失效时才 get_ui_snapshot / find_widget 探索，优先真实稳定 ValueKey；不得绕过禁用、遮挡或直接调用业务回调。输入影响布局时 hide_keyboard 确认稳定隐藏，再等待 actionable。等待失败读取 diagnostics / failure.diagnostics 的 selector、condition、timeoutMs、attempts、lastObservation，不用固定延时掩盖问题。
 Mock/targets/actions 唯一持久来源为 files.scenes 指向的 scenes/ 目录 v2；由 Agent 增量编辑并保留已有内容，修改后 reload_rules，需要 Mock 时才 activate_scene。公共操作放纯操作 Scene，call 显式映射 inputs，秘密参数逐层 secret:true；不保存临时 ref/坐标，不维护第二份运行配置。run_scene_action 不切换 Mock；激活、reload、重连或 IDE 恢复不执行 UI。
@@ -91,8 +91,61 @@ export const sceneStorageGuide = {
   ],
 };
 
+export const runtimeTargetGuide = {
+  discovery:
+    'list_sessions 返回项目 sessionId 和 runtimeTargets；运行目标包含 runtimeId、generation、kind、connected 与能力。项目身份与运行目标身份分别选择。',
+  selection:
+    '网络工具可传 target:{runtimeId,generation}。同项目多个连接目标必须明确选择，不采用焦点、最近目标或第一个目标；只有唯一连接目标时保留旧 sessionId 调用兼容。离线 Scene 查阅/配置可指定目标，旧调用使用原默认目标；读取说明不创建项目状态、不下载依赖或启动进程。',
+  routing:
+    '同一 target 的 HTTP 工作台、get_requests 和 get_request 使用相同后端；flutter 读取 VM 历史，proxy 读取代理历史。错误不回退另一库，请求 ID 只在原目标中查详情。Flutter UI 也可显式 target:{runtimeId,generation} 固定代次，proxy UI 在执行前拒绝。采集、激活、临时状态和执行快照按运行目标隔离；切换工作台不会重定向已启动操作。',
+  invalidation:
+    'generation 来自发现结果，不自行递增。目标断开或代次失效时运行时副作用在执行前拒绝；迟到结果不能复活旧目标。重新发现并核对业务结果后再决定下一步，不自动重放。',
+  support:
+    '支持 Flutter、HTTP Proxy 和显式准备的托管 Chromium Context。浏览器生命周期与 HTTP direct 拦截见 overview.browserRuntime；Widget Key、设备和热更新保持 Flutter 专用语义，代理 WS 调用明确拒绝，不隐式切换 VM。',
+  examples: [
+    step('get_network_status', {
+      ...selected,
+      target: { runtimeId: '<从 runtimeTargets 选择>', generation: 1 },
+    }),
+    step('get_requests', { ...selected, target: { runtimeId: '<同一运行目标>', generation: 1 }, limit: 20 }),
+  ],
+};
+
+export const webProxyGuide = {
+  entry:
+    '打开本地工作区的 Flutter Pilot → 连接与诊断 → Web 项目接入，保存本地 HTTP/HTTPS URL 与子项目相对根目录；原生 HTML 需显式登记，React/Vue/Vite 声明可发现，普通 Node package.json 不自动接入。',
+  preparation:
+    '打开/发现/读取指南不准备引擎。显式准备代理并开启 HTTP 采集后，以实际监听端口配置专用浏览器代理，HTTPS 在专用测试浏览器信任项目 CA；不改系统代理、全局证书或关闭 TLS 校验。',
+  verification:
+    '同一 flutter-pilot MCP，list_sessions 发现项目和 proxy target，get_network_status 检查 capture/Mock，reload_rules 后 activate_scene；触发前存基线，get_requests/get_request 与工作台核对本轮 ruleId、mocked、状态、详情。deactivate_scene 保留采集，set_capture_enabled(false) 同时暂停该目标 Mock。',
+  boundary:
+    '手动浏览器 + HTTP 代理；未提供网页 UI、WS 或页面业务测试。只有经过端口的流量属于此代理目标，无 DOM page 身份。缓存/Service Worker 可能绕过代理，CORS/OPTIONS 由规则明确配置，浏览器无法观察服务端 SSR/Node 请求。重载和激活不刷新网页。',
+};
+
 const guides: Record<GuideTopic, Record<string, unknown>> = {
   overview: {
+    browserRuntime: {
+      tests:
+        'Test Case v2 复用 setup/action、临时状态 Mock 与 HTTP/WS/UI 断言。run_test 传准确 Page target。源时钟基线排除 setup/旧在途/其他页面；HTTP 可检查 ruleId、原始请求、响应并提取 orderId，再关联 WS/UI。get_test_run 返回目标、指纹、证据和清理；只有 passed 才通过。cleanupPending 时 cancel_test_run 重试清理，不重跑 UI。',
+      websocket:
+        'Page 创建时安装 WS 路由，只采集接入后消息；vite-hmr 子协议和常见开发端点排除。复用 Scene wsRules、get_ws_connections/get_ws_messages、send_ws_message/inject_ws_message；get_browser_ws_message 读取原始/有效正文。准确 connectionId 与 Context/Page 关联，禁止 URL 歧义猜测。二进制/超过256KiB只直通；关闭采集同时暂停 Mock。发送仅 submitted，需页面/服务端确认。',
+      tls: '默认正常校验 TLS。macOS 首个 create_browser_context 可显式提供 trustedCertificates:[PEM CA]，仅当前 Worker 的临时 Chromium Profile 信任，不改系统或用户配置；状态返回指纹，Worker 启动后不能改变信任。未信任 WSS 必须失败。',
+      ui: 'Web UI 必须固定 target:{runtimeId,generation,pageId}。selector:{source:"web",testId:"submit"} 或 {source:"web",role:"button",name:"Submit"}，可加 frame:{testId:"checkout-frame"}；真实输入，不 force，不直接业务回调。get_ui_snapshot 返回有界 DOM。wait_for_widget 失败返回最后观测。scroll 仅选定区域。press_key 为浏览器键盘；hide_keyboard/设备手势不支持。',
+      screenshot:
+        'take_screenshot({sessionId,target,source:"web",mode:"screen"或"full_page"}) 返回 PNG。每边最多16384像素，总计3200万像素/12MiB。Web full_page 与 Flutter long 含义不同；仅截图不导航、不切 Mock。',
+      actions:
+        'Scene v2 targets 保存 Web selector，actions 继续 tap/enter_text/wait_for_widget/scroll 与跨 Scene call。run_scene_action 显式传 Page target，backend 省略或 auto。整条预检拒绝设备步骤，执行逐步重新定位，同 Context 共用锁；secret 跨 call 脱敏；completed 不是业务 passed。',
+      preparation:
+        'get_browser_status 只读；prepare_browser 显式安装私有锁定 Playwright/Chromium，可取消和重试。create_browser_context 才启动独立 Worker；不附着日常 Profile。',
+      identity:
+        'list_browser_pages 列 Context 和 Page，网络 target:{runtimeId,generation}，导航还需 pageId；失效/歧义拒绝，不按焦点选页。',
+      network:
+        '先 activate_scene，再 open_browser_page 导航；显式页面首次导航前拦截就绪，弹窗仅覆盖接入后流量。direct 后端不叠加代理 Mock。Service Workers block，CDP 显式关闭 HTTP cache；上传/二进制/流式/超限只直通并记录限制，不编辑。保留真实 OPTIONS/CORS/TLS 检查，无 SSR 请求覆盖。',
+      failure:
+        'Context 锁隔离；取消或超时结果未确认时先查询，不重放。Worker 崩溃只作废浏览器身份，Flutter 继续；显式关闭 Context/重建，重连与激活不刷新页面。',
+    },
+    webProxy: webProxyGuide,
+    runtimeTargets: runtimeTargetGuide,
     sceneStorage: sceneStorageGuide,
     title: '什么时候使用 Flutter Pilot MCP',
     capabilityRoutes,
@@ -178,6 +231,8 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       'Flutter 长图最多32屏、30000像素高、2400万像素，MCP 图片传输上限32 MiB（含 Base64/JSON）；客户端调用超时建议至少90 秒。超限或恢复失败按真实结果说明，不能宣称完整成功；横向、反向、嵌套滚动和原生平台视图按实际支持边界报告。',
   },
   http: {
+    webProxy: webProxyGuide,
+    runtimeTargets: runtimeTargetGuide,
     title: '编辑 .flutter-pilot/scenes/index.json：HTTP/Dio 规则',
     preparation:
       '先 get_network_status 取得 files.scenes 根清单路径，用 list_scenes 定位 Scene 目录，再按 scene.json 的 http 映射编辑单条规则。正文可用 bodyFile 引用 bodies/ 文件；exampleDocument 是 v2 自包含交换包，导入会拆分落盘。',
@@ -231,6 +286,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       'Debug/JIT、兼容Dio实例；新实例扫描前首请求可能未拦截，上传/流/二进制正文有编辑限制。规则需启用且所属场景激活；实际应用仍需运行时接入。',
   },
   ws: {
+    runtimeTargets: runtimeTargetGuide,
     title: '业务 WebSocket 规则、模拟推送与真实连接发送',
     preparation:
       '先 get_network_status 取得 files.scenes 根清单路径，再按目标 Scene 的 scene.json/ws 映射编辑单条业务 WS 规则。action.textFile 可引用 bodies/ 文件，与 text 互斥；exampleDocument 是 v2 自包含交换包。',
@@ -309,6 +365,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       '先 list_scenes / list_scene_actions 复用已有操作。仅缺少操作、定位失效或结果异常时探索当前界面，再用真实稳定 Key 编写 Scene 操作；后续 run_scene_action 由插件完成每步定位、动作和等待，无需 Agent 每步 find_widget 或整页快照。保存临时 ref、坐标或跨界面缓存控件对象均不支持。格式与执行见 workflow 指南。',
   },
   workflow: {
+    runtimeTargets: runtimeTargetGuide,
     title: '按需主动调用：规则文件 → UI 操作 → 网络与页面验证',
     quickRun: {
       title: '已有场景的最短执行路径',

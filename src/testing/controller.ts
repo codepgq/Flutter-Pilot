@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { Backend } from '../automation/model';
 import { automationMcpTools } from '../automation/tools';
+import { webUiTools } from '../browser/ui-schema';
 import type { HistoryEntry, BodySnapshot } from '../model';
 import type { WsMessage } from '../ws/model';
 import { wsUrlMatches } from '../ws/model';
@@ -35,6 +36,7 @@ export interface NetworkBaseline {
   wsIds: string[];
 }
 export interface TestHost extends WorkflowHost {
+  uiSource?: 'web';
   loadScenes(
     test?: TestCase,
     resolveMock?: (actions: SceneDocument) => string | undefined,
@@ -59,7 +61,7 @@ export interface TestAssertionResult {
   kind: 'http' | 'ws' | 'ui';
   status: 'pending' | 'passed' | 'failed';
   message?: string;
-  evidence?: { httpId?: string; wsId?: string; connectionId?: string };
+  evidence?: { httpId?: string; wsId?: string; connectionId?: string; ruleId?: string; mocked?: boolean };
 }
 export interface TestRun {
   kind: 'test';
@@ -262,7 +264,7 @@ export class TestController {
           runId,
           testId,
           name,
-          status,
+          status: this.active?.run.runId === runId ? ('running' as const) : status,
           startedAt,
           finishedAt,
           durationMs,
@@ -288,7 +290,9 @@ export class TestController {
   get(runId: string) {
     const run = this.runs.get(runId);
     if (!run) throw new TestError('TEST_RUN_NOT_FOUND', '测试运行不存在或已过期。');
-    return { ok: true, run: structuredClone(run) };
+    const copy = structuredClone(run);
+    if (this.active?.run === run) copy.status = 'running';
+    return { ok: true, run: copy };
   }
   cancel(runId: string) {
     const run = this.get(runId).run;
@@ -357,6 +361,7 @@ export class TestController {
     );
     validateSceneActions(scenes);
     const main = bindMain(scenes);
+    this.host.preflight?.(main);
     const inputs = main.inputs,
       secrets = [...main.secrets];
     for (const [key, value] of Object.entries(inputs)) if (sensitive(key) && value) secrets.push(value);
@@ -374,6 +379,7 @@ export class TestController {
         backend,
       );
       secrets.push(...child.secrets);
+      this.host.preflight?.(child);
     }
     for (const expectation of test.expect.http ?? []) {
       validateTemplates(expectation, availableInputs, vars);
@@ -410,14 +416,19 @@ export class TestController {
     for (const assertion of test.expect.ui ?? []) {
       const value = bindTemplates(assertion, inputs, runId, dummyVars);
       if (
-        !automationMcpTools.wait_for_widget.schema.safeParse({
-          sessionId: 'test',
-          backend,
-          selector: value.selector,
-          state: value.state,
-          text: value.text,
-          timeoutMs: 100,
-        }).success
+        !(value.selector.source === 'web' ? webUiTools : automationMcpTools).wait_for_widget.schema.safeParse(
+          {
+            sessionId: 'test',
+            ...(value.selector.source === 'web'
+              ? { target: { runtimeId: 'preflight', generation: 1, pageId: 'preflight' } }
+              : {}),
+            backend,
+            selector: value.selector,
+            state: value.state,
+            text: value.text,
+            timeoutMs: 100,
+          },
+        ).success
       )
         throw new TestError('INVALID_TEST', 'UI 断言选择器与后端不兼容。');
     }
@@ -628,7 +639,11 @@ export class TestController {
             previousDone = false;
             break;
           }
-          record.evidence = { httpId: active.clean(entry.id) };
+          record.evidence = {
+            httpId: active.clean(entry.id),
+            ruleId: active.clean(entry.requestRuleId ?? entry.responseRuleId ?? ''),
+            mocked: entry.mocked,
+          };
           assertJson(body(entry.originalRequest), expectation.requestJson, '原始请求');
           if (!entry.response) {
             if (entry.error) throw new TestError('ASSERTION_FAILED', '本轮 HTTP 请求未取得响应。');
@@ -641,6 +656,11 @@ export class TestController {
             throw new TestError('ASSERTION_FAILED', 'HTTP 响应状态码不符合预期。');
           if (expectation.mocked !== undefined && entry.mocked !== expectation.mocked)
             throw new TestError('ASSERTION_FAILED', 'HTTP Mock 来源不符合预期。');
+          if (
+            expectation.ruleId !== undefined &&
+            ![entry.requestRuleId, entry.responseRuleId].includes(expectation.ruleId)
+          )
+            throw new TestError('ASSERTION_FAILED', 'HTTP ruleId mismatch');
           assertJson(body(entry.response), expectation.responseJson, '响应');
           const unified = {
             request: { ...entry.originalRequest, body: body(entry.originalRequest) },
@@ -664,7 +684,11 @@ export class TestController {
             ]),
           );
           record.status = 'passed';
-          record.evidence = { httpId: active.clean(entry.id) };
+          record.evidence = {
+            httpId: active.clean(entry.id),
+            ruleId: active.clean(entry.requestRuleId ?? entry.responseRuleId ?? ''),
+            mocked: entry.mocked,
+          };
           httpSeen.set(raw.id, entry.id);
           for (const event of test.events ?? [])
             if (event.after === raw.id) {
@@ -777,13 +801,23 @@ export class TestController {
         active.run.runId,
         'get_ui_snapshot',
         {
-          source: prepared.backend === 'device' ? 'device' : 'flutter',
+          source: this.host.uiSource ?? (prepared.backend === 'device' ? 'device' : 'flutter'),
           maxNodes: 20,
         },
         controller.signal,
       );
       if (result.ok && Array.isArray(result.widgets)) {
-        const fields = ['ref', 'type', 'text', 'semantics', 'key', 'enabled', 'visible', 'actionable'];
+        const fields = [
+          'ref',
+          'type',
+          'text',
+          'semantics',
+          'key',
+          'testId',
+          'enabled',
+          'visible',
+          'actionable',
+        ];
         active.run.evidence = {
           ui: result.widgets.slice(0, 20).flatMap((widget: unknown) => {
             if (!widget || typeof widget !== 'object') return [];
@@ -892,6 +926,7 @@ export class TestController {
       await this.captureFailure(active, prepared);
     } finally {
       clearTimeout(timeout);
+      if (run.status === 'passed') await this.captureFailure(active, prepared);
       let terminal = run.status;
       run.status = 'running';
       for (const event of run.events) if (event.status === 'pending') event.status = 'skipped';

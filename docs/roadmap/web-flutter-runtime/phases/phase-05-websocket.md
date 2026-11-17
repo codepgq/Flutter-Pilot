@@ -8,11 +8,11 @@
 
 ## 任务与产出
 
-- [ ] P05-T01：为新建业务 WS 在页面创建前安装路由，维护运行时/Context/Page/连接 ID 与状态。
-- [ ] P05-T02：复用 WS 规则验证和匹配，实现双向原始/有效消息、替换/丢弃及查询。
-- [ ] P05-T03：实现向 App 注入与向真实服务端发送，保持方向、synthetic 标记、唯一连接与容量限制。
-- [ ] P05-T04：增加 WS/WSS、并发同 URL、重连、二进制限制及 HMR 对照夹具和 `test:web:ws`。
-- [ ] P05-T05：更新工作台、能力状态、同名 Prompt、WS 场景指南与验收。
+- [x] P05-T01：为新建业务 WS 在页面创建前安装路由，维护运行时/Context/Page/连接 ID 与状态。
+- [x] P05-T02：复用 WS 规则验证和匹配，实现双向原始/有效消息、替换/丢弃及查询。
+- [x] P05-T03：实现向 App 注入与向真实服务端发送，保持方向、synthetic 标记、唯一连接与容量限制。
+- [x] P05-T04：增加 WS/WSS、并发同 URL、重连、二进制限制及 HMR 对照夹具和 `test:web:ws`。
+- [x] P05-T05：更新工作台、能力状态、同名 Prompt、WS 场景指南与验收。
 
 主要落点：Web Worker、Web Adapter、`src/ws/`、MCP network、Scene runtime 分域能力以及工作台 WS 页面。
 

@@ -3,8 +3,18 @@ import { guideTopics } from './guide';
 import { automationMcpTools } from '../automation/tools';
 import { sceneActionMcpTools } from '../workflows/tools';
 import { testMcpTools } from '../testing/tools';
+import { RuntimeTargetError } from '../runtime/targets';
+import { browserMcpTools, BrowserError } from '../browser/protocol';
+import { webUiTools } from '../browser/ui-schema';
 
 const session = { sessionId: z.string().min(1).max(256) };
+const networkSession = {
+  ...session,
+  target: z
+    .object({ runtimeId: z.string().min(1).max(256), generation: z.number().int().min(0) })
+    .strict()
+    .optional(),
+};
 const timeout = z.number().int().min(100).max(30000).optional();
 const page = {
   limit: z.number().int().min(1).max(100).optional(),
@@ -12,7 +22,7 @@ const page = {
 };
 const wsMessage = z
   .object({
-    ...session,
+    ...networkSession,
     connectionId: z.string().min(1).max(512),
     text: z.string().max(262144).optional(),
     topic: z.string().min(1).max(1024).optional(),
@@ -33,6 +43,7 @@ export function encodeWsMessage(args: Record<string, unknown>): string {
 }
 
 export const mcpTools = {
+  ...browserMcpTools,
   get_usage_guide: {
     description:
       '离线查阅功能与“用户任务→工具”路由。topic 为 overview/screenshot/http/ws/ui/workflow；截图看 screenshot/app_screenshot，已有操作看 workflow.quickRun，capabilities 查全部能力。涵盖 App 启动/热更新、API/WS Mock、Key、键盘、设备、Scene 和测试，无需 sessionId 或在线 IDE。',
@@ -40,7 +51,7 @@ export const mcpTools = {
   },
   list_sessions: {
     description:
-      '列出项目并选择任务对应 sessionId；检查 vmConnected、capabilities.appLaunch 的已有会话/设备和命名配置，优先复用已运行 App。VM 离线也能发现 Scene；启动超时先查询此处，不重复启动或操作无关项目。',
+      '列出项目并选择任务对应 sessionId 和 runtimeTargets 中的运行目标；网络工具可传 target:{runtimeId,generation}，多连接目标必须明确选择，不能用工作台焦点猜测。检查 vmConnected、capabilities.appLaunch 的已有会话/设备和命名配置，优先复用已运行 App。VM 离线也能发现 Scene；启动超时先查询此处，不重复启动或操作无关项目。',
     schema: z.object({}).strict(),
   },
   start_app: {
@@ -72,16 +83,32 @@ export const mcpTools = {
   ...automationMcpTools,
   ...sceneActionMcpTools,
   ...testMcpTools,
+  ...Object.fromEntries(
+    Object.entries(webUiTools).map(([name, definition]) => [
+      name,
+      {
+        description:
+          automationMcpTools[name as keyof typeof automationMcpTools].description +
+          ' Flutter 可选显式 target:{runtimeId,generation}；旧代次或 proxy UI 目标在执行前拒绝。 ' +
+          definition.description,
+        schema: z.union([
+          automationMcpTools[name as keyof typeof automationMcpTools].schema,
+          definition.schema,
+        ]),
+      },
+    ]),
+  ),
   get_network_status: {
     description:
-      '查询 storageVersion:2、files.scenes 根清单路径、当前 Mock 与分域接入状态；HTTP 查看 attachedDioInstances 和覆盖边界，只要求本流程所需域/客户端就绪。编辑后 reload_rules 并激活所需 Mock；applied 需以本轮新记录验证。',
-    schema: z.object(session).strict(),
+      '查询指定运行目标的 storageVersion:2、files.scenes、当前 Mock 与分域接入状态；target 从 list_sessions.runtimeTargets 取得。Web 手动浏览器 HTTP 代理先按 http.webProxy 显式接入，端口/CA 见工作台连接与诊断，无页面身份或 WS/UI。Flutter HTTP 查看 attachedDioInstances。编辑后 reload_rules 并激活所需 Mock；applied 需以本轮新记录验证。',
+    schema: z.object(networkSession).strict(),
   },
   get_requests: {
-    description: '分页查询已采集 HTTP 请求。',
+    description:
+      '分页查询指定运行目标已采集 HTTP 请求；VM 与代理读取各自历史，与同目标工作台一致，查询失败不回退另一来源。多连接目标须传 target:{runtimeId,generation}。',
     schema: z
       .object({
-        ...session,
+        ...networkSession,
         ...page,
         search: z.string().max(1000).optional(),
         method: z.string().max(20).optional(),
@@ -91,18 +118,21 @@ export const mcpTools = {
       .strict(),
   },
   get_request: {
-    description: '读取已采集 HTTP 请求详情。',
-    schema: z.object({ ...session, id: z.string().min(1).max(512) }).strict(),
+    description:
+      '读取指定运行目标的 HTTP 请求详情；id 取自同一 target 的 get_requests，找不到或查询失败不回退其他历史库。',
+    schema: z.object({ ...networkSession, id: z.string().min(1).max(512) }).strict(),
   },
   get_ws_connections: {
-    description: '查询当前业务 WebSocket 连接。',
-    schema: z.object(session).strict(),
+    description:
+      '查询指定 Flutter 或托管浏览器运行目标的业务 WebSocket 连接；浏览器返回 Page 身份。代理目标不支持 WS，不切换到 VM。',
+    schema: z.object(networkSession).strict(),
   },
   get_ws_messages: {
-    description: '分页查询已采集 WebSocket 消息。',
+    description:
+      '分页查询指定 Flutter 或托管浏览器运行目标已采集 WebSocket 消息；使用同目标 connectionId，代理目标不支持 WS。',
     schema: z
       .object({
-        ...session,
+        ...networkSession,
         ...page,
         connectionId: z.string().max(512).optional(),
         direction: z.enum(['inbound', 'outbound']).optional(),
@@ -124,18 +154,19 @@ export const mcpTools = {
   reload_rules: {
     description:
       '增量刷新 scenes/index.json v2 目录与资源摘要，仅装配当前激活场景；错误隔离并保留最后有效运行快照，stale 表示新配置未生效；无激活场景时不自动选择。检查loaded和status.scene.runtime，再用新记录验证命中。',
-    schema: z.object(session).strict(),
+    schema: z.object(networkSession).strict(),
   },
   set_capture_enabled: {
-    description: '开启或关闭指定域采集；关闭同时暂停该域场景Mock，重新开启后恢复激活场景。',
-    schema: z.object({ ...session, domain: z.enum(['http', 'ws']), enabled: z.boolean() }).strict(),
+    description:
+      '开启或关闭指定运行目标的域采集；代理仅 HTTP，Flutter 与托管浏览器支持 HTTP/WS。关闭同时暂停该域场景 Mock，重新开启恢复该目标激活场景；失效代次或断开目标在副作用前拒绝。',
+    schema: z.object({ ...networkSession, domain: z.enum(['http', 'ws']), enabled: z.boolean() }).strict(),
   },
   list_scenes: {
     description:
       '分页搜索项目 Scene 摘要，返回目录、清单路径、规则/操作数量、健康状态及当前 Mock，不读取正文。offset 默认0，limit 默认50且最多200；search 匹配名称、ID、规则与动作名称。再 list_scene_actions 查询独立 action 文件路径和参数。',
     schema: z
       .object({
-        ...session,
+        ...networkSession,
         offset: z.number().int().min(0).optional(),
         limit: z.number().int().min(1).max(200).optional(),
         search: z.string().max(1000).optional(),
@@ -144,12 +175,12 @@ export const mcpTools = {
   },
   activate_scene: {
     description:
-      '持久激活指定场景，整体替换旧场景并开启所需HTTP/WS采集和Mock；离线待应用，重连和IDE重开自动恢复。检查分域状态并验证新记录，不把激活等同已命中。',
-    schema: z.object({ ...session, sceneId: z.string().min(1).max(128) }).strict(),
+      '为指定运行目标持久激活场景，整体替换该目标旧场景并开启所需 HTTP/WS 采集和 Mock；离线待应用，重连和 IDE 重开恢复同目标，不影响其他目标。检查分域状态并验证新记录，不把激活等同已命中。',
+    schema: z.object({ ...networkSession, sceneId: z.string().min(1).max(128) }).strict(),
   },
   deactivate_scene: {
-    description: '清除持久激活状态，停用HTTP和WS Mock，保留采集；重连不再恢复场景。',
-    schema: z.object(session).strict(),
+    description: '清除指定运行目标的持久激活状态，停用该目标 HTTP 和 WS Mock，保留采集；重连不再恢复场景。',
+    schema: z.object(networkSession).strict(),
   },
 } as const;
 
@@ -173,7 +204,7 @@ export function parseTool(name: string, args: unknown): Record<string, unknown> 
 }
 
 export function toolError(error: unknown): { code: string; message: string } {
-  return error instanceof McpToolError
+  return error instanceof McpToolError || error instanceof RuntimeTargetError || error instanceof BrowserError
     ? { code: error.code, message: error.message }
     : { code: 'OPERATION_FAILED', message: error instanceof Error ? error.message : '操作失败。' };
 }

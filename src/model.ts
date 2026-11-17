@@ -119,6 +119,7 @@ export interface ApiCatalogEntry {
   lastAt: number;
 }
 export interface WorkbenchState {
+  browser?: ReturnType<import('./browser/controller').BrowserController['snapshot']>;
   loadedSceneAction?: import('./workflows/model').SceneAction;
   scenePage?: import('./scene-storage-model').ScenePage;
   sceneDetail?: import('./scene-storage-model').SceneDetail;
@@ -165,6 +166,7 @@ export interface WorkbenchState {
     configPath: string;
     rulesPath: string;
     notice?: string;
+    web?: import('./discovery').WebProject;
   };
   mode?: 'proxy' | 'vm';
   vm?: {

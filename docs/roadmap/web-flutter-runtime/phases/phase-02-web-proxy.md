@@ -8,11 +8,11 @@
 
 ## 任务与产出
 
-- [ ] P02-T01：支持显式 Web 接入、已知前端项目声明识别、混合仓库子项目选择和相应扩展激活。
-- [ ] P02-T02：提供代理地址、实际监听端口、证书与连接诊断；保持项目 UUID、Scene v2 和旧项目兼容。
-- [ ] P02-T03：补齐代理模式 MCP 查询/状态/开关端到端路径，明确流量归属和 browser/server 范围。
-- [ ] P02-T04：建立本地 HTTP/HTTPS、跨域和独立 Chromium 夹具，新增 `test:web:proxy`。
-- [ ] P02-T05：同步工作台入口、MCP 离线说明、场景 Prompt 与验收证据。
+- [x] P02-T01：支持显式 Web 接入、已知前端项目声明识别、混合仓库子项目选择和相应扩展激活。
+- [x] P02-T02：提供代理地址、实际监听端口、证书与连接诊断；保持项目 UUID、Scene v2 和旧项目兼容。
+- [x] P02-T03：补齐代理模式 MCP 查询/状态/开关端到端路径，明确流量归属和 browser/server 范围。
+- [x] P02-T04：建立本地 HTTP/HTTPS、跨域和独立 Chromium 夹具，新增 `test:web:proxy`。
+- [x] P02-T05：同步工作台入口、MCP 离线说明、场景 Prompt 与验收证据。
 
 主要落点：`package.json`、`src/discovery.ts`、`src/project.ts`、工作台连接页、Proxy Adapter、`proxy/` 及夹具。
 

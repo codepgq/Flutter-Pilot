@@ -36,6 +36,13 @@ export async function createSceneNetwork(
     changed: () => {},
   });
   await scenes.initialize();
+  if (!store.listScenes().scenes.length) {
+    await store.importPackage(
+      { version: 2, scenes: [{ id: 'fixture', name: 'Fixture', httpRules: [], wsRules: [] }] },
+      false,
+    );
+    await scenes.reload();
+  }
   const network = new McpNetworkController({
     scenesPath: store.file,
     listScenes: () => scenes.summary(),
@@ -43,7 +50,7 @@ export async function createSceneNetwork(
     reloadScenes: () => scenes.reload(),
     status: () => ({
       vmConnected: vm.state.status === 'connected',
-      scene: { activeSceneId: scenes.document.activeSceneId, runtime: scenes.runtime },
+      scene: { activeSceneId: scenes.activeSceneId, runtime: scenes.runtime },
       http: {
         captureEnabled: vm.state.captureEnabled,
         mockEnabled: vm.state.mockEnabled,
@@ -64,10 +71,13 @@ export async function createSceneNetwork(
     scenes,
     network,
     writeHttpRules: async ({ rules }) => {
-      const before = await store.read();
-      const doc = structuredClone(before);
-      doc.scenes[0].httpRules = rules;
-      return store.save(doc, before);
+      const sceneId = store.listScenes().scenes[0].id;
+      const before = await store.prepareSnapshot([], sceneId);
+      for (const rule of before.scenes[0].httpRules) {
+        const current = await store.getRule(sceneId, 'http', rule.id);
+        await store.deleteResource({ sceneId, kind: 'http', id: rule.id }, current.hash);
+      }
+      for (const rule of rules) await store.saveResource({ sceneId, kind: 'http', id: rule.id }, rule, null);
     },
   };
 }

@@ -19,6 +19,18 @@ import { agentInstructions, getUsageGuide, guideResources, guideTopics } from '.
 import { capabilityRoutes } from '../src/mcp/capabilities';
 
 const roots: string[] = [];
+it('accepts explicit native generation without weakening strict Web Page selection', () => {
+  expect(
+    parseTool('tap', { sessionId: 's', target: { runtimeId: 'vm', generation: 1 }, key: 'confirm' }),
+  ).toMatchObject({ target: { runtimeId: 'vm', generation: 1 } });
+  expect(() =>
+    parseTool('tap', {
+      sessionId: 's',
+      target: { runtimeId: 'web', generation: 1 },
+      selector: { source: 'web', testId: 'confirm' },
+    }),
+  ).toThrow();
+});
 const servers: McpSessionServer[] = [];
 const clients: Client[] = [];
 let bridgeFile: string;
@@ -85,6 +97,31 @@ async function connect(registryRoot: string, workspace?: string, name = 'codex-t
 }
 
 describe('MCP local session transport', () => {
+  it('preserves an explicit runtime target through built stdio and authenticated IPC', async () => {
+    const observed: unknown[] = [];
+    const f = await fixture('target-project', async (tool, args) => {
+      observed.push({ tool, args });
+      return { target: args.target, items: [], total: 0 };
+    });
+    const client = await connect(f.registryRoot, f.workspace);
+    const target = { runtimeId: 'proxy-target', generation: 4 };
+    const result = await client.callTool({
+      name: 'get_requests',
+      arguments: { sessionId: 'target-project', target, limit: 20 },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({ target, items: [], total: 0 });
+    expect(observed).toEqual([
+      { tool: 'get_requests', args: { sessionId: 'target-project', target, limit: 20 } },
+    ]);
+    const invalid = await client.callTool({
+      name: 'get_requests',
+      arguments: { sessionId: 'target-project', target: { ...target, generation: -1 } },
+    });
+    expect(invalid.isError).toBe(true);
+    expect(observed).toHaveLength(1);
+  });
+
   it.each([
     ['setup_automation', 660000, {}],
     ['connect_device', 240000, { deviceId: 'fixture-device', appId: 'dev.fixture' }],
@@ -263,6 +300,11 @@ describe('MCP local session transport', () => {
       await expect(client.readResource({ uri: 'file:///etc/passwd' })).rejects.toMatchObject({
         code: -32602,
       });
+      expect(await readdir(root)).toEqual(registryState === 'unsafe' ? ['sessions'] : []);
+      if (registryState === 'unsafe') {
+        expect((await stat(registry)).mode & 0o777).toBe(0o755);
+        expect(await readdir(registry)).toEqual([]);
+      }
     },
   );
 

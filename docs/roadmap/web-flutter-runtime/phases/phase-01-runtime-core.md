@@ -8,11 +8,11 @@
 
 ## 任务与产出
 
-- [ ] P01-T01：记录目标身份、Adapter 最小接口、能力和错误语义；区分项目、运行时、设备/页面作用域。
-- [ ] P01-T02：为现有 VM 与代理增加适配边界，统一工作台和 MCP 的 HTTP 列表、详情及采集/Mock 状态路由。
-- [ ] P01-T03：将激活、历史、执行锁、代次与断线失效约束绑定明确运行目标，保留旧 Flutter sessionId 兼容。
-- [ ] P01-T04：用生产 IPC/Host 集成补路由、错误来源、歧义和迟到结果回归，不能仅 mock NetworkHost 自证。
-- [ ] P01-T05：同步架构、MCP 描述/Prompt/指南/协议以及本阶段验收报告。
+- [x] P01-T01：记录目标身份、Adapter 最小接口、能力和错误语义；区分项目、运行时、设备/页面作用域。
+- [x] P01-T02：为现有 VM 与代理增加适配边界，统一工作台和 MCP 的 HTTP 列表、详情及采集/Mock 状态路由。
+- [x] P01-T03：将激活、历史、执行锁、代次与断线失效约束绑定明确运行目标，保留旧 Flutter sessionId 兼容。
+- [x] P01-T04：用生产 IPC/Host 集成补路由、错误来源、歧义和迟到结果回归，不能仅 mock NetworkHost 自证。
+- [x] P01-T05：同步架构、MCP 描述/Prompt/指南/协议以及本阶段验收报告。
 
 主要落点：`src/extension.ts`、`src/mcp/`、`src/project.ts`、`src/scene-controller.ts`；新增 runtime 接口的具体目录在实现时记录。不把整个 Workbench 一次性重写作为前提。
 

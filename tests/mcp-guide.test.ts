@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { getUsageGuide, guideTopics, httpExample, wsExample, sceneStorageGuide } from '../src/mcp/guide';
+import {
+  getUsageGuide,
+  guideTopics,
+  httpExample,
+  wsExample,
+  sceneStorageGuide,
+  runtimeTargetGuide,
+} from '../src/mcp/guide';
 import { indexSchema, manifestSchema } from '../src/scene-storage-model';
 import { sceneActionSchema } from '../src/workflows/model';
 import { mcpTools, parseTool } from '../src/mcp/tools';
@@ -13,6 +20,56 @@ import { readFile } from 'node:fs/promises';
 import { validateScenePackage } from '../src/scenes';
 
 describe('Agent usage guide contracts', () => {
+  it('publishes the same runtime target contract in offline guides and prompts', () => {
+    for (const topic of ['overview', 'http', 'ws', 'workflow'] as const)
+      expect(getUsageGuide(topic).runtimeTargets).toEqual(runtimeTargetGuide);
+    for (const example of runtimeTargetGuide.examples)
+      expect(parseTool(example.tool, example.arguments)).toEqual(example.arguments);
+    const capabilityText = getMcpPrompt('capabilities').messages[0].content.text;
+    expect(capabilityText).toContain('overview.runtimeTargets');
+    expect(agentInstructions).toContain('target:{runtimeId,generation}');
+    for (const name of [
+      'get_network_status',
+      'get_requests',
+      'get_request',
+      'get_ws_connections',
+      'get_ws_messages',
+      'inject_ws_message',
+      'send_ws_message',
+      'reload_rules',
+      'set_capture_enabled',
+      'list_scenes',
+      'activate_scene',
+      'deactivate_scene',
+      'http_mock',
+      'websocket_mock',
+      'mock_workflow',
+      'scene_action_quick_run',
+    ]) {
+      const text = getMcpPrompt(name).messages[0].content.text;
+      expect(text).toContain('target:{runtimeId,generation}');
+      expect(text).toContain('runtimeTargets');
+    }
+  });
+
+  it('validates network target references strictly while retaining sessionId calls', () => {
+    const args = { sessionId: 'project', id: 'request' };
+    expect(parseTool('get_request', args)).toEqual(args);
+    const target = { runtimeId: 'proxy', generation: 3 };
+    expect(parseTool('get_request', { ...args, target })).toEqual({ ...args, target });
+    for (const invalid of [
+      {},
+      { runtimeId: 'proxy' },
+      { runtimeId: '', generation: 1 },
+      { runtimeId: 'proxy', generation: -1 },
+      { runtimeId: 'proxy', generation: 1.5 },
+      { runtimeId: 'proxy', generation: '1' },
+      { ...target, page: 'implicit' },
+    ])
+      expect(() => parseTool('get_request', { ...args, target: invalid })).toThrow();
+    expect(() => parseTool('hot_reload', { sessionId: 'project', target })).toThrow();
+  });
+
   it('keeps every README Scene exchange example importable by the v2 production validator', async () => {
     const readme = await readFile('README.md', 'utf8');
     let count = 0;
@@ -133,9 +190,7 @@ describe('Agent usage guide contracts', () => {
       }
     }
     expect([...advertisedTools].sort()).toEqual(Object.keys(mcpTools).sort());
-    const screenshot = capabilityRoutes.find((route) =>
-      route.tools.some((name) => name === 'take_screenshot'),
-    )!;
+    const screenshot = capabilityRoutes.find((route) => route.id === 'screenshot')!;
     expect(screenshot).toBeDefined();
     expect(screenshot.prompt).toBe('app_screenshot');
     expect(screenshot.topics).toContain('screenshot');
@@ -432,4 +487,18 @@ describe('Agent usage guide contracts', () => {
       expect(text).toContain('IDE');
     },
   );
+});
+
+it('discovers Web proxy preparation and limits offline in overview/http and relevant prompts', () => {
+  for (const topic of ['overview', 'http'] as const) {
+    const guide = getUsageGuide(topic) as any;
+    const text = JSON.stringify(guide);
+    expect(text).toContain('webProxy');
+    expect(text).toContain('CORS');
+    expect(text).toContain('Service Worker');
+    expect(text).toContain('SSR');
+  }
+  for (const name of ['capabilities', 'http_mock', 'get_network_status']) {
+    expect(getMcpPrompt(name).messages[0].content.text).toContain('webProxy');
+  }
 });

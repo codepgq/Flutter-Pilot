@@ -258,7 +258,8 @@ try {
     reload.ok && (await call('list_scenes')).scenes[0].httpRuleCount === 1,
     'edited rule file reloads via MCP',
   );
-  await call('activate_scene', { sceneId: scenes.document.scenes[0].id });
+  const sceneId = store.listScenes().scenes[0].id;
+  await call('activate_scene', { sceneId });
   const mock = await call('get_network_status');
   check(mock.http.mockEnabled && mock.http.instances === 1, 'MCP explicitly enables runtime mock');
   check((await call('tap', { key: 'fetch' })).ok, 'MCP pointer click triggers business request');
@@ -274,9 +275,9 @@ try {
     'MCP network history identifies applied rule',
   );
   check(JSON.parse(detail.response.body).marker === 'mcp-first', 'MCP response detail matches UI');
-  const rules = await store.read();
-  rules.scenes[0].httpRules[0].mock.body = JSON.stringify({ marker: 'mcp-updated' });
-  await store.save(rules, await store.read());
+  const resource = await store.getRule(sceneId, 'http', 'fixture-mock');
+  resource.value.mock.body = JSON.stringify({ marker: 'mcp-updated' });
+  await store.saveResource({ sceneId, kind: 'http', id: 'fixture-mock' }, resource.value, resource.hash);
   check((await call('reload_rules')).ok, 'MCP resynchronizes edited active rule');
   check((await call('tap', { key: 'fetch' })).ok, 'MCP second action');
   await waitFor(
@@ -284,6 +285,10 @@ try {
     10000,
   );
   check(true, 'updated rule affects next UI action');
+  if (process.env.PILOT_WEB_COEXISTENCE === '1') {
+    const { verifyCoexistence } = await import('./web-coexistence-smoke.mjs');
+    await verifyCoexistence({ vm, ui, store, scenes, network, directory: join(temp, '.flutter-pilot') });
+  }
   await call('deactivate_scene');
   check(!vm.state.mockEnabled, 'MCP disables runtime mock');
   check((await hash()) === before, 'fixture source unchanged during MCP operations');

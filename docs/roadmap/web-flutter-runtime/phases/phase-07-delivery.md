@@ -8,12 +8,12 @@
 
 ## 任务与产出
 
-- [ ] P07-T01：新增 `test:mcp:web`，从构建后的 stdio 入口驱动生产 Web Adapter；新增 `test:web:coexistence`。
-- [ ] P07-T02：执行原生 HTML、React、Vue 的完整 Web 夹具矩阵，以及独立 Flutter iOS 模拟器回归。
-- [ ] P07-T03：以一个真实 Agent 客户端验证发现、能力理解和实际 Web 调用，区别 SDK 与模型行为证据。
-- [ ] P07-T04：核对首次使用、依赖未准备、断线、取消、进程退出、IDE 恢复及多目标错误场景。
-- [ ] P07-T05：生成并核对隔离 VSIX 产物，检查 Worker/清单/私有依赖路径与 bridge；更新用户文档与支持矩阵。
-- [ ] P07-T06：填写最终验收报告、G01–G10 对照及所有遗留限制，更新 progress 与项目 memory。
+- [x] P07-T01：新增 `test:mcp:web`，从构建后的 stdio 入口驱动生产 Web Adapter；新增 `test:web:coexistence`。
+- [x] P07-T02：执行原生 HTML、React、Vue 的完整 Web 夹具矩阵，以及独立 Flutter iOS 模拟器回归。
+- [x] P07-T03：以一个真实 Agent 客户端验证发现、能力理解和实际 Web 调用，区别 SDK 与模型行为证据。
+- [x] P07-T04：核对首次使用、依赖未准备、断线、取消、进程退出、IDE 恢复及多目标错误场景。
+- [x] P07-T05：生成并核对隔离 VSIX 产物，检查 Worker/清单/私有依赖路径与 bridge；更新用户文档与支持矩阵。
+- [x] P07-T06：填写最终验收报告、G01–G10 对照及所有遗留限制，更新 progress 与项目 memory。
 
 ## 固定验收标准
 

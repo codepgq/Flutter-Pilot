@@ -11,7 +11,11 @@ export interface Rect extends Point {
   height: number;
 }
 export interface Selector {
-  source?: 'flutter' | 'device';
+  source?: 'flutter' | 'device' | 'web';
+  testId?: string;
+  role?: string;
+  name?: string;
+  frame?: { testId: string };
   key?: string | number;
   text?: string;
   semantics?: string;

@@ -11,6 +11,7 @@ export interface SceneActionSource {
 }
 
 export interface WorkflowHost {
+  preflight?(compiled: CompiledWorkflow): void;
   acquire(owner: string): Promise<void>;
   execute(owner: string, tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<UiResult>;
   release(owner: string): Promise<void>;
@@ -112,7 +113,7 @@ function waitDiagnostics(value: unknown, clean: (value: string) => string): Wait
       ]),
     );
   return {
-    selector: cleanSelector(selector.data) as Selector,
+    selector: cleanSelector({ ...selector.data }) as Selector,
     condition: data.condition as string,
     timeoutMs: data.timeoutMs as number,
     attempts: data.attempts as number,
@@ -208,6 +209,7 @@ export class WorkflowController {
     try {
       const doc = await this.store.read(sceneId, actionId);
       const compiled = compileSceneAction(doc, sceneId, actionId, inputs, backend);
+      this.host.preflight?.(compiled);
       if (this.disposed) throw new WorkflowError('SESSION_INVALIDATED', '场景操作会话已关闭。');
       const owner = randomUUID();
       const secrets = compiled.secrets.sort((a, b) => b.length - a.length);

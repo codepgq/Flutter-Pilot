@@ -3,7 +3,7 @@
   "displayName": "Flutter Pilot",
   "icon": "resources/icons/plugin.png",
   "description": "Flutter 运行时调试与 Agent 联调工作台：HTTP/WebSocket 采集与 Mock、UI 精确操作、热重载和 MCP。",
-  "version": "0.0.22",
+  "version": "0.0.23",
   "publisher": "flutter-pilot",
   "license": "MIT",
   "engines": {
@@ -27,6 +27,8 @@
   "activationEvents": [
     "onDebug:dart",
     "workspaceContains:pubspec.yaml",
+    "workspaceContains:package.json",
+    "workspaceContains:.flutter-pilot/project.json",
     "onCommand:flutterPilot.open"
   ],
   "capabilities": {
@@ -164,7 +166,7 @@
     "test:proxy": "python3 -m unittest discover -s tests/proxy -v",
     "test:ui": "playwright test",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-pilot-0.0.22.vsix",
+    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-pilot-0.0.23.vsix",
     "test:ide": "node scripts/ide-test.mjs",
     "format:check": "prettier --check \"src/**/*.ts\" \"webview/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/*.{mjs,cjs}\" \"*.{json,ts,mts}\"",
     "test:vm": "node scripts/vm-injection-smoke.mjs",
@@ -178,7 +180,15 @@
     "test:mcp:agents": "node scripts/mcp-agent-smoke.mjs",
     "test:ide:mcp": "node scripts/ide-mcp-test.mjs",
     "test:automation:flutter": "node scripts/automation-flutter-smoke.mjs",
-    "scenes:migrate": "node scripts/migrate-scenes.mjs"
+    "scenes:migrate": "node scripts/migrate-scenes.mjs",
+    "test:web:proxy": "node scripts/web-proxy-smoke.mjs",
+    "test:web:http": "node scripts/web-http-smoke.mjs",
+    "test:web:dependencies": "node scripts/web-dependencies-smoke.mjs",
+    "test:web:ui": "node scripts/web-ui-smoke.mjs",
+    "test:web:ws": "node scripts/web-ws-smoke.mjs",
+    "test:web:e2e": "node scripts/web-e2e-smoke.mjs",
+    "test:mcp:web": "node scripts/mcp-web-smoke.mjs",
+    "test:web:coexistence": "PILOT_WEB_COEXISTENCE=1 node scripts/mcp-flutter-smoke.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
