@@ -1,5 +1,11 @@
 # 实现与验证结论
 
+## 0.0.27 托管浏览器有状态 HTTP Mock（2026-11-25）
+
+- Scene 规则使用 JSONata 2.2.2 生成响应并可更新 Context 内的 JSON 状态。工作台可维护规则，MCP 可激活和读取实际命中。VSIX 提供生产 HTTP 拦截器的独立 Playwright 测试入口。
+- Admin 项目迁移了登录、邀请设密、账号管理、审批、资格、暂停恢复和 CMA 读取。独立 Admin MCP 使用同一规则和 Chromium Worker 核对三种可用身份、停用账号、错误密码和跨入口拒绝。新请求验收需要核对实际响应、命中规则及最终 UI，并排除导航取消的请求。
+- 分发包、Cursor 安装核对与附注标签核验的记录见 `docs/validation.md`。活动 Cursor 窗口在调试方便时重载。
+
 ## 0.0.26 发布、Cursor 安装与推送（2026-11-25）
 
 - 版本、lockfile、README / CHANGELOG 与 VSIX 路径同步至 0.0.26。发布内容包含 HTTP JSON 请求体匹配、工作台配置，以及 MCP 网络正文查询指引与目标历史清理。

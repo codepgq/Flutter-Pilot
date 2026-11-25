@@ -4,6 +4,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Browser, BrowserServer, BrowserContext, Page } from 'playwright';
 import { validateRuleDocument, type Rule, type HistoryEntry, type HistoryQuery } from '../model';
 import { BrowserError, browserUrl, type BrowserContextState } from './protocol';
+import { DynamicHttp } from './dynamic-http';
 import { installHttp } from './interception';
 import { executeWebUi } from './ui';
 import { BrowserSockets } from './websocket';
@@ -25,6 +26,7 @@ interface Context {
   mock: boolean;
   rules: Rule[];
   states: Map<string, string>;
+  dynamic: DynamicHttp;
 }
 const contexts = new Map<string, Context>();
 const pending = new Map<string, AbortController>();
@@ -131,6 +133,7 @@ async function dispatch(method: string, args: any, signal: AbortSignal) {
       mock: false,
       rules: [],
       states: new Map(),
+      dynamic: new DynamicHttp(),
     };
     contexts.set(c.id, c);
     // Register before any page can navigate, including popups.
@@ -142,7 +145,7 @@ async function dispatch(method: string, args: any, signal: AbortSignal) {
         installHttp(
           context,
           page,
-          () => ({ capture: c.capture, mock: c.mock, rules: c.rules, states: c.states }),
+          () => ({ capture: c.capture, mock: c.mock, rules: c.rules, states: c.states, dynamic: c.dynamic }),
           (value) => save(c, value, id),
         ),
       ]).then(() => {});
@@ -184,10 +187,12 @@ async function dispatch(method: string, args: any, signal: AbortSignal) {
         'TARGET_UNSUPPORTED',
         'Browser direct interception does not support interactive breakpoints.',
       );
+    const wsRules = validateWsRuleDocument({ version: 1, rules: args.wsRules ?? [] }).rules;
+    c.dynamic.configure(rules);
     c.rules = rules;
     c.capture = args.capture;
     c.mock = args.mock;
-    c.sockets.rules = validateWsRuleDocument({ version: 1, rules: args.wsRules ?? [] }).rules;
+    c.sockets.rules = wsRules;
     c.sockets.capture = !!args.wsCapture;
     c.sockets.mock = !!args.wsCapture && !!args.wsMock;
     const live = new Set(rules.flatMap((rule) => (rule.scenario ? [rule.scenario.id] : [])));

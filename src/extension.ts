@@ -629,7 +629,11 @@ class Workbench {
         },
         project: async (http, ws) => {
           const target = this.runtimeTarget(mode);
-          this.targetRules[mode] = http;
+          if (http.some((rule) => rule.enabled && rule.dynamic)) {
+            this.targetRules[mode] = [];
+            throw new Error('动态 HTTP Mock 仅支持托管浏览器。');
+          }
+          this.targetRules[mode] = http.filter((rule) => !rule.dynamic);
           this.targetErrors[mode] = undefined;
           if (mode === 'vm') {
             await this.vm.updateRules(http);

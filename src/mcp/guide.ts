@@ -270,6 +270,8 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
         '非空 JSON 对象。对原始请求体的顶层字段按值和类型完全匹配，忽略未指定的顶层字段。例如匹配测试账号 {"email":"admin@example.test","password":"demo-only"}。',
       bodyRegex:
         '非空 JSON 对象，值是正则字符串。字段必须是字符串，整个值必须匹配。可与 bodyJson 合用。两者都要求完整可读的 JSON 对象正文和 JSON Content-Type。无效正则保存失败。',
+      dynamic:
+        '托管 Chromium loopback 场景可用 dynamic:{store,expression,library?,initial?}。JSONata 读取 request、state、now、startedAt，返回 {status,body,state?} 或 {status,text,state?}。支持同场景 bodies/ 下的 expressionFile/libraryFile/initialFile。规则命中仍沿用 match。按 Context 隔离，Flutter Dio 和 HTTP 代理不支持。',
       mock: '直接返回响应，status为200..599，headers为字符串字典，body必须是字符串；JSON正文先序列化，不可直接放对象。',
       request: '可修改method/url/headers/query/body；headers和query以null删除项，正文为字符串。',
       response: '可修改status/headers/body；正文为字符串。',

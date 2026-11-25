@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.27 — 托管浏览器有状态 HTTP Mock（2026-11-25）
+
+- 本机 HTTP 规则可引用 JSONata 表达式、公共表达式和 JSON 初始状态。状态在同一 Chromium Context 的页面间共享，可随响应更新。
+- VSIX 包含浏览器测试适配，独立的 Chromium 回归可复用生产 HTTP 拦截器和项目 Scene。
+
 ## 0.0.26 — HTTP 请求体匹配与网络记录（2026-11-25）
 
 - HTTP Mock 规则支持 `match.bodyJson` 精确匹配指定 JSON 字段和 `match.bodyRegex` 对字符串字段做整值正则匹配，覆盖托管 Chromium、Flutter Dio 与 HTTP 代理。工作台可直接编辑两种条件。

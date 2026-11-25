@@ -11,6 +11,11 @@ const nodeBundle = {
 };
 const options = [
   {
+    entryPoints: ['src/browser/test-context.ts'],
+    outfile: 'dist/browser-test-context.cjs',
+    ...nodeBundle,
+  },
+  {
     entryPoints: ['src/browser/worker.ts'],
     outfile: 'dist/browser-worker.cjs',
     ...nodeBundle,

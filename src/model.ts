@@ -32,6 +32,8 @@ export interface Rule {
   redirect?: { url: string };
   mock?: { status: number; headers: Record<string, string>; body: string };
   response?: ResponsePatch;
+  /** Declarative JSON request/state transformation for managed Web contexts. */
+  dynamic?: { store: string; expression: string; library?: string; initial?: string };
   breakpoint?: { request?: boolean; response?: boolean; timeout?: number };
   /** Ephemeral HTTP fixture state, scoped by a test run. */
   scenario?: { id: string; initial: string; when: string; next?: string };
@@ -317,6 +319,7 @@ export function validateRuleDocument(input: unknown): RuleDocument {
         'response',
         'breakpoint',
         'scenario',
+        'dynamic',
       ],
       '规则',
     );
@@ -367,6 +370,37 @@ export function validateRuleDocument(input: unknown): RuleDocument {
       assert(typeof item.mock.body === 'string', 'mock.body 必须为字符串');
     }
     assert(!(item.mock !== undefined && item.redirect !== undefined), '同一规则不能同时直接 Mock 和转发');
+    if (item.dynamic !== undefined) {
+      const value = item.dynamic;
+      assert(object(value), 'dynamic 必须为对象');
+      fields(value, ['store', 'expression', 'library', 'initial'], 'dynamic');
+      assert(
+        typeof value.store === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value.store),
+        'dynamic.store 无效',
+      );
+      for (const [key, limit] of [
+        ['expression', 65536],
+        ['library', 65536],
+        ['initial', 1048576],
+      ] as const) {
+        if (key !== 'expression' && value[key] === undefined) continue;
+        const field = value[key];
+        assert(
+          typeof field === 'string' && field.trim().length > 0 && field.length <= limit,
+          `dynamic.${key} 无效或超限`,
+        );
+      }
+      assert(
+        ['mock', 'request', 'redirect', 'response', 'scenario', 'breakpoint'].every(
+          (key) => item[key] === undefined,
+        ),
+        '动态 HTTP Mock 不能与其他动作组合',
+      );
+      assert(
+        item.match.host === '127.0.0.1' || item.match.host === 'localhost',
+        '动态 HTTP Mock 仅支持显式 loopback host',
+      );
+    }
     if (item.scenario !== undefined) {
       assert(object(item.scenario), 'scenario 必须为对象');
       fields(item.scenario, ['id', 'initial', 'when', 'next'], 'scenario');
@@ -413,6 +447,7 @@ export function validateRuleDocument(input: unknown): RuleDocument {
       item.request !== undefined ||
         item.response !== undefined ||
         item.mock !== undefined ||
+        item.dynamic !== undefined ||
         item.redirect !== undefined ||
         (object(item.breakpoint) && (item.breakpoint.request || item.breakpoint.response)),
       '规则至少需要一个动作',

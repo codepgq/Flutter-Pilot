@@ -42,7 +42,7 @@
 
 ## 当前发布版本（2026-11-25）
 
-- 当前发布版本为 0.0.26。HTTP Mock 支持 JSON 请求体字段完全匹配和整值正则匹配，覆盖托管 Chromium、Flutter Dio 和 HTTP 代理。MCP 新增网络历史清理，现有 62 个工具和 70 个 Prompts。发布验证见 `IMPLEMENTATION.md` 和 `docs/validation.md`。
+- 当前发布版本为 0.0.27。托管 Chromium 支持本机 HTTP 的声明式响应和 Context 内 JSON 状态。`bodyJson` 精确匹配和 `bodyRegex` 整值正则匹配覆盖托管 Chromium、Flutter Dio 和 HTTP 代理。MCP 提供 62 个工具和 70 个 Prompts。验收记录见 `IMPLEMENTATION.md` 和 `docs/validation.md`。
 - 当前仓库自动生成的 `.flutter-pilot/` 是本地项目状态，保留但不提交、不进入 VSIX；可复用分发示例仍位于 `resources/`。
 
 ## Cursor MCP 适配（2026-11-14，0.0.21 已发布）

@@ -58,6 +58,7 @@ export function validateTestMock(value: unknown): TestMock {
       const { nextState, ...base } = rule;
       check(
         base.mock !== undefined &&
+          base.dynamic === undefined &&
           base.request === undefined &&
           base.redirect === undefined &&
           base.response === undefined &&

@@ -1715,6 +1715,10 @@ function newRule(kind: string): Rule {
   };
   if (kind === 'mock')
     rule.mock = { status: 200, headers: { 'content-type': 'application/json' }, body: '{\n  "data": {}\n}' };
+  if (kind === 'dynamic') {
+    rule.match.host = '127.0.0.1';
+    rule.dynamic = { store: 'fixture', expression: '{"status":200,"body":{"success":true}}' };
+  }
   if (kind === 'request') rule.request = { headers: {} };
   if (kind === 'response') rule.response = { headers: {} };
   if (kind === 'redirect') rule.redirect = { url: 'http://127.0.0.1:3000/' };
@@ -1722,6 +1726,7 @@ function newRule(kind: string): Rule {
   return rule;
 }
 function kindOf(rule: Rule) {
+  if (rule.dynamic) return 'dynamic';
   return rule.mock
     ? 'mock'
     : rule.redirect
@@ -1734,6 +1739,7 @@ function kindOf(rule: Rule) {
 }
 const kindLabels: Record<string, string> = {
   mock: '直接 Mock',
+  dynamic: '动态 HTTP Mock',
   request: '修改请求',
   response: '修改响应',
   redirect: '转发地址',
@@ -2315,7 +2321,7 @@ function RuleEditor({
   const existingRule =
     !!expectedHash || scenes.some((scene) => scene.httpRules.some((item) => item.id === rule.id));
   const [kind, setKind] = useState(kindOf(rule));
-  const [advanced, setAdvanced] = useState(false);
+  const [advanced, setAdvanced] = useState(!!rule.dynamic);
   const [raw, setRaw] = useState(JSON.stringify(rule, null, 2));
   const [headers, setHeaders] = useState(
     JSON.stringify(rule.mock?.headers ?? rule.request?.headers ?? rule.response?.headers ?? {}, null, 2),
@@ -2370,6 +2376,7 @@ function RuleEditor({
       request: fresh.request,
       response: fresh.response,
       mock: fresh.mock,
+      dynamic: fresh.dynamic,
       redirect: fresh.redirect,
       breakpoint: fresh.breakpoint ?? d.breakpoint,
     }));
@@ -2391,6 +2398,7 @@ function RuleEditor({
         <div className="editor-toggle">
           <button
             className={!advanced ? 'active' : ''}
+            disabled={!!rule.dynamic}
             onClick={() => {
               if (advanced) {
                 try {

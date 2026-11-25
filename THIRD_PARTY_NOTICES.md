@@ -240,3 +240,29 @@ SOFTWARE.
 ## 按需安装的 Appium 设备环境
 
 Appium 3.9.0、UiAutomator2 Driver 8.7.3、XCUITest Driver 12.22.8 及其依赖通过独立锁文件安装到用户私有目录，不随 VSIX 捆绑 node_modules。各包的原始 LICENSE / NOTICE 保留在安装目录中。Flutter Pilot 对锁定 XCUITest / WDA 添加具备版本检查的本地附着适配器，以保护已有模拟器与其他进程；来源和版本见 resources/automation/package-lock.json，适配器见 src/automation/runtime.ts。
+
+## JSONata
+
+用于托管 Chromium 的有状态 HTTP Mock 表达式求值。发行版本为 2.2.2，采用 MIT 许可。
+
+```text
+MIT license
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```

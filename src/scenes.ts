@@ -82,14 +82,21 @@ function freeze<T>(value: T): T {
 function bodySlots(
   rule: any,
   kind: 'http' | 'ws',
-): Array<{ owner: any; field: 'body' | 'text'; ref: 'bodyFile' | 'textFile' }> {
+): Array<{ owner: any; field: string; ref: string; placeholder?: string }> {
   if (!object(rule)) throw new Error('规则必须是对象');
   return kind === 'http'
-    ? ['request', 'response', 'mock'].flatMap((name) =>
-        rule[name] === undefined
+    ? [
+        ...['request', 'response', 'mock'].flatMap((name) =>
+          rule[name] === undefined ? [] : [{ owner: rule[name], field: 'body', ref: 'bodyFile' }],
+        ),
+        ...(!object(rule.dynamic)
           ? []
-          : [{ owner: rule[name], field: 'body' as const, ref: 'bodyFile' as const }],
-      )
+          : [
+              { owner: rule.dynamic, field: 'expression', ref: 'expressionFile', placeholder: '{}' },
+              { owner: rule.dynamic, field: 'library', ref: 'libraryFile', placeholder: '$' },
+              { owner: rule.dynamic, field: 'initial', ref: 'initialFile', placeholder: '{}' },
+            ]),
+      ]
     : [{ owner: rule.action, field: 'text', ref: 'textFile' }];
 }
 function bodyPath(value: unknown): string {
@@ -109,7 +116,7 @@ function inlineForValidation(value: any, kind: 'http' | 'ws') {
       bodyPath(slot.owner[slot.ref]);
       if (slot.owner[slot.field] !== undefined) throw new Error(`${slot.field} 与 ${slot.ref} 互斥`);
       delete slot.owner[slot.ref];
-      slot.owner[slot.field] = '';
+      slot.owner[slot.field] = slot.placeholder ?? '';
     }
   }
   if (kind === 'http') return validateRuleDocument({ version: 1, rules: [result] }).rules[0];
@@ -263,7 +270,7 @@ export class SceneStore {
                 )) ?? '{}',
               );
               if (
-                cached.version === 4 &&
+                cached.version === 5 &&
                 cached.root === this.file &&
                 Array.isArray(cached.entries) &&
                 cached.checksum === hash(json(cached.entries)) &&
@@ -386,7 +393,8 @@ export class SceneStore {
                     const rule = inlineForValidation(value, kind);
                     const overview = structuredClone(rule);
                     for (const slot of bodySlots(overview, kind))
-                      if (slot.owner[slot.field] !== undefined) slot.owner[slot.field] = '';
+                      if (slot.owner[slot.field] !== undefined)
+                        slot.owner[slot.field] = slot.placeholder ?? '';
                     return {
                       id: rule.id,
                       name: rule.name,
@@ -480,7 +488,7 @@ export class SceneStore {
       dirty.map(async (directory) => {
         try {
           await this.privateWrite(`scene-cache/${directory}.json`, {
-            version: 4,
+            version: 5,
             root: this.file,
             entries: shards.get(directory),
             checksum: hash(json(shards.get(directory))),

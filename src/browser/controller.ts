@@ -209,9 +209,15 @@ export class BrowserController extends EventEmitter {
           await this.sync(c);
         },
         project: async (rules, ws) => {
+          const previous = { rules: c.rules, wsRules: c.wsRules };
           c.rules = rules;
           c.wsRules = ws;
-          await this.sync(c);
+          try {
+            await this.sync(c);
+          } catch (error) {
+            Object.assign(c, previous);
+            throw error;
+          }
         },
         enable: async (domain) => {
           if (domain === 'http') {

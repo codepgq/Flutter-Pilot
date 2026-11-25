@@ -1,12 +1,19 @@
 import type { BrowserContext, Page } from 'playwright';
 import type { HistoryEntry, Rule } from '../model';
+import type { DynamicHttp } from './dynamic-http';
 import { bodyLimit, bodySnapshot, entry, patchRequest, patchResponse, selectHttp } from './http';
 
 /** CDP preserves Chromium's real OPTIONS/CORS checks and can continue unbuffered responses. */
 export async function installHttp(
   context: BrowserContext,
   page: Page,
-  settings: () => { capture: boolean; mock: boolean; rules: Rule[]; states: Map<string, string> },
+  settings: () => {
+    capture: boolean;
+    mock: boolean;
+    rules: Rule[];
+    states: Map<string, string>;
+    dynamic: DynamicHttp;
+  },
   save: (record: HistoryEntry) => void,
 ) {
   const session = await context.newCDPSession(page);
@@ -71,8 +78,7 @@ export async function installHttp(
       record.targetUrl = request.url;
       if (unsupported) record.error = 'Upload or binary/oversize request is passed through without editing.';
       if (rule) record.requestRuleId = rule.id;
-      if (rule?.mock) {
-        const mock = rule.mock;
+      const fulfill = async (mock: NonNullable<Rule['mock']>) => {
         const originalResponse = {
           ...bodySnapshot(Object.entries(mock.headers), Buffer.from(mock.body)),
           status: mock.status,
@@ -87,7 +93,7 @@ export async function installHttp(
         record.mocked = true;
         if (responseRule && originalResponse.editable) record.responseRuleId = responseRule.id;
         // Commit state before delivering the response so an immediate follow-up sees it.
-        if (rule.scenario?.next) config.states.set(rule.scenario.id, rule.scenario.next);
+        if (rule?.scenario?.next) config.states.set(rule.scenario.id, rule.scenario.next);
         await session.send('Fetch.fulfillRequest', {
           requestId,
           responseCode: response.status,
@@ -102,6 +108,13 @@ export async function installHttp(
         });
         requests.delete(requestId);
         save(record);
+      };
+      if (rule?.dynamic) {
+        await config.dynamic.run(rule.id, original, fulfill);
+        return;
+      }
+      if (rule?.mock) {
+        await fulfill(rule.mock);
         return;
       }
       await session.send('Fetch.continueRequest', {

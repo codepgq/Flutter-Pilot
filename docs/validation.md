@@ -1,5 +1,10 @@
 # 验收记录
 
+## 0.0.27 托管浏览器有状态 HTTP Mock（2026-11-25）
+
+- 发布回归涵盖类型、格式、889 项 Vitest、109 项工作台 Playwright、32 项托管 Chromium HTTP 和 VSIX 打包。独立 Admin MCP 通过六项身份验收，核对了页面和实际 Mock 命中。Flutter Dio 和代理沿用 0.0.26 的请求体匹配，动态状态适用于托管 Chromium 的本机接口。
+- 分发包为 `artifacts/flutter-pilot-0.0.27.vsix`。包、源码构建、Cursor 安装文件及离线 MCP 核验见 `artifacts/v0.0.27-install-report.json`。远端 main 与附注标签的核验见 `artifacts/v0.0.27-release-report.txt`。
+
 ## 0.0.26 发布、Cursor 安装与推送（2026-11-25）
 
 - 版本、lockfile、README / CHANGELOG 与 VSIX 路径同步至 0.0.26。发布内容包含 HTTP JSON 请求体匹配、工作台配置，以及 MCP 网络正文查询指引与目标历史清理。

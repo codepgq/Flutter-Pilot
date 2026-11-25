@@ -44,7 +44,16 @@ export interface Resource<T> {
   version: number;
   files: Record<string, string>;
 }
-export type StoredHttpRule = Omit<Rule, 'request' | 'response' | 'mock'> & {
+export type StoredHttpRule = Omit<Rule, 'request' | 'response' | 'mock' | 'dynamic'> & {
+  dynamic?: {
+    store: string;
+    expression?: string;
+    expressionFile?: string;
+    library?: string;
+    libraryFile?: string;
+    initial?: string;
+    initialFile?: string;
+  };
   request?: Omit<NonNullable<Rule['request']>, 'body'> & { body?: string; bodyFile?: string };
   response?: Omit<NonNullable<Rule['response']>, 'body'> & { body?: string; bodyFile?: string };
   mock?: Omit<NonNullable<Rule['mock']>, 'body'> & { body?: string; bodyFile?: string };

@@ -2748,7 +2748,11 @@ describe('runtime target routing through production Host and authenticated MCP I
       await message('connection.mode', { mode: 'vm' });
       await message('vm.connect', { url: 'ws://127.0.0.1:12345/ws' });
       await message('mcp.enable', { enabled: true });
-      const [descriptor] = await discoverSessions(join(directory, 'bridge', 'sessions'), fake.workspace);
+      const descriptor = await vi.waitFor(async () => {
+        const sessions = await discoverSessions(join(directory, 'bridge', 'sessions'), fake.workspace);
+        expect(sessions).toHaveLength(1);
+        return sessions[0];
+      });
       const describe = async () => (await requestSession(descriptor, { kind: 'describe' })) as any;
       const targets = (await describe()).runtimeTargets;
       const ref = (kind: string) => {

@@ -78,3 +78,28 @@ npm run scenes:migrate -- /path/to/project/.flutter-pilot --apply
 预检用生产 v1 校验器读取旧文件，在临时目录拆分，再校验装配数据、UTF-8 正文和动作展开；正式转换再次执行相同校验，确认源文件未变后发布新目录。拒绝覆盖已有 `scenes/`，保留旧文件。迁移报告记录旧激活 ID，新工作区初始不激活，由用户首次选择。缺新结构但存在旧文件时提示迁移，不自动创建空配置。
 
 验收分为仓库/协议、合成工作台和实际设备；0.0.22 已按用户授权打包并安装到 Cursor，发布检查不包含业务设备验收。规模数据与实际耗时记录在 `artifacts/scene-storage-scale.json`。
+
+### 托管 Chromium 动态 HTTP Mock
+
+在 `127.0.0.1` 或 `localhost` 的 HTTP 规则中添加 `dynamic` 动作。method、path 和请求体匹配沿用普通规则配置。每个 `store` 在同一浏览器 Context 的标签页之间共享 JSON 状态。多个规则可引用同一个 `store`。可以在一条规则声明 `initial`，其他规则省略即可。
+
+```json
+{
+  "id": "add-item",
+  "name": "追加模拟条目",
+  "enabled": true,
+  "priority": 100,
+  "match": { "method": "POST", "host": "127.0.0.1", "path": "/api/items" },
+  "dynamic": {
+    "store": "items",
+    "initial": "{\"items\":[]}",
+    "expression": "($items := $append(state.items, [request.body]); {\"status\":201,\"body\":request.body,\"state\":{\"items\":$items}})"
+  }
+}
+```
+
+表达式使用 JSONata。输入包含 `request.method`、`request.path`、`request.query`、`request.headers`、`request.body`、`state`、毫秒时间戳 `now` 与创建存储时的 `startedAt`。可使用 `$uuid()` 生成演示令牌，`$digest(text)` 生成 SHA-256 演示摘要。响应返回 `{status, body, state?}`，其中 `body` 是 JSON 值。使用 `text` 代替 `body` 可返回带受限 CSP 的 HTML。省略 `state` 时保持当前状态。
+
+`expressionFile`、`libraryFile` 和 `initialFile` 从场景下的 `bodies/` 读取内容，路由之间可复用 `libraryFile` 中的绑定。普通规则也可以在同一场景里以更高优先级返回故障响应。动态规则按 Context 串行执行，响应交付失败时丢弃本次状态更新，后续请求读取最近一次提交。切换到不包含该存储的场景、修改初始数据或新建 Context 会重新初始化。表达式按受信工作区配置执行。Web 运行时限制请求、状态、响应大小和表达式执行规模。
+
+Playwright Chromium 测试可复用扩展内 `dist/browser-test-context.cjs` 的 `attachScene(context, rulesDirectory, sceneId)`。在首次导航前 `await pilot.ready(page)`。返回值还包含当前 Context 的 `history` 和 `override(rules)`，后者允许在测试中临时替换或补充规则。Playwright 测试使用相同的 HTTP 拦截器和状态引擎。此入口支持 HTTP 场景，Flutter Dio、代理和 WS 分别使用对应运行目标。

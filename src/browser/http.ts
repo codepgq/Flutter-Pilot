@@ -84,7 +84,7 @@ export function selectHttp(
       (rule) =>
         rule.enabled &&
         matchesHttp(rule, request, states) &&
-        (stage === 'request' ? rule.request || rule.redirect || rule.mock : rule.response),
+        (stage === 'request' ? rule.request || rule.redirect || rule.mock || rule.dynamic : rule.response),
     )
     .sort((a, b) => b.priority - a.priority)[0];
 }
