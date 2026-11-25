@@ -29,7 +29,8 @@
     "workspaceContains:pubspec.yaml",
     "workspaceContains:package.json",
     "workspaceContains:.flutter-pilot/project.json",
-    "onCommand:flutterPilot.open"
+    "onCommand:flutterPilot.open",
+    "onCommand:flutterPilot.localBrowserMock"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -73,6 +74,10 @@
       ]
     },
     "commands": [
+      {
+        "command": "flutterPilot.localBrowserMock",
+        "title": "Flutter Pilot: 普通浏览器 HTTP Mock"
+      },
       {
         "command": "flutterPilot.open",
         "title": "Flutter Pilot: 打开工作台",
