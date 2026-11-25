@@ -1,5 +1,11 @@
 # 实现与验证结论
 
+## 0.0.30 Web 启动项接入普通浏览器 HTTP Mock（2026-11-25）
+
+- `mockSceneId` 显式绑定已有 HTTP Scene，启动器在服务器就绪后创建专用 Mock 地址，工作台及侧栏可打开或复制；停止、退出及关闭会话时关闭入口。
+- Admin 的真实 Cursor 工作台加载 0.0.30 后点击启动，原用户 Chrome 标签页访问该地址，演示管理员登录成功并展示四条待审核申请。Flutter Pilot 输出确认登录、申请列表和详情规则均返回 200；原端口登录 POST 为 404。
+- 类型、格式、904 项 Vitest、111 项 Playwright 与 VSIX 打包通过。安装及远端核验见 `docs/validation.md`。
+
 ## 0.0.29 普通浏览器本机 HTTP Mock（2026-11-25）
 
 - 命令面板显式选择本机 HTTP 开发 URL 和 Scene 快照，专用 loopback 端口按上游 hostname 使用项目规则，独立持有 JSONata 状态。未命中转发到固定开发服务器；不改系统代理、证书、业务源码或原有运行目标。

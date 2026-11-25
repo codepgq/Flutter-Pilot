@@ -74,6 +74,10 @@ WS/WSS 仅覆盖 Page 接入后的业务连接。支持文本方向匹配、优�
 
 ## 普通浏览器 HTTP Mock
 
+日常启动时，在 Web profile 中设置 `"mockSceneId": "已有 HTTP Scene ID"`，点击侧栏或工作台的「启动项目」。开发服务器就绪且 Mock 入口启动成功后，卡片显示场景及 Mock 地址，提供「打开 Mock 地址」「复制 Mock 地址」。使用此地址进入 Chrome，原 `url` 是开发服务器上游。停止项目或进程退出时同时关闭入口。规则变化或切换场景需重新启动项目，状态重新初始化。省略 `mockSceneId` 保持普通 Web 启动行为。
+
+已独立启动开发服务器时，也可使用命令面板入口：
+
 1. 先启动项目开发服务器。在该项目的 Cursor 窗口打开命令面板，执行 **Flutter Pilot: 普通浏览器 HTTP Mock**。
 2. 确认本机开发 URL（例如 `http://127.0.0.1:3102/login`），选择含启用 HTTP 规则的 Scene（例如 `admin-stateful`）。复制生成的 `http://127.0.0.1:<新端口>/login` 到日常 Chrome，或选择「用默认浏览器打开」。原 `3102` 地址不会被拦截。
 3. 在 Chrome Network 检查本轮响应的状态及 `X-Flutter-Pilot-Mock-Rule`；也可在 IDE 的 Flutter Pilot 输出通道查看命中。再次执行命令可复制地址或停止。关闭项目时自动停止；规则编辑或切换场景需要停止并重新创建入口，JSON 状态也会重新初始化。

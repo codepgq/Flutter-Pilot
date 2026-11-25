@@ -31,6 +31,7 @@ export interface WebLaunchProfile extends LaunchProfileBase {
   args?: string[];
   url: string;
   readyTimeoutMs?: number;
+  mockSceneId?: string;
 }
 
 export interface FlutterLaunchProfile extends LaunchProfileBase {
@@ -64,6 +65,8 @@ export interface ProjectLaunchSnapshot {
   activeProfileId?: string;
   activeType?: 'web' | 'flutter';
   url?: string;
+  mockUrl?: string;
+  mockSceneId?: string;
   output?: string;
   error?: string;
   portConflict?: LaunchPortConflict;
@@ -78,6 +81,7 @@ export interface ProjectLaunchOptions {
   workspace: string;
   file: string;
   assertMutable: () => void;
+  startWebMock?: (profile: WebLaunchProfile) => Promise<{ url: string; stop: () => Promise<void> }>;
   assertFlutterLaunchable?: (configurationName: string, deviceId?: string) => void;
   flutterConfigurations: () => { name: string }[];
   flutterConfiguration?: (name: string, deviceId?: string) => Record<string, unknown>;
@@ -137,7 +141,18 @@ function validateProfile(input: unknown, index: number): ProjectLaunchProfile {
   if (input.type === 'web') {
     assertKeys(
       input,
-      ['id', 'name', 'type', 'root', 'packageManager', 'script', 'args', 'url', 'readyTimeoutMs'],
+      [
+        'id',
+        'name',
+        'type',
+        'root',
+        'packageManager',
+        'script',
+        'args',
+        'url',
+        'readyTimeoutMs',
+        'mockSceneId',
+      ],
       `profiles[${index}]`,
     );
     if (
@@ -163,6 +178,12 @@ function validateProfile(input: unknown, index: number): ProjectLaunchProfile {
         input.readyTimeoutMs > 600000)
     )
       invalid(`profiles[${index}].readyTimeoutMs 必须为 5000–600000 的整数`);
+    const url = localUrl(input.url, `profiles[${index}].url`);
+    if (input.mockSceneId !== undefined) {
+      if (typeof input.mockSceneId !== 'string' || !profileId.test(input.mockSceneId))
+        invalid(`profiles[${index}].mockSceneId 必须为有效 Scene ID`);
+      if (new URL(url).protocol !== 'http:') invalid('普通浏览器 HTTP Mock 需要本机 HTTP URL');
+    }
     return {
       id: input.id,
       name: input.name,
@@ -171,7 +192,8 @@ function validateProfile(input: unknown, index: number): ProjectLaunchProfile {
       packageManager: input.packageManager as WebPackageManager,
       script: input.script,
       ...(args ? { args: [...args] as string[] } : {}),
-      url: localUrl(input.url, `profiles[${index}].url`),
+      url,
+      ...(input.mockSceneId !== undefined ? { mockSceneId: input.mockSceneId } : {}),
       ...(input.readyTimeoutMs !== undefined ? { readyTimeoutMs: input.readyTimeoutMs } : {}),
     };
   }
@@ -355,6 +377,7 @@ function flutterEndpoints(toolArgs: unknown): LaunchEndpoint[] {
 export class ProjectLaunchController extends EventEmitter {
   private document?: ProjectLaunchDocument;
   private webChild?: ChildProcess;
+  private webMock?: { url: string; stop: () => Promise<void> };
   private webState: ProjectLaunchSnapshot['status'] = 'idle';
   private activeProfileId?: string;
   private output = '';
@@ -424,7 +447,10 @@ export class ProjectLaunchController extends EventEmitter {
               : 'idle',
       ...(activeProfileId ? { activeProfileId } : {}),
       ...(activeProfile ? { activeType: activeProfile.type } : {}),
-      ...(activeProfile?.type === 'web' ? { url: activeProfile.url } : {}),
+      ...(activeProfile?.type === 'web'
+        ? { url: activeProfile.url, mockSceneId: activeProfile.mockSceneId }
+        : {}),
+      ...(this.webMock && this.webState === 'running' ? { mockUrl: this.webMock.url } : {}),
       ...(this.output ? { output: this.output } : {}),
       ...(this.error ? { error: this.error } : {}),
       ...(this.conflict ? { portConflict: this.conflict.display } : {}),
@@ -600,6 +626,7 @@ export class ProjectLaunchController extends EventEmitter {
       exited = true;
       if (generation !== this.generation) return;
       this.webChild = undefined;
+      void this.stopWebMock().catch((error) => this.emit('log', String(error)));
       if (this.stopping) {
         this.webState = 'idle';
         this.stopping = false;
@@ -616,6 +643,15 @@ export class ProjectLaunchController extends EventEmitter {
       await new Promise((resolve) => setTimeout(resolve, 500));
       if (generation !== this.generation || !this.webChild)
         throw new Error(this.error ?? 'Web 启动进程提前退出');
+      if (profile.mockSceneId) {
+        if (!this.options.startWebMock) throw new Error('当前启动器不支持普通浏览器 HTTP Mock');
+        const mock = await this.options.startWebMock(profile);
+        if (generation !== this.generation || this.webChild !== child || this.stopping || this.disposed) {
+          await mock.stop();
+          throw new Error('Web 启动已结束，Mock 入口已关闭');
+        }
+        this.webMock = mock;
+      }
       this.webState = 'running';
       this.emit('changed');
       return this.snapshot();
@@ -650,7 +686,7 @@ export class ProjectLaunchController extends EventEmitter {
   }
 
   async stop() {
-    if (this.startPending && !this.webChild) throw new Error('启动操作进行中，请等待结果。');
+    if (this.startPending) throw new Error('启动操作进行中，请等待结果。');
     if (this.webChild) {
       await this.stopWeb();
       this.emit('changed');
@@ -664,7 +700,14 @@ export class ProjectLaunchController extends EventEmitter {
     return this.snapshot();
   }
 
+  private async stopWebMock() {
+    const mock = this.webMock;
+    this.webMock = undefined;
+    await mock?.stop();
+  }
+
   private async stopWeb() {
+    await this.stopWebMock();
     const child = this.webChild;
     if (!child) return;
     this.webState = 'stopping';

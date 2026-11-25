@@ -233,6 +233,8 @@ export async function activate(context: vscode.ExtensionContext) {
       stop: (folder) => sessionByFolder(folder).launchStop(),
       reload: (folder) => sessionByFolder(folder).launchReload(),
       edit: (folder) => sessionByFolder(folder).openLaunchFile(),
+      openMock: (folder) => sessionByFolder(folder).openLaunchMock(),
+      copyMock: (folder) => sessionByFolder(folder).copyLaunchMock(),
     },
     extensionVersion,
   );
@@ -920,6 +922,7 @@ class Workbench {
       workspace: this.folder.uri.fsPath,
       file: this.project.launchFile,
       assertMutable: () => this.ensureEnvironmentMutable(),
+      startWebMock: (profile) => this.startBrowserMock(profile.url, profile.mockSceneId!),
       assertFlutterLaunchable: (name, deviceId) => this.mcpAppLaunch.checkLaunch(name, deviceId),
       flutterConfigurations: () => this.mcpAppLaunch.status().configurations,
       flutterConfiguration: (name, deviceId) =>
@@ -1047,6 +1050,34 @@ class Workbench {
     await this.initialize();
     await this.projectLaunch.reload();
   }
+  private launchMockUrl() {
+    const { mockUrl, status } = this.projectLaunch.snapshot();
+    if (status !== 'running' || !mockUrl) throw new Error('普通浏览器 HTTP Mock 尚未启动。');
+    return mockUrl;
+  }
+  async openLaunchMock() {
+    await vscode.env.openExternal(vscode.Uri.parse(this.launchMockUrl()));
+  }
+  async copyLaunchMock() {
+    await vscode.env.clipboard.writeText(this.launchMockUrl());
+  }
+  private async startBrowserMock(url: string, sceneId: string) {
+    const store = this.stores.proxy;
+    await store.reload();
+    const document = await store.prepareSnapshot([], sceneId);
+    const scene = document.scenes.find((item) => item.id === sceneId);
+    if (!scene) throw new Error(`找不到普通浏览器 HTTP Mock 场景：${sceneId}`);
+    if (scene.wsRules.some((rule) => rule.enabled)) throw new Error('普通浏览器 HTTP Mock 不支持 WS 规则。');
+    if (this.disposed) throw new Error('项目会话已关闭。');
+    const running = await startLocalMock({
+      upstream: url,
+      rules: scene.httpRules,
+      onHit: (rule, status) => this.log(`普通浏览器 HTTP Mock · ${rule} → ${status}`),
+      onFailure: (rule) => this.log(`普通浏览器 HTTP Mock · ${rule} 执行失败`),
+    });
+    this.log(`普通浏览器 HTTP Mock · ${sceneId} · ${running.url}`);
+    return running;
+  }
   async configureLocalBrowserMock() {
     if (this.localBrowserMockBusy) throw new Error('普通浏览器 HTTP Mock 正在配置，请稍后重试。');
     this.localBrowserMockBusy = true;
@@ -1071,6 +1102,14 @@ class Workbench {
         return;
       }
       const launch = this.projectLaunch.snapshot();
+      if (launch.mockUrl && launch.status === 'running') {
+        const action = await vscode.window.showQuickPick(['复制 Mock 地址', '用默认浏览器打开'], {
+          title: `项目启动 HTTP Mock · ${launch.mockUrl}`,
+        });
+        if (action === '复制 Mock 地址') await this.copyLaunchMock();
+        if (action === '用默认浏览器打开') await this.openLaunchMock();
+        return;
+      }
       const selected = launch.profiles.find(
         (profile) =>
           profile.type === 'web' && profile.id === (launch.activeProfileId ?? launch.selectedProfileId),
@@ -1094,23 +1133,12 @@ class Workbench {
       if (!choices.length) throw new Error('当前工作区没有含启用 HTTP 规则的有效 Scene。');
       const choice = await vscode.window.showQuickPick(choices, { title: '选择普通浏览器 HTTP Mock 场景' });
       if (!choice || this.disposed) return;
-      const document = await store.prepareSnapshot([], choice.id);
-      const scene = document.scenes.find((item) => item.id === choice.id)!;
-      if (scene.wsRules.some((rule) => rule.enabled))
-        throw new Error('普通浏览器 HTTP Mock 不支持 WS 规则。');
-      if (this.disposed) return;
-      const running = await startLocalMock({
-        upstream: url.trim(),
-        rules: scene.httpRules,
-        onHit: (rule, status) => this.log(`普通浏览器 HTTP Mock · ${rule} → ${status}`),
-        onFailure: (rule) => this.log(`普通浏览器 HTTP Mock · ${rule} 执行失败`),
-      });
+      const running = await this.startBrowserMock(url.trim(), choice.id);
       if (this.disposed) {
         await running.stop();
         return;
       }
       this.localBrowserMock = running;
-      this.log(`普通浏览器 HTTP Mock · ${choice.id} · ${running.url}`);
       void Promise.resolve(
         vscode.window.showInformationMessage(
           `普通浏览器 HTTP Mock 已启动：${running.url}`,
@@ -3084,6 +3112,12 @@ class Workbench {
           break;
         case 'launch.stop':
           await this.projectLaunch.stop();
+          break;
+        case 'launch.openMock':
+          await this.openLaunchMock();
+          break;
+        case 'launch.copyMock':
+          await this.copyLaunchMock();
           break;
         case 'connection.mode': {
           const mode = payload.mode === 'vm' ? 'vm' : 'proxy';

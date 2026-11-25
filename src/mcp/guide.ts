@@ -113,11 +113,11 @@ export const runtimeTargetGuide = {
 
 const localBrowserMockGuide = {
   entry:
-    '普通 Chrome 测本机同源 HTTP：先启动项目开发服务器，在 Cursor 命令面板执行「Flutter Pilot: 普通浏览器 HTTP Mock」，确认上游 URL 并选择 Scene；用 Chrome 打开新生成的 127.0.0.1 端口，不要继续使用原端口。不是系统代理，也不需要 CA。',
+    '普通 Chrome 测本机同源 HTTP：在 Web launch.json profile 配置 mockSceneId，点击启动项目后打开或复制卡片上的 Mock 地址。已有开发服务器也可从 Cursor 命令面板执行「Flutter Pilot: 普通浏览器 HTTP Mock」，确认上游 URL 和 Scene。使用新的 127.0.0.1 端口，无需修改系统代理或 CA。',
   boundary:
     '支持静态或动态直接响应；状态按本机入口共享，停止重开清空并换端口。规则编辑后停止并重新创建。请使用演示数据；不转发 Cookie，不支持 HTTPS、WS/HMR、绝对跨源 API、断点或改写。该入口没有 MCP Page/HTTP 历史身份。',
   verification:
-    '在 Chrome Network 核对 HTTP 状态及响应头 X-Flutter-Pilot-Mock-Rule，或查看 IDE Flutter Pilot 输出。不使用 activate_scene 切换该入口。再次执行命令可复制地址或停止。',
+    '在 Chrome Network 核对 HTTP 状态及响应头 X-Flutter-Pilot-Mock-Rule，或查看 IDE Flutter Pilot 输出。不使用 activate_scene 切换该入口。启动项入口随项目停止；命令面板独立入口可再次执行命令复制地址或停止。',
 };
 
 export const webProxyGuide = {

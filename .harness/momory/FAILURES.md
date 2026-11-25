@@ -2,7 +2,7 @@
 
 ## 普通 Chrome 与托管浏览器的 Mock 归属（2026-11-25，已解决）
 
-Admin 默认 `3102` 只提供前端，未进入托管 Context 的登录 POST 对该 Context 不可见，直连返回 404；正向代理还受 Chromium 默认绕过本机地址限制。0.0.29 使用显式本机专用入口复用有状态规则，不自动改原地址。Chrome 冒烟脚本等待的是请求路径 `/admin/v1/expert-applications`，不是前端路由 `/applications`；验收同时核对页面、真实 HTTP 状态和命中头。
+Admin 默认 `3102` 只提供前端，未进入托管 Context 的登录 POST 对该 Context 不可见，直连返回 404；正向代理还受 Chromium 默认绕过本机地址限制。0.0.29 使用显式本机专用入口复用有状态规则，但用户通过原 Web 启动按钮仍只看到开发服务器地址。0.0.30 以 `mockSceneId` 将入口与启动项绑定，同时在卡片显示实际 Mock 地址。验收必须从正常启动入口进入用户现有 Chrome，并查看实际命中日志。Chrome 冒烟脚本等待的是请求路径 `/admin/v1/expert-applications`，不是前端路由 `/applications`；验收同时核对页面、真实 HTTP 状态和命中头。
 
 ## 规则防覆盖测试的启动同步竞态（2026-11-25）
 

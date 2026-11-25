@@ -6,6 +6,7 @@ import { createServer } from 'node:net';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer as createHttpServer } from 'node:http';
+import { startLocalMock } from '../src/browser/local-mock';
 import {
   launchCommand,
   ProjectLaunchController,
@@ -101,6 +102,8 @@ describe('project launch configuration', () => {
     [{ ...webProfile, script: 'dev && rm -rf /' }, 'script'],
     [{ ...webProfile, url: 'https://example.com' }, '本地'],
     [{ ...webProfile, unknown: true }, '未知字段'],
+    [{ ...webProfile, mockSceneId: '../other' }, 'mockSceneId'],
+    [{ ...webProfile, url: 'https://localhost:3000/', mockSceneId: 'demo' }, 'HTTP URL'],
   ])('rejects unsafe or unknown launch fields', (profile, message) => {
     expect(() => validateLaunchDocument({ version: 1, profiles: [profile] })).toThrow(message);
   });
@@ -195,7 +198,7 @@ describe('project launch configuration', () => {
     await controller.dispose();
   });
 
-  it('starts and stops a configured Web package script without a shell', async () => {
+  it.each([false, true])('starts and stops a Web script (ordinary browser Mock: %s)', async (withMock) => {
     const port = await new Promise<number>((resolve, reject) => {
       const server = createServer();
       server.once('error', reject);
@@ -223,6 +226,7 @@ describe('project launch configuration', () => {
             args: ['--port', String(port)],
             url: `http://127.0.0.1:${port}/`,
             readyTimeoutMs: 5000,
+            ...(withMock ? { mockSceneId: 'demo' } : {}),
           },
         ],
       }),
@@ -231,6 +235,22 @@ describe('project launch configuration', () => {
       workspace: root,
       file,
       assertMutable: vi.fn(),
+      startWebMock: async (profile) => {
+        expect(profile.mockSceneId).toBe('demo');
+        return startLocalMock({
+          upstream: profile.url,
+          rules: [
+            {
+              id: 'demo-login',
+              name: 'Demo',
+              enabled: true,
+              priority: 1,
+              match: { method: 'POST', path: '/login-api' },
+              mock: { status: 201, headers: {}, body: 'mock login' },
+            },
+          ],
+        });
+      },
       flutterConfigurations: () => [],
       flutterSessions: () => [],
       startFlutter: vi.fn(),
@@ -244,7 +264,18 @@ describe('project launch configuration', () => {
     });
     await expect(fetch(`http://127.0.0.1:${port}/`)).resolves.toMatchObject({ status: 200 });
     expect(controller.snapshot().output).toContain('server.cjs');
+    const mockUrl = controller.snapshot().mockUrl;
+    if (withMock) {
+      expect(mockUrl).toBeTruthy();
+      const response = await fetch(new URL('/login-api', mockUrl!), { method: 'POST' });
+      expect(response.status).toBe(201);
+      expect(await response.text()).toBe('mock login');
+      expect(response.headers.get('x-flutter-pilot-mock-rule')).toBe('demo-login');
+      expect(await (await fetch(mockUrl!)).text()).toBe('ok');
+    } else expect(mockUrl).toBeUndefined();
     await controller.stop();
+    if (mockUrl) await expect(fetch(mockUrl)).rejects.toBeDefined();
+    expect(controller.snapshot().mockUrl).toBeUndefined();
     expect(controller.snapshot().status).toBe('idle');
     await expect(fetch(`http://127.0.0.1:${port}/`)).rejects.toBeDefined();
     await controller.dispose();

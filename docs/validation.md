@@ -1,5 +1,10 @@
 # 验收记录
 
+## 0.0.30 Web 启动项接入普通浏览器 HTTP Mock（2026-11-25）
+
+- Admin 的 Cursor 工作台加载 v0.0.30 并使用 `admin-pilot-api-dev`（`mockSceneId: admin-stateful`）启动。用户已打开的日常 Chrome 标签页切换到专用 Mock 地址，登录后到达 `/applications`，显示 4 条待审核申请。IDE 输出 `admin-stateful-login-admin → 200`、`admin-stateful-application-list → 200`、`admin-stateful-application-detail → 200`。直连 3102 登录 POST 为 404。
+- 类型、格式、904 项 Vitest、111 项工作台 Playwright、VSIX 打包通过。VSIX 为 `artifacts/flutter-pilot-0.0.30.vsix`，Cursor 安装与离线 MCP 核验见 `artifacts/v0.0.30-install-report.json`，远端引用核对见 `artifacts/v0.0.30-release-report.txt`。
+
 ## 0.0.29 普通浏览器本机 HTTP Mock（2026-11-25）
 
 - Google Chrome 158.0.8127.88（独立测试会话，无 CDP 请求拦截、无代理）访问插件生成的地址，管理员登录、申请列表、邀请（201）、跨标签页模拟收件箱、设密和新账号首次登录均验证通过；原开发端口登录接口仍为 404。实际命中见 `artifacts/admin-chrome-smoke.json`；可用 `node scripts/local-browser-admin-smoke.mjs <Admin 仓库> <本机登录 URL>` 复验。

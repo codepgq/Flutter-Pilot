@@ -25,6 +25,8 @@ export interface LauncherSession {
     status: ProjectLaunchSnapshot['status'];
     activeProfileId?: string;
     url?: string;
+    mockUrl?: string;
+    mockSceneId?: string;
     error?: string;
     portConflict?: ProjectLaunchSnapshot['portConflict'];
   };
@@ -50,6 +52,8 @@ export function launcherSessionFrom(input: {
       status: input.launch.status,
       ...(input.launch.activeProfileId ? { activeProfileId: input.launch.activeProfileId } : {}),
       ...(input.launch.url ? { url: input.launch.url } : {}),
+      ...(input.launch.mockUrl ? { mockUrl: input.launch.mockUrl } : {}),
+      ...(input.launch.mockSceneId ? { mockSceneId: input.launch.mockSceneId } : {}),
       ...(input.launch.error ? { error: input.launch.error } : {}),
       ...(input.launch.portConflict ? { portConflict: input.launch.portConflict } : {}),
     },
@@ -63,7 +67,7 @@ function profileDetail(profile: ProjectLaunchProfile): LauncherProfile {
     type: profile.type,
     detail:
       profile.type === 'web'
-        ? `${profile.packageManager} run ${profile.script} · ${profile.url}`
+        ? `${profile.packageManager} run ${profile.script} · ${profile.url}${profile.mockSceneId ? ` · Mock: ${profile.mockSceneId}` : ''}`
         : `Debug 配置：${profile.configuration ?? '自动选择唯一配置'}`,
   };
 }
@@ -77,6 +81,8 @@ export interface LauncherActions {
   stop: (folder: string) => Promise<void>;
   reload: (folder: string) => Promise<void>;
   edit: (folder: string) => Promise<void>;
+  openMock: (folder: string) => Promise<void>;
+  copyMock: (folder: string) => Promise<void>;
 }
 
 /** Sidebar status and project launch. Opening this view does not open the workbench. */
@@ -136,6 +142,8 @@ export class LauncherView implements vscode.WebviewViewProvider {
       else if (command.action === 'launch.stop') await this.actions.stop(requireFolder(command));
       else if (command.action === 'launch.reload') await this.actions.reload(requireFolder(command));
       else if (command.action === 'launch.edit') await this.actions.edit(requireFolder(command));
+      else if (command.action === 'launch.openMock') await this.actions.openMock(requireFolder(command));
+      else if (command.action === 'launch.copyMock') await this.actions.copyMock(requireFolder(command));
       else return;
     } catch (error) {
       if (!(error instanceof LaunchPortOccupiedError)) {
@@ -273,7 +281,16 @@ function launcherHtml(cspSource: string) {
           card.append(detail);
         }
       }
-      if (launch.url && (launch.status === 'running' || launch.status === 'starting')) card.append(el('p', 'detail', launch.url));
+      if (launch.mockUrl && launch.status === 'running') {
+        card.append(el('p', 'status', '普通浏览器 HTTP Mock · ' + launch.mockSceneId));
+        card.append(el('p', 'detail', launch.mockUrl));
+        const mockActions = el('div', 'row');
+        mockActions.append(
+          button('打开 Mock 地址', 'primary', false, () => vscode.postMessage({ action: 'launch.openMock', folder: session.folder })),
+          button('复制 Mock 地址', 'secondary', false, () => vscode.postMessage({ action: 'launch.copyMock', folder: session.folder }))
+        );
+        card.append(mockActions);
+      } else if (launch.url && !launch.mockSceneId && (launch.status === 'running' || launch.status === 'starting')) card.append(el('p', 'detail', launch.url));
       const conflict = launch.portConflict;
       if (!conflict || conflict.profileId === select?.value) {
         if (launch.error) card.append(el('p', 'error', launch.error));

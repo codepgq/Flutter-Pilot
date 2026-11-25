@@ -984,7 +984,7 @@ function ProjectLaunch({ state }: { state: WorkbenchState }) {
             <p>
               <span className="tag">{profile.type === 'web' ? 'WEB' : 'FLUTTER'}</span>{' '}
               {profile.type === 'web'
-                ? `${profile.packageManager} run ${profile.script} · ${profile.url}`
+                ? `${profile.packageManager} run ${profile.script} · ${profile.url}${profile.mockSceneId ? ` · Mock: ${profile.mockSceneId}` : ''}`
                 : `Debug 配置：${profile.configuration ?? '自动选择唯一配置'}`}
             </p>
           )}
@@ -1010,8 +1010,20 @@ function ProjectLaunch({ state }: { state: WorkbenchState }) {
         <p role="status">
           状态：{statusLabel}
           {launch.activeProfileId ? ` · ${launch.activeProfileId}` : ''}
-          {launch.url ? ` · ${launch.url}` : ''}
+          {launch.mockUrl
+            ? ` · 普通浏览器 Mock · ${launch.mockSceneId} · ${launch.mockUrl}`
+            : launch.url && !launch.mockSceneId
+              ? ` · ${launch.url}`
+              : ''}
         </p>
+      )}
+      {launch?.status === 'running' && launch.mockUrl && (
+        <div className="card-actions">
+          <Button primary action="launch.openMock">
+            打开 Mock 地址
+          </Button>
+          <Button action="launch.copyMock">复制 Mock 地址</Button>
+        </div>
       )}
       {launch?.error && (!launch.portConflict || conflict) && (
         <div className="notice" role="alert">

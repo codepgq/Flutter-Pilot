@@ -1433,6 +1433,7 @@ test('项目启动卡片支持 Web/Flutter profile、启动停止与手动配置
           packageManager: 'pnpm',
           script: 'dev:pilot',
           url: 'http://localhost:3000/',
+          mockSceneId: 'demo',
         },
         {
           id: 'flutter-app',
@@ -1468,16 +1469,26 @@ test('项目启动卡片支持 Web/Flutter profile、启动停止与手动配置
           packageManager: 'pnpm',
           script: 'dev:pilot',
           url: 'http://localhost:3000/',
+          mockSceneId: 'demo',
         },
       ],
       status: 'running',
       activeProfileId: 'web-dev',
       activeType: 'web',
       url: 'http://localhost:3000/',
+      mockUrl: 'http://127.0.0.1:43120/',
+      mockSceneId: 'demo',
       output: 'Local: http://localhost:3000/',
     },
   });
   await expect(page.getByLabel('项目启动日志')).toContainText('http://localhost:3000/');
+  await expect(page.getByRole('status').filter({ hasText: '普通浏览器 Mock' })).toContainText(
+    'http://127.0.0.1:43120/',
+  );
+  await page.getByRole('button', { name: '复制 Mock 地址' }).click();
+  expect(await messages(page)).toContainEqual({ action: 'launch.copyMock', payload: {} });
+  await page.getByRole('button', { name: '打开 Mock 地址' }).click();
+  expect(await messages(page)).toContainEqual({ action: 'launch.openMock', payload: {} });
   await page.getByRole('button', { name: '停止', exact: true }).click();
   expect(await messages(page)).toContainEqual({ action: 'launch.stop', payload: {} });
 });

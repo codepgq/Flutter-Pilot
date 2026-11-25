@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.30 — Web 启动项接入普通浏览器 HTTP Mock（2026-11-25）
+
+- Web profile 支持可选 `mockSceneId`。启动项目会创建对应 Scene 的普通浏览器 HTTP Mock 地址，侧栏和工作台支持打开及复制。
+- Mock 创建失败时启动失败并释放本次开发进程。停止 Web 项目、进程退出或关闭 IDE 会话时关闭其 Mock 入口。
+
 ## 0.0.29 — 普通浏览器本机 HTTP Mock（2026-11-25）
 
 - 命令面板可为当前项目启动本机 HTTP Mock 专用地址，普通 Chrome 可直接使用静态响应、JSONata 有状态响应和 JSON 请求体匹配。无需更改浏览器代理、证书或项目代码。

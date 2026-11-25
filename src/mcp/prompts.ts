@@ -13,7 +13,7 @@ const templates = {
     description: '构造下单成功/失败、资产数据等 API 业务状态，按场景验证规则命中与页面表现。',
     topics: ['http'],
     steps: [
-      '本机同源 HTTP 在日常 Chrome 调试时，先看 overview.localBrowserMock / http.localBrowserMock；从 Cursor 命令面板启动并访问新地址，用响应头验证。这个入口不使用 MCP target。',
+      '本机同源 HTTP 在日常 Chrome 调试时，先看 overview.localBrowserMock / http.localBrowserMock；在 Web 启动项设置 mockSceneId，启动后打开 Mock 地址；已有服务器可从 Cursor 命令面板启动独立入口。用响应头验证。这个入口不使用 MCP target。',
       '需要正向代理的 Web 项目按 overview.webProxy / http.webProxy 在工作台登记本地 URL 与子项目根，显式准备代理，用实际监听端口接入专用浏览器并信任 CA。手动触发网页；HTTP 代理无 page 身份，不覆盖 WS/UI/SSR、缓存或 Service Worker 绕行流量，CORS/OPTIONS 需明确响应。',
       '先 list_sessions 查看 runtimeTargets；网络工具可传 target:{runtimeId,generation}，多个连接目标必须明确选择。VM 与代理历史、采集和 Mock 分别路由，同目标工作台与 MCP 一致，查询失败不回退其他库。',
       '根据任务确定请求 method、host、path、预期响应和触发方式；先用 get_network_status 查看 files.scenes、采集与 Dio Mock 状态，必要时查询已有请求确认接口，不能猜测业务字段。',
