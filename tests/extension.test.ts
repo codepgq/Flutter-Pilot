@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm, mkdir, writeFile, symlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { SceneStore } from '../src/scenes';
@@ -132,7 +133,7 @@ vi.mock('vscode', async () => {
       createOutputChannel: () => ({ appendLine() {}, dispose() {} }),
       createStatusBarItem: () => ({ show() {}, dispose() {} }),
       showErrorMessage: vi.fn(),
-      showWarningMessage: async () => fake.confirm,
+      showWarningMessage: vi.fn(async () => fake.confirm),
       showQuickPick: async (items: any[]) =>
         items.find((item) => item.folder.uri.fsPath === fake.selectedWorkspace) ?? items[0],
       showTextDocument: async (uri: any) => {
@@ -1201,6 +1202,7 @@ async function activateCurrent() {
     globalStorageUri: { fsPath: fake.storage },
     extensionPath: process.cwd(),
     extensionUri: { fsPath: process.cwd() },
+    extension: { packageJSON: { version: '9.8.7' } },
   } as any);
 }
 beforeEach(async () => {
@@ -1233,12 +1235,7 @@ beforeEach(async () => {
     'name: app\ndependencies:\n  flutter:\n    sdk: flutter\n  dio: ^5.0.0\n',
   );
   await saveProxyConnection(fake.workspace);
-  await activate({
-    subscriptions: [],
-    globalStorageUri: { fsPath: fake.storage },
-    extensionPath: process.cwd(),
-    extensionUri: { fsPath: process.cwd() },
-  } as any);
+  await activateCurrent();
 });
 afterEach(async () => {
   await deactivate();
@@ -1359,6 +1356,7 @@ describe('扩展与工作台整合', () => {
     expect(view.webview.html).toContain('启动项目');
     view.receive?.({ action: 'ready' });
     const initial = messages.at(-1);
+    expect(initial.extensionVersion).toBe('9.8.7');
     expect(initial.sessions[0]).toMatchObject({
       name: 'project',
       recording: true,
@@ -1390,11 +1388,99 @@ describe('扩展与工作台整合', () => {
       ).toBe(true),
     );
     view.receive?.({ action: 'open' });
-    await vi.waitFor(() => expect(fake.panels.length).toBe(1));
+    await vi.waitFor(() => {
+      expect(fake.panels).toHaveLength(1);
+      expect(latest().state.extensionVersion).toBe(initial.extensionVersion);
+    });
     view.receive?.({ action: 'launch.start', folder: fake.workspace, profileId: 'flutter-app' });
     await vi.waitFor(() => expect(messages.at(-1).actionError).toContain('missing-config'));
     view.receive?.({ action: 'launch.start', folder: '/tmp/not-a-session', profileId: 'flutter-app' });
     await vi.waitFor(() => expect(messages.at(-1).actionError).toContain('找不到对应的项目会话'));
+  });
+  it('Flutter 侧栏在原生确认后才结束占用进程并交给 IDE 启动', async () => {
+    await open();
+    await message('connection.mode', { mode: 'vm' });
+    await vi.waitFor(() => expect(latest().state.mode).toBe('vm'));
+    const registered = fake.webviewProviders.find((item) => item.id === 'flutterPilot.launcher');
+    const messages: any[] = [];
+    let receive!: (value: unknown) => void;
+    const view = {
+      webview: {
+        options: {},
+        html: '',
+        cspSource: 'csp://test',
+        postMessage: async (message: unknown) => {
+          messages.push(message);
+          return true;
+        },
+        onDidReceiveMessage: (callback: (value: unknown) => void) => {
+          receive = callback;
+        },
+      },
+      onDidDispose() {},
+    };
+    registered!.provider.resolveWebviewView(view);
+    expect(view.webview.html).toContain('结束进程并重新启动');
+    const listener = spawn(
+      process.execPath,
+      [
+        '-e',
+        "const s=require('node:net').createServer();s.listen(0,'127.0.0.1',()=>console.log(s.address().port))",
+      ],
+      { stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    const exited = once(listener, 'exit');
+    try {
+      const [data] = await Promise.race([
+        once(listener.stdout!, 'data'),
+        exited.then(() => {
+          throw new Error('端口夹具提前退出');
+        }),
+      ]);
+      const port = Number(String(data).trim());
+      fake.launchConfigurations = [
+        { name: 'App', type: 'dart', request: 'launch', toolArgs: [`--host-vmservice-port=${port}`] },
+      ];
+      await writeFile(
+        join(fake.workspace, '.flutter-pilot', 'launch.json'),
+        JSON.stringify({
+          version: 1,
+          profiles: [{ id: 'flutter', name: 'Flutter', type: 'flutter', configuration: 'App' }],
+        }),
+      );
+      receive({ action: 'launch.start', folder: fake.workspace, profileId: 'flutter' });
+      await vi.waitFor(() =>
+        expect(messages.at(-1).sessions[0].launch.portConflict).toMatchObject({
+          pid: listener.pid,
+          port,
+          profileId: 'flutter',
+        }),
+      );
+      const { id } = messages.at(-1).sessions[0].launch.portConflict;
+      fake.confirm = undefined;
+      const vscode = await import('vscode');
+      vi.mocked(vscode.window.showWarningMessage).mockClear();
+      receive({ action: 'launch.restart', folder: fake.workspace, profileId: 'flutter', conflictId: id });
+      await vi.waitFor(() =>
+        expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+          expect.stringContaining(`127.0.0.1:${port}`),
+          { modal: true },
+          '结束进程并重新启动',
+        ),
+      );
+      await vi.waitFor(() => expect(messages.at(-1).sessions[0].launch.status).toBe('failed'));
+      expect(listener.signalCode).toBeNull();
+      expect(listener.exitCode).toBeNull();
+      expect(fake.appStarts).toHaveLength(0);
+      fake.confirm = '结束进程并重新启动';
+      receive({ action: 'launch.restart', folder: fake.workspace, profileId: 'flutter', conflictId: id });
+      await vi.waitFor(() => expect(fake.appStarts).toMatchObject([{ folder: fake.workspace, name: 'App' }]));
+      await exited;
+      await vi.waitFor(() => expect(messages.at(-1).sessions[0].launch.portConflict).toBeUndefined());
+    } finally {
+      listener.kill();
+      await exited;
+    }
   });
   it('侧栏与工作台截图共用连接校验，未连接时显示明确提示', async () => {
     const manifest = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8'));
@@ -2576,18 +2662,25 @@ describe('项目文件与工作区绑定整合', () => {
 
   it('外部修改规则后拒绝旧内存覆盖，读取后允许继续编辑', async () => {
     await open();
-    const external = { ...rule, id: 'external', name: 'external' };
+    const baseline = { ...rule, id: 'baseline', name: 'baseline' };
+    await message('rules.save', { rule: baseline });
     const doc = await readScenes();
+    const id = doc.scenes[0].id;
+    const syncs = () => fake.engines[0].calls.filter((call: any) => call.method === 'rules.sync');
+    await message('scenes.activate', { id });
+    await vi.waitFor(() => {
+      expect(latest().state.sceneRuntime.http.status).toBe('applied');
+      expect(syncs().at(-1)?.params.rules).toEqual([baseline]);
+    });
+    const previousSyncs = syncs().length;
+    const external = { ...rule, id: 'external', name: 'external' };
     doc.scenes[0].httpRules = [external];
-    doc.activeSceneId = doc.scenes[0].id;
+    doc.activeSceneId = id;
     await writeScenes(doc);
-    const previousSyncs = fake.engines[0].calls.filter((call: any) => call.method === 'rules.sync').length;
     await message('rules.save', { rule });
-    expect(latest().state.lastError).toContain('重新读取');
+    await vi.waitFor(() => expect(latest().state.lastError).toContain('重新读取'));
     expect((await readScenes()).scenes[0].httpRules).toEqual([external]);
-    expect(fake.engines[0].calls.filter((call: any) => call.method === 'rules.sync')).toHaveLength(
-      previousSyncs,
-    );
+    expect(syncs()).toHaveLength(previousSyncs);
     await message('project.reload');
     await message('rules.save', { rule });
     expect((await readScenes()).scenes[0].httpRules).toEqual([external, rule]);

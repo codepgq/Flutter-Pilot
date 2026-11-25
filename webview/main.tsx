@@ -450,9 +450,16 @@ function App() {
             <h1>Flutter Pilot</h1>
           </div>
         </div>
-        <span className="header-project" title={state.workspace}>
-          {state.project?.name || state.workspace.split('/').filter(Boolean).at(-1) || '当前工作区'}
-        </span>
+        <div className="header-project-meta">
+          <span className="header-project" title={state.workspace}>
+            {state.project?.name || state.workspace.split('/').filter(Boolean).at(-1) || '当前工作区'}
+          </span>
+          {state.extensionVersion && (
+            <span className="header-version" title="Flutter Pilot 版本">
+              v{state.extensionVersion}
+            </span>
+          )}
+        </div>
         <div className="header-actions">
           <Button
             action="screenshot.capture"
@@ -936,7 +943,9 @@ function ProjectLaunch({ state }: { state: WorkbenchState }) {
     setSelected((previous) => (available.some((profile) => profile.id === previous) ? previous : current));
   }, [launch?.activeProfileId, launch?.selectedProfileId, JSON.stringify(launch?.profiles ?? [])]);
   const profile = launch?.profiles.find((item) => item.id === selected);
-  const running = launch?.status === 'running' || launch?.status === 'starting';
+  const running =
+    launch?.status === 'running' || launch?.status === 'starting' || launch?.status === 'stopping';
+  const conflict = launch?.portConflict?.profileId === selected ? launch?.portConflict : undefined;
   const statusLabel = launch
     ? { idle: '未启动', starting: '启动中', running: '运行中', stopping: '停止中', failed: '失败' }[
         launch.status
@@ -1004,9 +1013,20 @@ function ProjectLaunch({ state }: { state: WorkbenchState }) {
           {launch.url ? ` · ${launch.url}` : ''}
         </p>
       )}
-      {launch?.error && (
+      {launch?.error && (!launch.portConflict || conflict) && (
         <div className="notice" role="alert">
           {launch.error}
+        </div>
+      )}
+      {conflict && (
+        <div className="card-actions">
+          <Button
+            danger
+            disabled={state.busy || running}
+            onClick={() => send('launch.restart', { profileId: conflict.profileId, conflictId: conflict.id })}
+          >
+            结束进程并重新启动
+          </Button>
         </div>
       )}
       {launch?.output && <pre aria-label="项目启动日志">{launch.output}</pre>}

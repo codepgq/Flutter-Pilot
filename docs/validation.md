@@ -1,5 +1,10 @@
 # 验收记录
 
+## 0.0.28 启动端口冲突恢复与版本显示（2026-11-25）
+
+- 896 项 Vitest、111 项 Playwright、类型检查、格式检查和构建通过。macOS 真实监听进程夹具验证 Web 重启、Flutter 释放本机端口后交接 IDE 启动、取消确认，以及监听进程被替换后拒绝终止。侧栏在 320px 下的无项目和多项目布局均只显示一次版本，工作台在 390px 下保持版本可见。
+- 分发包为 `artifacts/flutter-pilot-0.0.28.vsix`。包、构建、Cursor 安装文件和离线 MCP 核验见 `artifacts/v0.0.28-install-report.json`。远端 main 与附注标签核验见 `artifacts/v0.0.28-release-report.txt`。活动 Cursor 窗口在调试方便时重载。Flutter 模拟器端到端、Linux 和 Windows 本机进程仍待实测。
+
 ## 0.0.27 托管浏览器有状态 HTTP Mock（2026-11-25）
 
 - 发布回归涵盖类型、格式、889 项 Vitest、109 项工作台 Playwright、32 项托管 Chromium HTTP 和 VSIX 打包。独立 Admin MCP 通过六项身份验收，核对了页面和实际 Mock 命中。Flutter Dio 和代理沿用 0.0.26 的请求体匹配，动态状态适用于托管 Chromium 的本机接口。

@@ -47,7 +47,7 @@ import { validateWsRuleDocument, wsUrlMatches } from './ws/rules';
 import type { WsRule, WsMessage, WsMessageQuery } from './ws/model';
 import { openProjectBinding, type ProjectBinding, type ProjectSettings } from './project';
 import { prepareProjectStorage } from './projectStorage';
-import { ProjectLaunchController } from './project-launch';
+import { LaunchPortOccupiedError, ProjectLaunchController } from './project-launch';
 import { LauncherView, launcherSessionFrom } from './launcher-view';
 import {
   ApiCatalogQuery,
@@ -88,6 +88,8 @@ function updateStatus() {
 export async function activate(context: vscode.ExtensionContext) {
   shuttingDown = false;
   const epoch = ++lifecycle;
+  const manifestVersion: unknown = context.extension?.packageJSON?.version;
+  const extensionVersion = typeof manifestVersion === 'string' ? manifestVersion : undefined;
   output = vscode.window.createOutputChannel('Flutter Pilot');
   context.subscriptions.push(output);
   // Register debug listeners before any asynchronous workspace initialization.
@@ -131,7 +133,7 @@ export async function activate(context: vscode.ExtensionContext) {
         !vscode.workspace.workspaceFolders?.some((f) => f.uri.toString() === key)
       )
         throw new Error('工作区已关闭，项目会话未启动。');
-      const session = new Workbench(context, folder, updateStatus, project, storage);
+      const session = new Workbench(context, folder, updateStatus, project, storage, extensionVersion);
       sessions.set(key, session);
       session.updateVmDiscovery();
       return session;
@@ -215,15 +217,20 @@ export async function activate(context: vscode.ExtensionContext) {
     if (!session) throw new Error('找不到对应的项目会话，请先打开受信任的本地工作区。');
     return session;
   };
-  launcherView = new LauncherView({
-    sessions: () => [...sessions.values()].map((session) => session.launcherState()),
-    open,
-    screenshot,
-    start: (folder, profileId) => sessionByFolder(folder).launchStart(profileId),
-    stop: (folder) => sessionByFolder(folder).launchStop(),
-    reload: (folder) => sessionByFolder(folder).launchReload(),
-    edit: (folder) => sessionByFolder(folder).openLaunchFile(),
-  });
+  launcherView = new LauncherView(
+    {
+      sessions: () => [...sessions.values()].map((session) => session.launcherState()),
+      open,
+      screenshot,
+      start: (folder, profileId) => sessionByFolder(folder).launchStart(profileId),
+      restart: (folder, profileId, conflictId) =>
+        sessionByFolder(folder).launchRestart(profileId, conflictId),
+      stop: (folder) => sessionByFolder(folder).launchStop(),
+      reload: (folder) => sessionByFolder(folder).launchReload(),
+      edit: (folder) => sessionByFolder(folder).openLaunchFile(),
+    },
+    extensionVersion,
+  );
   launcherView.register(context);
   command('flutterPilot.start', async () => {
     const session = await open();
@@ -446,6 +453,7 @@ class Workbench {
     private readonly onChange: () => void,
     private readonly project: ProjectBinding,
     private readonly storage: string,
+    private readonly extensionVersion: string | undefined,
   ) {
     this.projectSettings = { ...project.config.settings };
     this.configuredPort = project.config.connection.configuredPort;
@@ -905,7 +913,26 @@ class Workbench {
       workspace: this.folder.uri.fsPath,
       file: this.project.launchFile,
       assertMutable: () => this.ensureEnvironmentMutable(),
+      assertFlutterLaunchable: (name, deviceId) => this.mcpAppLaunch.checkLaunch(name, deviceId),
       flutterConfigurations: () => this.mcpAppLaunch.status().configurations,
+      flutterConfiguration: (name, deviceId) =>
+        appLaunchConfiguration(
+          vscode.workspace.getConfiguration('launch', this.folder.uri).get('configurations', []),
+          this.folder.uri.fsPath,
+          name,
+          deviceId,
+        ),
+      confirmRestart: async ({ port, host, pid, name, profileId }) => {
+        const address = host === '::1' ? `[::1]:${port}` : `${host}:${port}`;
+        const action = '结束进程并重新启动';
+        return (
+          (await vscode.window.showWarningMessage(
+            `结束监听 ${address} 的 ${name}（PID ${pid}）并重新启动 ${profileId}？`,
+            { modal: true },
+            action,
+          )) === action
+        );
+      },
       flutterSessions: () =>
         (vmDiscovery?.debugSessions(this.folder.uri.toString()) ?? []).map((session) => ({
           id: session.id,
@@ -1001,6 +1028,10 @@ class Workbench {
     await this.initialize();
     await this.projectLaunch.start(profileId);
   }
+  async launchRestart(profileId: string, conflictId: string) {
+    await this.initialize();
+    await this.projectLaunch.restart(profileId, conflictId);
+  }
   async launchStop() {
     await this.initialize();
     await this.projectLaunch.stop();
@@ -1084,9 +1115,9 @@ class Workbench {
           .catch((error) => this.report(error));
         return;
       }
-      void this.enqueue(() => this.handle(message as Record<string, unknown>)).catch((error) =>
-        this.report(error),
-      );
+      void this.enqueue(() => this.handle(message as Record<string, unknown>)).catch((error) => {
+        if (!(error instanceof LaunchPortOccupiedError)) this.report(error);
+      });
     });
     this.push();
     try {
@@ -1275,6 +1306,7 @@ class Workbench {
     const activeTest = this.tests.snapshot.activeRunId;
     if (activeTest) this.testRunId = activeTest;
     const state: WorkbenchState = {
+      extensionVersion: this.extensionVersion,
       mode: this.mode,
       vm: { ...this.vm.state },
       vmDiscovery: this.vmAuto.snapshot,
@@ -2958,6 +2990,9 @@ class Workbench {
           break;
         case 'launch.start':
           await this.projectLaunch.start(String(payload.profileId ?? ''));
+          break;
+        case 'launch.restart':
+          await this.projectLaunch.restart(String(payload.profileId ?? ''), String(payload.conflictId ?? ''));
           break;
         case 'launch.stop':
           await this.projectLaunch.stop();

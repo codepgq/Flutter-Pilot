@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
+import { fork } from 'node:child_process';
+import { once } from 'node:events';
 import { createServer as createHttpServer } from 'node:http';
 import {
   launchCommand,
@@ -12,6 +14,35 @@ import {
 } from '../src/project-launch';
 
 let root: string;
+
+async function occupyPort(port = 0, host = '127.0.0.1') {
+  const fixture = join(root, 'listener.cjs');
+  await writeFile(
+    fixture,
+    `
+    const server = require('node:net').createServer((socket) => socket.end());
+    server.listen(Number(process.argv[2]), process.argv[3], () => process.send(server.address().port));
+  `,
+  );
+  const child = fork(fixture, [String(port), host], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  const exited = once(child, 'exit');
+  const stop = async () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    await exited;
+  };
+  try {
+    const [listeningPort] = await Promise.race([
+      once(child, 'message'),
+      exited.then(() => {
+        throw new Error('端口夹具提前退出');
+      }),
+    ]);
+    return { port: Number(listeningPort), pid: child.pid, child, exited, stop };
+  } catch (error) {
+    await stop();
+    throw error;
+  }
+}
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'pilot-project-launch-'));
 });
@@ -256,9 +287,181 @@ describe('project launch configuration', () => {
     try {
       await controller.initialize();
       await expect(controller.start('web-dev')).rejects.toThrow('已有服务在运行');
+      expect(controller.snapshot().portConflict).toBeUndefined();
     } finally {
       await controller.dispose();
       await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('only terminates the confirmed listener and then starts the same Web script', async () => {
+    const owner = await occupyPort();
+    const file = join(root, 'launch.json');
+    const confirmRestart = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const url = `http://127.0.0.1:${owner.port}/`;
+    await writeFile(join(root, 'package.json'), JSON.stringify({ scripts: { dev: 'node server.cjs' } }));
+    await writeFile(
+      join(root, 'server.cjs'),
+      `require('node:http').createServer((q,r)=>r.end('new')).listen(${owner.port},'127.0.0.1');`,
+    );
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        profiles: [{ ...webProfile, packageManager: 'npm', script: 'dev', url }],
+      }),
+    );
+    const controller = new ProjectLaunchController({
+      workspace: root,
+      file,
+      confirmRestart,
+      assertMutable: vi.fn(),
+      flutterConfigurations: () => [],
+      flutterSessions: () => [],
+      startFlutter: vi.fn(),
+      stopFlutter: vi.fn(),
+    });
+    try {
+      await expect(controller.start('web-dev')).rejects.toThrow('已有服务在运行');
+      const conflict = controller.snapshot().portConflict!;
+      expect(conflict).toMatchObject({ pid: owner.pid, port: owner.port, profileId: 'web-dev' });
+      await expect(controller.restart('web-dev', 'stale')).rejects.toThrow('已过期');
+      expect(confirmRestart).not.toHaveBeenCalled();
+      await expect(controller.restart('web-dev', conflict.id)).resolves.toMatchObject({
+        status: 'failed',
+        portConflict: conflict,
+      });
+      expect(owner.child.signalCode).toBeNull();
+      expect(confirmRestart).toHaveBeenCalledWith(conflict);
+      await expect(controller.restart('web-dev', conflict.id)).resolves.toMatchObject({ status: 'running' });
+      await owner.exited;
+      expect(controller.snapshot().portConflict).toBeUndefined();
+      expect(await (await fetch(url)).text()).toBe('new');
+    } finally {
+      await controller.dispose();
+      await owner.stop();
+    }
+  }, 12000);
+
+  it.each(['--host-vmservice-port', '--dds-port', '--vm-service-port'])(
+    'releases a fixed Flutter host port set by %s before calling the IDE launch',
+    async (flag) => {
+      const owner = await occupyPort();
+      const file = join(root, 'launch.json');
+      const profile = {
+        id: 'flutter-app',
+        name: 'Flutter',
+        type: 'flutter',
+        configuration: 'App',
+        deviceId: 'device',
+      };
+      await writeFile(file, JSON.stringify({ version: 1, profiles: [profile] }));
+      const startFlutter = vi.fn(async () => {
+        await owner.exited;
+      });
+      const controller = new ProjectLaunchController({
+        workspace: root,
+        file,
+        confirmRestart: vi.fn().mockResolvedValue(true),
+        assertMutable: vi.fn(),
+        flutterConfigurations: () => [{ name: 'App' }],
+        flutterSessions: () => [],
+        flutterConfiguration: () => ({
+          toolArgs: flag === '--dds-port' ? [flag, String(owner.port)] : [`${flag}=${owner.port}`],
+        }),
+        startFlutter,
+        stopFlutter: vi.fn(),
+      });
+      try {
+        await expect(controller.start(profile.id)).rejects.toThrow('Flutter 调试端口');
+        expect(startFlutter).not.toHaveBeenCalled();
+        const conflict = controller.snapshot().portConflict!;
+        expect(conflict).toMatchObject({ pid: owner.pid, port: owner.port, profileId: profile.id });
+        await controller.restart(profile.id, conflict.id);
+        expect(startFlutter).toHaveBeenCalledExactlyOnceWith('App', 'device');
+        expect(controller.snapshot().portConflict).toBeUndefined();
+      } finally {
+        await owner.stop();
+        await controller.dispose();
+      }
+    },
+    12000,
+  );
+
+  it('refuses to end a replacement listener after the confirmation dialog was opened', async () => {
+    const owner = await occupyPort();
+    let replacement: Awaited<ReturnType<typeof occupyPort>> | undefined;
+    const file = join(root, 'launch.json');
+    await writeFile(
+      file,
+      JSON.stringify({ version: 1, profiles: [{ ...webProfile, url: `http://127.0.0.1:${owner.port}/` }] }),
+    );
+    await writeFile(
+      join(root, 'package.json'),
+      JSON.stringify({ scripts: { [webProfile.script]: 'node server.cjs' } }),
+    );
+    const controller = new ProjectLaunchController({
+      workspace: root,
+      file,
+      confirmRestart: async () => {
+        await owner.stop();
+        replacement = await occupyPort(owner.port);
+        return true;
+      },
+      assertMutable: vi.fn(),
+      flutterConfigurations: () => [],
+      flutterSessions: () => [],
+      startFlutter: vi.fn(),
+      stopFlutter: vi.fn(),
+    });
+    try {
+      await expect(controller.start('web-dev')).rejects.toThrow('已有服务在运行');
+      await expect(controller.restart('web-dev', controller.snapshot().portConflict!.id)).rejects.toThrow(
+        '占用进程已变化',
+      );
+      expect(replacement?.child.signalCode).toBeNull();
+      expect(replacement?.child.exitCode).toBeNull();
+      expect(controller.snapshot().portConflict).toBeUndefined();
+    } finally {
+      await owner.stop();
+      await replacement?.stop();
+      await controller.dispose();
+    }
+  }, 12000);
+
+  it('does not inspect a device-side VM port or a disabled DDS port', async () => {
+    const owner = await occupyPort();
+    const file = join(root, 'launch.json');
+    await writeFile(
+      file,
+      JSON.stringify({ version: 1, profiles: [{ id: 'flutter-app', name: 'Flutter', type: 'flutter' }] }),
+    );
+    const startFlutter = vi.fn();
+    const controller = new ProjectLaunchController({
+      workspace: root,
+      file,
+      assertMutable: vi.fn(),
+      flutterConfigurations: () => [{ name: 'App' }],
+      flutterSessions: () => [],
+      flutterConfiguration: () => ({
+        toolArgs: [
+          `--device-vmservice-port=${owner.port}`,
+          `--dds-port=${owner.port}`,
+          '--no-dds',
+          '--host-vmservice-port=0',
+        ],
+      }),
+      startFlutter,
+      stopFlutter: vi.fn(),
+    });
+    try {
+      await controller.start('flutter-app');
+      expect(startFlutter).toHaveBeenCalledExactlyOnceWith('App', undefined);
+      expect(owner.child.signalCode).toBeNull();
+      expect(controller.snapshot().portConflict).toBeUndefined();
+    } finally {
+      await owner.stop();
+      await controller.dispose();
     }
   });
 });

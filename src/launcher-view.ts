@@ -1,6 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
-import type { ProjectLaunchProfile, ProjectLaunchSnapshot } from './project-launch';
+import {
+  LaunchPortOccupiedError,
+  type ProjectLaunchProfile,
+  type ProjectLaunchSnapshot,
+} from './project-launch';
 
 export interface LauncherProfile {
   id: string;
@@ -22,6 +26,7 @@ export interface LauncherSession {
     activeProfileId?: string;
     url?: string;
     error?: string;
+    portConflict?: ProjectLaunchSnapshot['portConflict'];
   };
 }
 
@@ -46,6 +51,7 @@ export function launcherSessionFrom(input: {
       ...(input.launch.activeProfileId ? { activeProfileId: input.launch.activeProfileId } : {}),
       ...(input.launch.url ? { url: input.launch.url } : {}),
       ...(input.launch.error ? { error: input.launch.error } : {}),
+      ...(input.launch.portConflict ? { portConflict: input.launch.portConflict } : {}),
     },
   };
 }
@@ -67,6 +73,7 @@ export interface LauncherActions {
   open: () => Promise<unknown>;
   screenshot: () => Promise<unknown>;
   start: (folder: string, profileId: string) => Promise<void>;
+  restart: (folder: string, profileId: string, conflictId: string) => Promise<void>;
   stop: (folder: string) => Promise<void>;
   reload: (folder: string) => Promise<void>;
   edit: (folder: string) => Promise<void>;
@@ -77,7 +84,10 @@ export class LauncherView implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private actionError?: string;
 
-  constructor(private readonly actions: LauncherActions) {}
+  constructor(
+    private readonly actions: LauncherActions,
+    private readonly extensionVersion?: string,
+  ) {}
 
   register(context: vscode.ExtensionContext) {
     context.subscriptions.push(
@@ -103,6 +113,7 @@ export class LauncherView implements vscode.WebviewViewProvider {
   refresh() {
     void this.view?.webview.postMessage({
       type: 'launcher',
+      extensionVersion: this.extensionVersion,
       sessions: this.actions.sessions(),
       ...(this.actionError ? { actionError: this.actionError } : {}),
     });
@@ -120,13 +131,17 @@ export class LauncherView implements vscode.WebviewViewProvider {
       else if (command.action === 'screenshot') await this.actions.screenshot();
       else if (command.action === 'launch.start')
         await this.actions.start(requireFolder(command), requireProfile(command));
+      else if (command.action === 'launch.restart' && command.conflictId)
+        await this.actions.restart(requireFolder(command), requireProfile(command), command.conflictId);
       else if (command.action === 'launch.stop') await this.actions.stop(requireFolder(command));
       else if (command.action === 'launch.reload') await this.actions.reload(requireFolder(command));
       else if (command.action === 'launch.edit') await this.actions.edit(requireFolder(command));
       else return;
     } catch (error) {
-      this.actionError = error instanceof Error ? error.message : String(error);
-      void vscode.window.showErrorMessage(this.actionError);
+      if (!(error instanceof LaunchPortOccupiedError)) {
+        this.actionError = error instanceof Error ? error.message : String(error);
+        void vscode.window.showErrorMessage(this.actionError);
+      }
     }
     this.refresh();
   }
@@ -146,6 +161,7 @@ interface LauncherCommand {
   action: string;
   folder?: string;
   profileId?: string;
+  conflictId?: string;
 }
 
 function readCommand(message: unknown): LauncherCommand | undefined {
@@ -155,7 +171,9 @@ function readCommand(message: unknown): LauncherCommand | undefined {
   const folder = typeof value.folder === 'string' && value.folder.length <= 4096 ? value.folder : undefined;
   const profileId =
     typeof value.profileId === 'string' && value.profileId.length <= 64 ? value.profileId : undefined;
-  return { action: value.action, ...(folder ? { folder } : {}), ...(profileId ? { profileId } : {}) };
+  const conflictId =
+    typeof value.conflictId === 'string' && value.conflictId.length === 36 ? value.conflictId : undefined;
+  return { action: value.action, folder, profileId, conflictId };
 }
 
 function launcherHtml(cspSource: string) {
@@ -171,7 +189,8 @@ function launcherHtml(cspSource: string) {
   .lead { margin-bottom: 12px; }
   .card { margin: 0 0 12px; }
   h2 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
-  .status, .note, .detail { color: var(--vscode-descriptionForeground); }
+  .version { font-size: 11px; overflow-wrap: anywhere; }
+  .status, .note, .detail, .version { color: var(--vscode-descriptionForeground); }
   .error { color: var(--vscode-errorForeground); }
   label { display: block; margin: 0 0 8px; }
   select, button { box-sizing: border-box; font: inherit; }
@@ -241,7 +260,10 @@ function launcherHtml(cspSource: string) {
         }
         select.value = current;
         select.disabled = running;
-        select.addEventListener('change', () => chosen.set(session.folder, select.value));
+        select.addEventListener('change', () => {
+          chosen.set(session.folder, select.value);
+          render(data);
+        });
         label.append(select);
         card.append(label);
         const profile = profiles.find((item) => item.id === current);
@@ -252,7 +274,13 @@ function launcherHtml(cspSource: string) {
         }
       }
       if (launch.url && (launch.status === 'running' || launch.status === 'starting')) card.append(el('p', 'detail', launch.url));
-      if (launch.error) card.append(el('p', 'error', launch.error));
+      const conflict = launch.portConflict;
+      if (!conflict || conflict.profileId === select?.value) {
+        if (launch.error) card.append(el('p', 'error', launch.error));
+        if (conflict) card.append(button('结束进程并重新启动', 'secondary block', running, () => {
+          vscode.postMessage({ action: 'launch.restart', folder: session.folder, profileId: conflict.profileId, conflictId: conflict.id });
+        }));
+      }
       const actions = el('div', 'row');
       actions.append(
         button('启动项目', 'primary', !select || running, () => { if (select) vscode.postMessage({ action: 'launch.start', folder: session.folder, profileId: select.value }); }),
@@ -270,6 +298,7 @@ function launcherHtml(cspSource: string) {
     nodes.push(button('打开工作台', 'primary block', false, () => vscode.postMessage({ action: 'open' })));
     nodes.push(button('截取 App / 长截图', 'primary block', false, () => vscode.postMessage({ action: 'screenshot' })));
     nodes.push(el('p', 'note', '请在受信任的本地 Flutter 工作区中使用。'));
+    if (data.extensionVersion) nodes.push(el('p', 'version', 'Flutter Pilot v' + data.extensionVersion));
     root.replaceChildren(...nodes);
   };
   window.addEventListener('message', (event) => render(event.data));

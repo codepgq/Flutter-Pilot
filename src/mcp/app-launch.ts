@@ -203,13 +203,7 @@ export class McpAppLaunchController {
     };
   }
 
-  async execute(
-    configurationName: string,
-    timeoutMs = 30000,
-    signal?: AbortSignal,
-    isCurrent = () => true,
-    deviceId?: string,
-  ) {
+  checkLaunch(configurationName: string, deviceId?: string) {
     const capability = this.status();
     if (capability.busy || this.host.lifecycleBusy())
       throw new McpToolError('BUSY', '应用启动或热更新仍未结束，请先检查当前调试会话，勿重复启动。');
@@ -242,6 +236,17 @@ export class McpAppLaunchController {
         'APP_DEVICE_MISMATCH',
         '现有同名调试会话的设备不同或无法确认；请检查当前会话，不替换或重启应用。',
       );
+    return existing;
+  }
+
+  async execute(
+    configurationName: string,
+    timeoutMs = 30000,
+    signal?: AbortSignal,
+    isCurrent = () => true,
+    deviceId?: string,
+  ) {
+    const existing = this.checkLaunch(configurationName, deviceId);
     if (signal?.aborted || !isCurrent()) throw new McpToolError('CANCELLED', '启动已取消，未发送 IDE 请求。');
     const controller = new AbortController();
     const attempt: LaunchAttempt = {

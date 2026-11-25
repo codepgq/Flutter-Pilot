@@ -98,6 +98,20 @@ test('设置和本地引擎入口使用原生命令链接，不向扩展宿主�
   await engine.click();
   expect(await messages(page)).not.toContainEqual({ action: 'settings.open', payload: {} });
 });
+test('工作台顶部展示当前插件版本，窄窗口仍可见', async ({ page }) => {
+  await page.goto('/');
+  const header = page.getByRole('banner');
+  const version = header.getByText('v9.8.7', { exact: true });
+  await expect(version).toBeHidden();
+  await state(page, { extensionVersion: '9.8.7' });
+  await expect(header.getByTitle(fixture.workspace, { exact: true })).toHaveText('commerce_app');
+  await expect(version).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 840 });
+  await expect(version).toBeInViewport();
+  await expect(header.getByText('工作区与连接', { exact: true })).toBeInViewport();
+  await expect(page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+});
+
 test('项目绑定展示 UUID 并打开配置、规则和读取项目文件', async ({ page }) => {
   await page.setViewportSize({ width: 680, height: 920 });
   await page.goto('/');
@@ -1466,6 +1480,68 @@ test('项目启动卡片支持 Web/Flutter profile、启动停止与手动配置
   await expect(page.getByLabel('项目启动日志')).toContainText('http://localhost:3000/');
   await page.getByRole('button', { name: '停止', exact: true }).click();
   expect(await messages(page)).toContainEqual({ action: 'launch.stop', payload: {} });
+});
+
+test('端口冲突按钮只属于当前启动项，并将确认交给扩展宿主', async ({ page }) => {
+  await page.goto('/');
+  const profiles = [
+    {
+      id: 'web',
+      name: 'Web',
+      type: 'web' as const,
+      root: '.',
+      packageManager: 'npm' as const,
+      script: 'dev',
+      url: 'http://127.0.0.1:3000/',
+    },
+    { id: 'flutter', name: 'Flutter', type: 'flutter' as const, configuration: 'App' },
+  ];
+  const launch = { file: '/workspace/.flutter-pilot/launch.json', profiles };
+  const restart = page.getByRole('button', { name: '结束进程并重新启动' });
+  const selector = page.getByLabel('项目启动项');
+  const conflict = {
+    id: 'fixture-web',
+    profileId: 'web',
+    host: '127.0.0.1' as const,
+    port: 3000,
+    pid: 101,
+    name: 'node',
+  };
+  await state(page, {
+    launch: { ...launch, status: 'failed', error: '端口被占用（node，PID 101）', portConflict: conflict },
+  });
+  await expect(restart).toBeVisible();
+  await restart.click();
+  expect(await messages(page)).toContainEqual({
+    action: 'launch.restart',
+    payload: { profileId: 'web', conflictId: 'fixture-web' },
+  });
+  await selector.selectOption('flutter');
+  await expect(restart).toBeHidden();
+  const flutterConflict = {
+    ...conflict,
+    id: 'fixture-flutter',
+    profileId: 'flutter',
+    pid: 102,
+    name: 'dart',
+  };
+  await state(page, {
+    launch: {
+      ...launch,
+      status: 'failed',
+      error: 'Flutter 调试端口被占用（dart，PID 102）',
+      portConflict: flutterConflict,
+    },
+  });
+  await restart.click();
+  expect(await messages(page)).toContainEqual({
+    action: 'launch.restart',
+    payload: { profileId: 'flutter', conflictId: 'fixture-flutter' },
+  });
+  await state(page, { launch: { ...launch, status: 'starting', portConflict: flutterConflict } });
+  await expect(restart).toBeDisabled();
+  await state(page, { launch: { ...launch, status: 'running' } });
+  await expect(restart).toBeHidden();
 });
 
 test('托管浏览器明确列出 Context/Page 并发送固定目标导航', async ({ page }) => {

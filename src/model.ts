@@ -125,6 +125,7 @@ export interface ApiCatalogEntry {
   lastAt: number;
 }
 export interface WorkbenchState {
+  extensionVersion?: string;
   browser?: ReturnType<import('./browser/controller').BrowserController['snapshot']>;
   launch?: import('./project-launch').ProjectLaunchSnapshot;
   loadedSceneAction?: import('./workflows/model').SceneAction;

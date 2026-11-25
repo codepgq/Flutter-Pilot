@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { access, lstat, readFile, realpath } from 'node:fs/promises';
@@ -7,6 +8,13 @@ import { parse as parseJsonc } from 'jsonc-parser';
 import { appLaunchConfigurations, validLaunchDeviceId } from './mcp/app-launch';
 import type { WebProject } from './discovery';
 import { detectNodeRuntime } from './mcp/adapters';
+import {
+  findPortOwner,
+  portOccupied,
+  terminatePortOwner,
+  type LaunchEndpoint,
+  type PortOwner,
+} from './launch-port';
 
 export type WebPackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun';
 
@@ -39,6 +47,15 @@ export interface ProjectLaunchDocument {
   profiles: ProjectLaunchProfile[];
 }
 
+export class LaunchPortOccupiedError extends Error {}
+
+export interface LaunchPortConflict extends LaunchEndpoint {
+  id: string;
+  profileId: string;
+  pid: number;
+  name: string;
+}
+
 export interface ProjectLaunchSnapshot {
   file: string;
   profiles: ProjectLaunchProfile[];
@@ -49,6 +66,7 @@ export interface ProjectLaunchSnapshot {
   url?: string;
   output?: string;
   error?: string;
+  portConflict?: LaunchPortConflict;
 }
 
 interface FlutterSession {
@@ -60,7 +78,10 @@ export interface ProjectLaunchOptions {
   workspace: string;
   file: string;
   assertMutable: () => void;
+  assertFlutterLaunchable?: (configurationName: string, deviceId?: string) => void;
   flutterConfigurations: () => { name: string }[];
+  flutterConfiguration?: (name: string, deviceId?: string) => Record<string, unknown>;
+  confirmRestart?: (conflict: LaunchPortConflict) => Promise<boolean>;
   flutterSessions: () => FlutterSession[];
   startFlutter: (configurationName: string, deviceId?: string) => Promise<unknown>;
   stopFlutter: (configurationName: string) => Promise<void>;
@@ -290,6 +311,47 @@ export async function suggestedLaunchProfiles(
   return profiles.slice(0, 50);
 }
 
+interface LaunchPlan {
+  profile: ProjectLaunchProfile;
+  root?: string;
+  configuration?: string;
+  flutterConfig?: Record<string, unknown>;
+  endpoints: LaunchEndpoint[];
+}
+
+function webEndpoints(value: string): LaunchEndpoint[] {
+  const url = new URL(value);
+  const port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80;
+  if (url.hostname === '[::1]') return [{ host: '::1', port }];
+  const endpoints: LaunchEndpoint[] = [{ host: '127.0.0.1', port }];
+  if (url.hostname === 'localhost') endpoints.push({ host: '::1', port });
+  return endpoints;
+}
+
+function flutterEndpoints(toolArgs: unknown): LaunchEndpoint[] {
+  if (!Array.isArray(toolArgs)) return [];
+  const ports = new Map<string, number>();
+  let host: LaunchEndpoint['host'] = '127.0.0.1';
+  let dds = true;
+  for (const [index, arg] of toolArgs.entries()) {
+    if (arg === '--') break;
+    if (arg === '--ipv6') host = '::1';
+    if (arg === '--no-ipv6') host = '127.0.0.1';
+    if (arg === '--dds') dds = true;
+    if (arg === '--no-dds') dds = false;
+    if (typeof arg !== 'string') continue;
+    const match = /^--(host-vmservice-port|vm-service-port|dds-port)(?:=(.*))?$/.exec(arg);
+    if (!match) continue;
+    const value = match[2] ?? toolArgs[index + 1];
+    ports.set(match[1], typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : 0);
+  }
+  if (ports.has('host-vmservice-port') && ports.has('vm-service-port')) return [];
+  if (!dds) ports.delete('dds-port');
+  return [...new Set(ports.values())]
+    .filter((port) => port > 0 && port <= 65535)
+    .map((port) => ({ host, port }));
+}
+
 export class ProjectLaunchController extends EventEmitter {
   private document?: ProjectLaunchDocument;
   private webChild?: ChildProcess;
@@ -299,6 +361,9 @@ export class ProjectLaunchController extends EventEmitter {
   private error?: string;
   private stopping = false;
   private generation = 0;
+  private startPending = false;
+  private disposed = false;
+  private conflict?: { display: LaunchPortConflict; plan: LaunchPlan; owner: PortOwner };
 
   constructor(private readonly options: ProjectLaunchOptions) {
     super();
@@ -320,7 +385,9 @@ export class ProjectLaunchController extends EventEmitter {
   }
 
   async reload() {
+    if (this.startPending) throw new Error('项目正在启动，请稍后重新读取。');
     this.document = await readLaunchDocument(this.file);
+    this.conflict = undefined;
     this.error = undefined;
     const selected = this.document.selectedProfileId;
     if (selected && !this.document.profiles.some((profile) => profile.id === selected))
@@ -340,57 +407,147 @@ export class ProjectLaunchController extends EventEmitter {
             : flutterSessions.length === 1,
         ),
     );
-    const activeProfileId = this.webChild ? this.activeProfileId : activeFlutter?.id;
+    const activeProfileId = this.webChild || this.startPending ? this.activeProfileId : activeFlutter?.id;
     const activeProfile = this.document?.profiles.find((profile) => profile.id === activeProfileId);
     return {
       file: this.file,
       profiles: this.document?.profiles ?? [],
       selectedProfileId: this.document?.selectedProfileId,
-      status: this.webChild ? this.webState : activeFlutter ? 'running' : this.error ? 'failed' : 'idle',
+      status: this.webChild
+        ? this.webState
+        : this.startPending
+          ? 'starting'
+          : activeFlutter
+            ? 'running'
+            : this.error
+              ? 'failed'
+              : 'idle',
       ...(activeProfileId ? { activeProfileId } : {}),
       ...(activeProfile ? { activeType: activeProfile.type } : {}),
       ...(activeProfile?.type === 'web' ? { url: activeProfile.url } : {}),
       ...(this.output ? { output: this.output } : {}),
       ...(this.error ? { error: this.error } : {}),
+      ...(this.conflict ? { portConflict: this.conflict.display } : {}),
     };
   }
 
-  async start(profileId: string) {
-    this.options.assertMutable();
-    if (this.webChild) throw new Error('已有 Web 启动进程在运行，请先停止。');
-    await this.reload();
-    const profile = this.document?.profiles.find((item) => item.id === profileId);
-    if (!profile) throw new Error('找不到指定的项目启动项');
-    if (profile.type === 'flutter') return this.startFlutter(profile);
-    return this.startWeb(profile);
+  start(profileId: string) {
+    return this.runStart(profileId);
   }
 
-  private async startFlutter(profile: FlutterLaunchProfile) {
-    const capability = this.options.flutterConfigurations();
-    const running = this.options
-      .flutterSessions()
-      .find((session) => session.configurationName === profile.configuration);
-    if (running) return this.snapshot();
-    const configuration =
-      profile.configuration ??
-      (capability.length === 1
-        ? capability[0].name
-        : (() => {
-            throw new Error('存在多个 Flutter 启动配置，请在 launch.json 中填写 configuration');
-          })());
-    if (!capability.some((item) => item.name === configuration))
-      throw new Error(`launch.json 引用的 Flutter 启动配置“${configuration}”不存在`);
-    this.activeProfileId = profile.id;
-    this.error = undefined;
+  restart(profileId: string, conflictId: string) {
+    return this.runStart(profileId, conflictId);
+  }
+
+  private async runStart(profileId: string, conflictId?: string) {
+    this.assertMutable();
+    if (this.startPending) throw new Error('已有启动操作进行中。');
+    if (this.webChild) throw new Error('已有 Web 启动进程在运行，请先停止。');
+    const conflict = this.conflict;
+    if (
+      conflictId !== undefined &&
+      (conflict?.display.id !== conflictId || conflict.display.profileId !== profileId)
+    )
+      throw new Error('端口占用信息已过期，请重新启动以检查端口。');
+    this.startPending = true;
+    this.activeProfileId = profileId;
     this.emit('changed');
-    await this.options.startFlutter(configuration, profile.deviceId);
+    try {
+      await this.performStart(profileId, conflictId === undefined ? undefined : conflict);
+    } catch (error) {
+      if (this.conflict === conflict) this.conflict = undefined;
+      this.error = (error as Error).message;
+      throw error;
+    } finally {
+      this.startPending = false;
+      this.emit('changed');
+    }
     return this.snapshot();
   }
 
-  private async startWeb(profile: WebLaunchProfile) {
-    const root = await selectedRoot(this.options.workspace, profile.root);
-    if (await this.urlReady(profile.url))
-      throw new Error(`${profile.url} 已有服务在运行；请复用它，或先停止旧进程后重新启动`);
+  private async performStart(profileId: string, conflict?: NonNullable<ProjectLaunchController['conflict']>) {
+    let plan = await this.loadPlan(profileId);
+    if (conflict) {
+      const assertSamePlan = () => {
+        if (JSON.stringify(plan) !== JSON.stringify(conflict.plan) || this.runningFlutter(plan))
+          throw new Error('启动配置或调试会话已变化，请重新检查端口。');
+        this.assertFlutterLaunchable(plan);
+      };
+      assertSamePlan();
+      if (!(await this.options.confirmRestart?.(conflict.display))) return;
+      this.assertMutable();
+      plan = await this.loadPlan(profileId);
+      assertSamePlan();
+      if (plan.profile.type === 'web') await this.checkWebScript(plan.profile, plan.root!);
+      await terminatePortOwner(conflict.display, conflict.owner, () => {
+        this.assertMutable();
+        assertSamePlan();
+      });
+    }
+    this.error = undefined;
+    this.conflict = undefined;
+    if (this.runningFlutter(plan)) return;
+    this.assertFlutterLaunchable(plan);
+    for (const endpoint of plan.endpoints) {
+      if (!(await portOccupied(endpoint))) continue;
+      const owner = await findPortOwner(endpoint);
+      if (owner) {
+        const { pid, name } = owner;
+        const display = { ...endpoint, profileId, id: randomUUID(), pid, name };
+        this.conflict = { display, plan, owner };
+      }
+      const address =
+        endpoint.host === '::1' ? `[::1]:${endpoint.port}` : `${endpoint.host}:${endpoint.port}`;
+      const label =
+        plan.profile.type === 'web'
+          ? `${plan.profile.url} 已有服务在运行`
+          : `Flutter 调试端口 ${address} 已被占用`;
+      throw new LaunchPortOccupiedError(
+        owner
+          ? `${label}（${owner.name}，PID ${owner.pid}）`
+          : `${label}。无法确认唯一的占用进程，请检查端口。`,
+      );
+    }
+    this.assertMutable();
+    if (plan.profile.type === 'web') await this.startWeb(plan.profile, plan.root!);
+    else await this.options.startFlutter(plan.configuration!, plan.profile.deviceId);
+  }
+
+  private assertMutable() {
+    if (this.disposed) throw new Error('项目会话已关闭。');
+    this.options.assertMutable();
+  }
+
+  private assertFlutterLaunchable(plan: LaunchPlan) {
+    if (plan.profile.type === 'flutter' && plan.configuration)
+      this.options.assertFlutterLaunchable?.(plan.configuration, plan.profile.deviceId);
+  }
+
+  private runningFlutter(plan: LaunchPlan) {
+    return (
+      plan.profile.type === 'flutter' &&
+      this.options.flutterSessions().some((session) => session.configurationName === plan.configuration)
+    );
+  }
+
+  private async loadPlan(profileId: string): Promise<LaunchPlan> {
+    this.document = await readLaunchDocument(this.file);
+    const profile = this.document.profiles.find((item) => item.id === profileId);
+    if (!profile) throw new Error('找不到指定的项目启动项');
+    if (profile.type === 'web') {
+      const root = await selectedRoot(this.options.workspace, profile.root);
+      return { profile, root, endpoints: webEndpoints(profile.url) };
+    }
+    const capability = this.options.flutterConfigurations();
+    const configuration = profile.configuration ?? (capability.length === 1 ? capability[0].name : undefined);
+    if (!configuration) throw new Error('请在 launch.json 中填写 Flutter 启动配置 configuration');
+    if (!capability.some((item) => item.name === configuration))
+      throw new Error(`launch.json 引用的 Flutter 启动配置“${configuration}”不存在`);
+    const flutterConfig = this.options.flutterConfiguration?.(configuration, profile.deviceId);
+    return { profile, configuration, flutterConfig, endpoints: flutterEndpoints(flutterConfig?.toolArgs) };
+  }
+
+  private async checkWebScript(profile: WebLaunchProfile, root: string) {
     let pkg: { scripts?: Record<string, unknown> };
     try {
       pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
@@ -399,8 +556,13 @@ export class ProjectLaunchController extends EventEmitter {
     }
     if (typeof pkg.scripts?.[profile.script] !== 'string')
       throw new Error(`package.json 中不存在启动脚本“${profile.script}”`);
+  }
+
+  private async startWeb(profile: WebLaunchProfile, root: string) {
+    await this.checkWebScript(profile, root);
     const command = launchCommand(profile);
     const nodePath = await detectNodeRuntime();
+    this.assertMutable();
     const generation = ++this.generation;
     this.webState = 'starting';
     this.activeProfileId = profile.id;
@@ -488,6 +650,7 @@ export class ProjectLaunchController extends EventEmitter {
   }
 
   async stop() {
+    if (this.startPending && !this.webChild) throw new Error('启动操作进行中，请等待结果。');
     if (this.webChild) {
       await this.stopWeb();
       this.emit('changed');
@@ -531,6 +694,7 @@ export class ProjectLaunchController extends EventEmitter {
   }
 
   async dispose() {
+    this.disposed = true;
     ++this.generation;
     await this.stopWeb();
   }
