@@ -72,6 +72,14 @@ WS/WSS 仅覆盖 Page 接入后的业务连接。支持文本方向匹配、优�
 
 手动浏览器代理使用实际监听端口与项目 CA，仅归属于 listener，不能识别具体 Page，也不支持 WS/UI/业务测试。缓存或 Service Worker 可能使流量不经过代理。详见 [MCP 指南](mcp.md)。
 
+## 普通浏览器 HTTP Mock
+
+1. 先启动项目开发服务器。在该项目的 Cursor 窗口打开命令面板，执行 **Flutter Pilot: 普通浏览器 HTTP Mock**。
+2. 确认本机开发 URL（例如 `http://127.0.0.1:3102/login`），选择含启用 HTTP 规则的 Scene（例如 `admin-stateful`）。复制生成的 `http://127.0.0.1:<新端口>/login` 到日常 Chrome，或选择「用默认浏览器打开」。原 `3102` 地址不会被拦截。
+3. 在 Chrome Network 检查本轮响应的状态及 `X-Flutter-Pilot-Mock-Rule`；也可在 IDE 的 Flutter Pilot 输出通道查看命中。再次执行命令可复制地址或停止。关闭项目时自动停止；规则编辑或切换场景需要停止并重新创建入口，JSON 状态也会重新初始化。
+
+入口仅监听 IPv4 loopback，转发未命中的请求到显式指定的本机 HTTP 开发服务器。命中支持静态/动态直接响应，按上游 hostname 匹配规则；同一入口的标签页共享状态，不与托管 Context 或正向代理共享。仅用于本地测试数据，勿用于生产。它不拦截页面硬编码的跨源 API，且不会收发 Cookie（Chrome 的 Cookie 不按端口隔离）；支持 Admin 使用的 Bearer 会话，不支持 Cookie 鉴权、HTTPS、WS/HMR、断点和请求/响应改写。网页缓存或 Service Worker 可能使请求不经过入口。不提供 MCP Page 或 HTTP 历史身份；自动化、截图及完整历史仍用托管浏览器。
+
 ## 支持矩阵
 
 | 范围                      | 当前范围与限制                                                                       |

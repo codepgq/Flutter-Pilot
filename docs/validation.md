@@ -1,5 +1,11 @@
 # 验收记录
 
+## 0.0.29 普通浏览器本机 HTTP Mock（2026-11-25）
+
+- Google Chrome 158.0.8127.88（独立测试会话，无 CDP 请求拦截、无代理）访问插件生成的地址，管理员登录、申请列表、邀请（201）、跨标签页模拟收件箱、设密和新账号首次登录均验证通过；原开发端口登录接口仍为 404。实际命中见 `artifacts/admin-chrome-smoke.json`；可用 `node scripts/local-browser-admin-smoke.mjs <Admin 仓库> <本机登录 URL>` 复验。
+- 901 项 Vitest、111 项 Playwright、类型、格式和构建通过。命令集成覆盖读取场景、启停、复制地址、不改变现有激活状态。回归验证状态隔离、请求体上限、禁止非本机上游、跨源限制及 Cookie 隔离。
+- VSIX 为 `artifacts/flutter-pilot-0.0.29.vsix`。Cursor 安装、96 个扩展文件及离线 MCP（62 个工具 / 70 个 Prompts / 6 个资源）核验见 `artifacts/v0.0.29-install-report.json`；远端 main 和附注标签核验见 `artifacts/v0.0.29-release-report.txt`。不自动重载活动 Cursor 窗口。
+
 ## 0.0.28 启动端口冲突恢复与版本显示（2026-11-25）
 
 - 896 项 Vitest、111 项 Playwright、类型检查、格式检查和构建通过。macOS 真实监听进程夹具验证 Web 重启、Flutter 释放本机端口后交接 IDE 启动、取消确认，以及监听进程被替换后拒绝终止。侧栏在 320px 下的无项目和多项目布局均只显示一次版本，工作台在 390px 下保持版本可见。

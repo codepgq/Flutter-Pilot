@@ -352,6 +352,8 @@ MCP 配置和 stdio 连接不需要 macOS 钥匙串。隔离 IDE 验收可能触
 
 ## Web 手动浏览器 HTTP 代理
 
+普通 Chrome 的本机同源、有状态 Mock 可改用 [普通浏览器专用入口](web-runtime.md#普通浏览器-http-mock)。离线 `overview.localBrowserMock`、`http.localBrowserMock` 可查操作；它不属于下述正向代理 target。
+
 无 pubspec 的 React/Vue/Vite 项目可发现，普通 Node package.json 不自动识别。原生 HTML 或混合仓库在工作台「连接与诊断 → Web 项目接入」显式保存本地 HTTP/HTTPS URL 与子项目相对根目录，沿用项目 UUID、Scene v2 和同一 MCP。打开、查询状态或读取指南不会准备代理；先显式准备引擎和开启 HTTP 采集，再按实际监听端口配置专用浏览器。HTTPS 在专用测试浏览器信任该项目 CA，不关闭 TLS 校验或改全局证书。
 
 使用 `list_sessions.runtimeTargets` 中的 proxy target 调用网络工具；`get_network_status.proxy` 返回实际端口、CA、错误与 `listener_only_no_page_identity` 归属。保存 Scene 后 `reload_rules`、按需 `activate_scene`，手动触发后用本轮请求 ID 核对工作台和 MCP 的原始/有效快照、mocked 与 requestRuleId/responseRuleId。取消激活保留采集；停采集同时暂停该目标 Mock，恢复采集恢复当前规则。Mock 在 request 阶段返回时记录 requestRuleId；不要假定一定有 responseRuleId。

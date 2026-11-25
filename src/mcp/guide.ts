@@ -111,6 +111,15 @@ export const runtimeTargetGuide = {
   ],
 };
 
+const localBrowserMockGuide = {
+  entry:
+    '普通 Chrome 测本机同源 HTTP：先启动项目开发服务器，在 Cursor 命令面板执行「Flutter Pilot: 普通浏览器 HTTP Mock」，确认上游 URL 并选择 Scene；用 Chrome 打开新生成的 127.0.0.1 端口，不要继续使用原端口。不是系统代理，也不需要 CA。',
+  boundary:
+    '支持静态或动态直接响应；状态按本机入口共享，停止重开清空并换端口。规则编辑后停止并重新创建。请使用演示数据；不转发 Cookie，不支持 HTTPS、WS/HMR、绝对跨源 API、断点或改写。该入口没有 MCP Page/HTTP 历史身份。',
+  verification:
+    '在 Chrome Network 核对 HTTP 状态及响应头 X-Flutter-Pilot-Mock-Rule，或查看 IDE Flutter Pilot 输出。不使用 activate_scene 切换该入口。再次执行命令可复制地址或停止。',
+};
+
 export const webProxyGuide = {
   entry:
     '打开本地工作区的 Flutter Pilot → 连接与诊断 → Web 项目接入，保存本地 HTTP/HTTPS URL 与子项目相对根目录；原生 HTML 需显式登记，React/Vue/Vite 声明可发现，普通 Node package.json 不自动接入。',
@@ -145,6 +154,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
         'Context 锁隔离；取消或超时结果未确认时先查询，不重放。Worker 崩溃只作废浏览器身份，Flutter 继续；显式关闭 Context/重建，重连与激活不刷新页面。',
     },
     webProxy: webProxyGuide,
+    localBrowserMock: localBrowserMockGuide,
     runtimeTargets: runtimeTargetGuide,
     sceneStorage: sceneStorageGuide,
     title: '什么时候使用 Flutter Pilot MCP',
@@ -232,6 +242,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
   },
   http: {
     webProxy: webProxyGuide,
+    localBrowserMock: localBrowserMockGuide,
     runtimeTargets: runtimeTargetGuide,
     title: '编辑 .flutter-pilot/scenes/index.json：HTTP/Dio 规则',
     preparation:

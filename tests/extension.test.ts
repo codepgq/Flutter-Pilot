@@ -38,6 +38,9 @@ const fake = vi.hoisted(() => ({
   confirm: undefined as string | undefined,
   selectedWorkspace: '',
   shownDocuments: [] as string[],
+  localMockUpstream: undefined as string | undefined,
+  localMockChoice: undefined as string | undefined,
+  clipboard: '',
   launchConfigurations: [] as Record<string, unknown>[],
   appStarts: [] as { folder: string; name: string; configuration?: Record<string, unknown> }[],
   webviewProviders: [] as { id: string; provider: { resolveWebviewView: (view: any) => void } }[],
@@ -58,7 +61,13 @@ vi.mock('vscode', async () => {
     },
     ViewColumn: { One: 1 },
     StatusBarAlignment: { Left: 1 },
-    env: {},
+    env: {
+      clipboard: {
+        writeText: async (text: string) => {
+          fake.clipboard = text;
+        },
+      },
+    },
     debug: {
       startDebugging: async (folder: any, configuration: string | Record<string, unknown>) => {
         fake.appStarts.push({
@@ -135,7 +144,13 @@ vi.mock('vscode', async () => {
       showErrorMessage: vi.fn(),
       showWarningMessage: vi.fn(async () => fake.confirm),
       showQuickPick: async (items: any[]) =>
-        items.find((item) => item.folder.uri.fsPath === fake.selectedWorkspace) ?? items[0],
+        items.find(
+          (item) =>
+            item.folder?.uri.fsPath === fake.selectedWorkspace ||
+            (item.id === fake.localMockChoice && fake.localMockChoice !== undefined),
+        ) ?? items[0],
+      showInputBox: async () => fake.localMockUpstream,
+      showInformationMessage: async () => undefined,
       showTextDocument: async (uri: any) => {
         fake.shownDocuments.push(uri.fsPath);
       },
@@ -1226,6 +1241,9 @@ beforeEach(async () => {
   fake.confirm = undefined;
   fake.selectedWorkspace = '';
   fake.shownDocuments = [];
+  fake.localMockUpstream = undefined;
+  fake.localMockChoice = undefined;
+  fake.clipboard = '';
   fake.launchConfigurations = [];
   fake.appStarts = [];
   fake.webviewProviders = [];
@@ -1241,6 +1259,27 @@ afterEach(async () => {
   await deactivate();
   await rm(directory, { recursive: true, force: true });
   delete process.env.FLUTTER_PILOT_MCP_ROOT;
+});
+it('starts, copies and stops a regular browser gateway from a project Scene', async () => {
+  await writeScenes({
+    version: 1,
+    activeSceneId: null,
+    scenes: [{ id: 'chrome', name: 'Chrome', httpRules: [rule], wsRules: [] }],
+  });
+  fake.localMockUpstream = 'http://127.0.0.1:3102/test';
+  fake.localMockChoice = 'chrome';
+  const command = fake.commands.get('flutterPilot.localBrowserMock')!;
+  await command();
+  fake.localMockChoice = 'copy';
+  await command();
+  expect(fake.clipboard).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/test$/);
+  const reply = await fetch(fake.clipboard);
+  expect(reply.status).toBe(200);
+  expect(reply.headers.get('x-flutter-pilot-mock-rule')).toBe('test');
+  expect((await readScenes()).activeSceneId).toBeNull();
+  fake.localMockChoice = 'stop';
+  await command();
+  await expect(fetch(fake.clipboard)).rejects.toThrow();
 });
 describe('扩展与工作台整合', () => {
   it('routes temporary WS CRUD by ID and rejects invalid, stale or inactive connection targets', async () => {

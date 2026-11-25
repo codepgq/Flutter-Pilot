@@ -92,7 +92,7 @@ export const capabilityRoutes = [
     prompt: 'http_mock',
     topics: ['http'],
     workflow:
-      '先从 list_sessions.runtimeTargets 选择运行目标，网络工具可传 target:{runtimeId,generation}；多连接目标必须显式选择，HTTP 查询失败不回退另一库。VM 与代理的历史、采集和 Mock 分别路由。查 HTTP 详情需先 get_requests 再 get_request；清理当前目标历史须 clear_network_history 并传 confirm:true。只查请求无需开启 Mock。需要模拟时按实际接口契约增量编辑 files.scenes，请求体条件见 http.fields.bodyJson/bodyRegex，reload_rules 后激活所需场景；检查相关 Dio 接入，以本轮新请求、规则命中与页面验证，不能从 applied 推断命中。',
+      '日常 Chrome 的本机同源 HTTP Mock 见 overview.localBrowserMock 或 http.localBrowserMock，不使用 MCP target。其他场景先从 list_sessions.runtimeTargets 选择运行目标，网络工具可传 target:{runtimeId,generation}；多连接目标必须显式选择，HTTP 查询失败不回退另一库。VM 与代理的历史、采集和 Mock 分别路由。查 HTTP 详情需先 get_requests 再 get_request；清理当前目标历史须 clear_network_history 并传 confirm:true。只查请求无需开启 Mock。需要模拟时按实际接口契约增量编辑 files.scenes，请求体条件见 http.fields.bodyJson/bodyRegex，reload_rules 后激活所需场景；检查相关 Dio 接入，以本轮新请求、规则命中与页面验证，不能从 applied 推断命中。',
   },
   {
     id: 'ws',

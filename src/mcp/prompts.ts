@@ -13,7 +13,8 @@ const templates = {
     description: '构造下单成功/失败、资产数据等 API 业务状态，按场景验证规则命中与页面表现。',
     topics: ['http'],
     steps: [
-      '普通 Web 项目先按 overview.webProxy / http.webProxy 在工作台登记本地 URL 与子项目根，显式准备代理，用实际监听端口接入专用浏览器并信任 CA。手动触发网页；HTTP 代理无 page 身份，不覆盖 WS/UI/SSR、缓存或 Service Worker 绕行流量，CORS/OPTIONS 需明确响应。',
+      '本机同源 HTTP 在日常 Chrome 调试时，先看 overview.localBrowserMock / http.localBrowserMock；从 Cursor 命令面板启动并访问新地址，用响应头验证。这个入口不使用 MCP target。',
+      '需要正向代理的 Web 项目按 overview.webProxy / http.webProxy 在工作台登记本地 URL 与子项目根，显式准备代理，用实际监听端口接入专用浏览器并信任 CA。手动触发网页；HTTP 代理无 page 身份，不覆盖 WS/UI/SSR、缓存或 Service Worker 绕行流量，CORS/OPTIONS 需明确响应。',
       '先 list_sessions 查看 runtimeTargets；网络工具可传 target:{runtimeId,generation}，多个连接目标必须明确选择。VM 与代理历史、采集和 Mock 分别路由，同目标工作台与 MCP 一致，查询失败不回退其他库。',
       '根据任务确定请求 method、host、path、预期响应和触发方式；先用 get_network_status 查看 files.scenes、采集与 Dio Mock 状态，必要时查询已有请求确认接口，不能猜测业务字段。',
       '任务包含多种状态时，按实际业务协议列出本次需要的场景，例如下单成功、业务失败、余额不足或不同资产信息；区分 HTTP 错误与 HTTP 200 中的业务失败码，逐个切换场景并验证，不同时启用互相冲突的规则。',
