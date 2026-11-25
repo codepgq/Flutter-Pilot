@@ -32,6 +32,7 @@ describe('Agent usage guide contracts', () => {
       'get_network_status',
       'get_requests',
       'get_request',
+      'clear_network_history',
       'get_ws_connections',
       'get_ws_messages',
       'inject_ws_message',
@@ -68,6 +69,10 @@ describe('Agent usage guide contracts', () => {
     ])
       expect(() => parseTool('get_request', { ...args, target: invalid })).toThrow();
     expect(() => parseTool('hot_reload', { sessionId: 'project', target })).toThrow();
+    expect(
+      parseTool('clear_network_history', { sessionId: 'project', domain: 'all', confirm: true }),
+    ).toMatchObject({ domain: 'all', confirm: true });
+    expect(() => parseTool('clear_network_history', { sessionId: 'project', domain: 'all' })).toThrow();
   });
 
   it('keeps every README Scene exchange example importable by the v2 production validator', async () => {
@@ -369,6 +374,9 @@ describe('Agent usage guide contracts', () => {
   });
   it('keeps HTTP documents and each action example valid against the production validator', () => {
     expect(validateRuleDocument(httpExample)).toEqual(httpExample);
+    const example = getUsageGuide('http').bodyMatchExample;
+    expect(validateRuleDocument({ version: 1, rules: [example] }).rules[0]).toEqual(example);
+    expect(getMcpPrompt('http_mock').messages[0].content.text).toContain('match.bodyRegex');
     const variants = getUsageGuide('http').variants as Record<string, unknown>;
     for (const action of Object.values(variants)) {
       const { mock: _, ...base } = httpExample.rules[0];

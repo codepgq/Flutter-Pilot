@@ -1,5 +1,21 @@
 # 实现与验证结论
 
+## 0.0.26 发布、Cursor 安装与推送（2026-11-25）
+
+- 版本、lockfile、README / CHANGELOG 与 VSIX 路径同步至 0.0.26。发布内容包含 HTTP JSON 请求体匹配、工作台配置，以及 MCP 网络正文查询指引与目标历史清理。
+- 发布回归包括 886 项 Vitest、109 项工作台 Playwright、32 项托管 Chromium HTTP、32 项 Dart Dio VM，以及类型、格式和打包检查。开发期另验证 iOS Flutter 和真实 mitmproxy 集成，详见请求体匹配记录。
+- Cursor CLI 使用 `--force` 安装 `artifacts/flutter-pilot-0.0.26.vsix`，包和安装文件比对与离线 MCP 发现见 `artifacts/v0.0.26-install-report.json`。远端 main 与附注标签 `v0.0.26` 的核验见 `artifacts/v0.0.26-release-report.txt`。活动窗口可在调试方便时重载并重连 MCP。
+
+## HTTP Mock 请求体匹配（2026-11-25）
+
+- 规则编辑器「更多匹配条件」支持编辑两类 JSON 配置，API 目录提示只显示字段名。Vitest 57 文件 / 886 项通过，补充 MCP 示例后定向 39 项通过。类型和构建通过，工作台 Scene 回归 6 项通过。托管 Chromium HTTP 32 项、Dart Dio VM 32 项、iOS Flutter 模拟器 9 项及真实 mitmproxy 登录集成用例均通过。正确凭证和尾部多换行的失败凭证分别验证规则 ID 与响应；Flutter 示例源码哈希一致。
+
+## MCP 网络详细查阅与当前目标历史清理（2026-11-25）
+
+- MCP 工具说明、同名 Prompt、capability routes、离线指南及 docs/mcp.md 已同步：HTTP get_request 展示可用原始/生效请求与响应详情及 truncated；WS includeBodies:true 按目标 total 分页，省略 connectionId 并指定 inbound 可读取当前目标所有服务端推送正文。截断、采集前流量、超大响应边界均明确提示。
+- 新增 clear_network_history，支持当前项目目标的 HTTP、WS、all，并要求 confirm:true；不提供跨项目清理。proxy 的 ws/all 在执行删除前拒绝；all 按域并行清理并返回部分失败信息。清理 HTTP 保留 API 目录；清理 WS 删除所有消息和已关闭连接元数据，保留在线连接。历史留在 IDE 私有存储，按工作区路径隔离，不新增仓库历史文件或 .gitignore 规则。
+- 验证：56 个 Vitest 文件 / 881 项通过；最终 Prompt/schema 变更后再跑 mcp-network、mcp-guide、mcp-transport 共 3 文件 / 62 项通过；`npm run typecheck` 及 `npm run format:check` 通过。未执行 UI、真实 Flutter/Web 浏览器运行时、MCP 客户端安装验收；未发布、提交或安装。
+
 ## 0.0.25 发布、Cursor 安装与推送（2026-11-17）
 
 - 按用户默认发布约定交付侧栏状态/启动入口，以及 0.0.24 扩展无法激活的修复。发布前远端 main、最新 tag 与 Cursor 安装版均为 0.0.24；版本、lockfile、README / CHANGELOG 和 VSIX 路径同步为 0.0.25。

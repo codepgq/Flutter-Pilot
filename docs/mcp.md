@@ -33,6 +33,8 @@ Codex CLI 与 App 可能共用配置；卡片会显示共享来源，配置不�
 
 Cursor 使用独立的 JSON 配置（兼容注释与尾逗号），在 `mcpServers.flutter-pilot` 下保存 `type:"stdio"`、Node 绝对路径和稳定桥接参数，保留其他服务及设置。项目与全局都有同名条目时，提示它们可能分别加载，不将任一范围标记为已覆盖；可在对应范围查看或移除本插件配置。客户端检测只检查 `cursor` 命令或 macOS 应用位置，不启动 IDE。当前已核对的 Cursor MCP 客户端名为 `cursor-vscode`，仅对应范围的实际握手会使卡片显示已连接；其他未知名称仍在客户端列表中展示。
 
+网络历史保存在 IDE 私有存储中，按项目目录/worktree 路径隔离，不写入仓库文件；因此工作区 `.gitignore` 无需为网络历史增加条目。MCP 新增 `clear_network_history`，可在准确的当前 target 下分别清理 HTTP、WS 或两者，需传 `confirm:true`；不会清理其他项目、API 目录统计、规则、Scene 或配置。WS 清理保留在线连接，删除消息及已关闭连接的历史信息。
+
 路径及 stdio 字段依据 [Cursor 官方 MCP 文档](https://cursor.com/docs/mcp)。本机 Cursor 3.29.15 安装实现另确认客户端名及项目 / 用户配置独立标识；不将源码检查或合成 SDK 握手作为真实 Cursor Agent 业务验收。离线 `overview.agentAdapters`、`capabilities` 和 `get_usage_guide` 同名 Prompt 也可查阅接入入口。
 
 已有其他 MCP 配置会保留。同名配置不匹配时显示冲突，点击 **修复本插件配置** 才替换该条目；**移除适配** 只移除确认属于本插件的配置。关闭 MCP 保留客户端配置，重新开启即可恢复。关闭工作台不停止后台服务；退出 IDE 或关闭工作区后会话不可用。
@@ -51,26 +53,42 @@ VM 认证地址不写入 Agent 配置。桥接进程通过私有 Unix socket 访
 }
 ```
 
-以上是 `get_requests` 参数，`generation` 必须使用发现结果中的实际值。同目标工作台和 MCP 查询同一 HTTP 后端：Flutter 使用 VM 历史，代理使用代理历史；查询失败或请求 ID 不存在均不回退另一库。代理 HTTP 采集和 Mock 只改变代理，停用 Mock 后仍可采集。WS、Widget Key、设备和热更新仍有 Flutter 专用语义，代理 WS 调用明确拒绝，不切换到 VM。
+以上是 `get_requests` 参数，`generation` 必须使用发现结果中的实际值。同目标工作台和 MCP 查询同一 HTTP 后端：Flutter 使用 VM 历史，代理使用代理历史；`get_requests` 返回摘要，使用 `get_request` 按同一目标的真实 ID 读取可用的原始/生效请求与响应快照（headers、body、状态、编码、字节数及截断标记）。查询失败或请求 ID 不存在均不回退另一库。代理 HTTP 采集和 Mock 只改变代理，停用 Mock 后仍可采集。WS、Widget Key、设备和热更新仍有 Flutter 专用语义，代理 WS 调用明确拒绝，不切换到 VM。
 
 激活、临时状态、历史和执行快照按运行目标隔离；切换工作台选择不会重定向已启动运行。失效代次或已断开的运行时在副作用前失败，迟到结果不使旧目标恢复有效。先重新发现目标、核对实际业务结果，再决定下一步，不自动重放。离线指南、schema 和 Prompt 的读取不创建项目状态、不准备依赖、不启动进程。托管浏览器生命周期与 HTTP direct 入口见下方独立浏览器运行时。
 
 ## Agent 能力发现与使用指南
 
-MCP 在连接初始化的 `instructions` 中发送功能介绍和“用户任务 → 工具 → 使用前提”指引，引导 Agent 收到适用任务时优先主动使用 Flutter Pilot。初始化说明、`overview.capabilityRoutes` 和 `capabilities` Prompt 共用 [功能映射](../src/mcp/capabilities.ts)，覆盖当前源码全部 61 个工具；`tools/list` 提供工具描述及实际参数 schema。
+MCP 在连接初始化的 `instructions` 中发送功能介绍和“用户任务 → 工具 → 使用前提”指引，引导 Agent 收到适用任务时优先主动使用 Flutter Pilot。初始化说明、`overview.capabilityRoutes` 和 `capabilities` Prompt 共用 [功能映射](../src/mcp/capabilities.ts)，覆盖当前源码全部 62 个工具；`tools/list` 提供工具描述及实际参数 schema。
 
-| 用户任务示例                               | 功能与主要入口                                                                    |
-| ------------------------------------------ | --------------------------------------------------------------------------------- |
-| “截图”“截屏”“screenshot”“长截图”“对比布局” | 当前 Flutter App 优先 `take_screenshot`；长图先 `list_screenshot_targets`         |
-| “启动 App”“热重载”“热重启”                 | `list_sessions` 确认已有会话，按需 `start_app`／`hot_reload`／`hot_restart`       |
-| “查接口报错”“模拟空数据、失败或资产数据”   | `get_network_status`、`get_requests`／`get_request`，需要 Mock 时重载并激活 Scene |
-| “查 WS 消息”“模拟推送”“发送消息”           | `get_ws_connections`／`get_ws_messages`、`inject_ws_message`／`send_ws_message`   |
-| “找控件”“点击”“滚动”“拖拽”“检查 Key”       | `get_ui_snapshot`／`find_widget`、交互工具及 `inspect_key_issues`                 |
-| “输入”“清空”“复制粘贴”“收起键盘”           | `enter_text`／`edit_text`、`get_keyboard_state`／`hide_keyboard` 等键盘工具       |
-| “权限弹窗”“通知栏”“返回”“旋转设备”         | 按需检查设备通道，使用原生快照、交互或 `device_action`                            |
-| “登录到主页”“执行已有操作”“保存复用流程”   | `list_scenes` → `list_scene_actions` → `run_scene_action`，查询或取消运行         |
-| “回归测试”“验证 HTTP/WS/UI 关联结果”       | `list_tests` → `run_test` → `get_test_run`，需要时 `cancel_test_run`              |
-| “支持什么功能”“查看参数”                   | 离线 `get_usage_guide`、`capabilities` 及工具同名 Prompt                          |
+| 用户任务示例                               | 功能与主要入口                                                                                                 |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| “截图”“截屏”“screenshot”“长截图”“对比布局” | 当前 Flutter App 优先 `take_screenshot`；长图先 `list_screenshot_targets`                                      |
+| “启动 App”“热重载”“热重启”                 | `list_sessions` 确认已有会话，按需 `start_app`／`hot_reload`／`hot_restart`                                    |
+| “查接口报错”“模拟空数据、失败或资产数据”   | `get_network_status`、`get_requests`／`get_request`，需要 Mock 时重载并激活 Scene                              |
+| “查所有 WS 推送正文”“模拟推送”“发送消息”   | `get_ws_connections`／`get_ws_messages`（`includeBodies:true` 并分页）、`inject_ws_message`／`send_ws_message` |
+| “清理当前 HTTP/WS 历史”                    | `clear_network_history`（显式确认，限定当前 target）                                                           |
+| “找控件”“点击”“滚动”“拖拽”“检查 Key”       | `get_ui_snapshot`／`find_widget`、交互工具及 `inspect_key_issues`                                              |
+| “输入”“清空”“复制粘贴”“收起键盘”           | `enter_text`／`edit_text`、`get_keyboard_state`／`hide_keyboard` 等键盘工具                                    |
+| “权限弹窗”“通知栏”“返回”“旋转设备”         | 按需检查设备通道，使用原生快照、交互或 `device_action`                                                         |
+| “登录到主页”“执行已有操作”“保存复用流程”   | `list_scenes` → `list_scene_actions` → `run_scene_action`，查询或取消运行                                      |
+| “回归测试”“验证 HTTP/WS/UI 关联结果”       | `list_tests` → `run_test` → `get_test_run`，需要时 `cancel_test_run`                                           |
+| “支持什么功能”“查看参数”                   | 离线 `get_usage_guide`、`capabilities` 及工具同名 Prompt                                                       |
+
+查看当前目标下所有 WS 服务端推送正文时，可先用 `get_ws_connections` 查看连接，再省略 `connectionId`、按 `direction:"inbound"` 和 `includeBodies:true` 调用 `get_ws_messages`，按 `total` 和 `limit`/`offset` 遍历所有页；若只查某条连接，再传其准确 `connectionId`。检查每条消息的 `original`、`effective`、`encoding`、`bytes` 和 `truncated`。大响应可减小页大小；二进制正文按 base64 表示，超出采集/存储上限的消息会标记截断。HTTP 则先从 `get_requests` 选 ID，再调用 `get_request` 读取详情。采集启用前的请求和消息无法追溯补录。
+
+清理当前目标示例（不可恢复；需用户明确要求）：
+
+```json
+{
+  "sessionId": "<当前项目 session>",
+  "target": { "runtimeId": "<目标>", "generation": 1 },
+  "domain": "all",
+  "confirm": true
+}
+```
+
+`domain` 可选 `http`、`ws` 或 `all`。HTTP 代理目标只支持清理 HTTP；WS 历史清理不关闭在线连接，并保留 API 目录、规则、Scene 和配置。清理结果会列出成功域与失败域，不应将部分成功报告为全部完成。
 
 例如用户在当前 Flutter App 上说“截图”，Agent 应选择对应项目并直接调用 `take_screenshot({sessionId,source:"flutter",mode:"screen"})`。普通截图无需先找 Key、读 Scene、激活 Mock 或安装 Appium。桌面、浏览器网页和其他目标使用对应工具；缺少目标上下文时先确认对象。仅截图不重启 App、不导航或切换 Mock；仅启动任务确认启动结果即可，后续按任务继续。
 
@@ -86,14 +104,14 @@ MCP 在连接初始化的 `instructions` 中发送功能介绍和“用户任务
 | ------------------ | ------------------------------------------------------------------------------- |
 | `overview`（默认） | 能力场景、Prompt 导航、首次调用、规则文件和运行前提                             |
 | `screenshot`       | App 普通截图、长图目标选择、设备整屏、图片返回与范围限制                        |
-| `http`             | `scenes/` 中 HTTP 规则的字段、完整合法示例、请求／响应修改、转发及验证流程      |
-| `ws`               | `scenes/` 中 WS 规则的 URL、方向、文本匹配、替换／丢弃及双向消息验证            |
+| `http`             | HTTP 详细请求/响应查阅、当前目标历史清理、Scene 规则与验证流程                  |
+| `ws`               | WS 全消息正文分页查阅、当前目标历史清理、规则与双向消息验证                     |
 | `ui`               | 快照发现真实 Key、父范围查找、点击／输入／滚动／等待、Key 诊断与修复            |
 | `workflow`         | 保存并复用 Scene 操作、Test Case 关联 HTTP/WS/UI 断言、临时有状态 Mock 与热更新 |
 
 同一份指南还可通过 `resources/list` 发现，URI 为 `flutter-pilot://guides/<topic>`，使用 `resources/read` 读取。工具入口兼容只使用 MCP tools 的 Agent，资源入口方便支持参考资料的客户端；两者返回相同内容。
 
-支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 69 个模板：四个能力入口、原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及全部 61 个工具的同名独立模板。`take_screenshot`、`start_app`、`hide_keyboard`、`hot_reload`、`hot_restart`、Scene 操作和测试工具可以直接按同名 Prompt 查找，无需先打开其他场景模板。
+支持 MCP Prompts 的客户端可通过 `prompts/list` 发现、通过 `prompts/get` 读取 70 个模板：四个能力入口、原有 `http_mock`、`websocket_mock`、`flutter_ui`、`mock_workflow` 四个场景模板，以及全部 62 个工具的同名独立模板。`take_screenshot`、`start_app`、`hide_keyboard`、`hot_reload`、`hot_restart`、Scene 操作和测试工具可以直接按同名 Prompt 查找，无需先打开其他场景模板。
 
 | Prompt                   | 查阅内容                                                                                                            |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
@@ -131,7 +149,7 @@ MCP 在连接初始化的 `instructions` 中发送功能介绍和“用户任务
 
 Agent 的可调用能力由 `tools/list` 提供，Prompts 是可选的使用指导；未读取 Prompts 不等于工具不存在。初始化说明已明确列出所有工具及同名 Prompt 入口。不支持 Prompts 的客户端仍可通过工具描述和 `get_usage_guide` 发现用法。新增工具必须补齐同名提示词；重要使用流程也需进入场景 Prompt 与 `overview` 导航，类型检查及真实 MCP stdio 测试校验完整覆盖、离线发现和可读性。
 
-指南明确由 Agent 文件工具增量编辑规则，先通过 `get_network_status` 获取准确路径并保留已有规则。HTTP JSON 正文必须序列化为字符串；WS 规则针对业务连接，连接临时规则不能写入持久文件。保存后调用 `reload_rules`，检查所需域加载及客户端接入，再用 `activate_scene` 激活目标场景并验证本次新记录。先通过 `list_scenes` / `list_scene_actions` 复用已有操作；只有首次编写、Key 失效或起始页不匹配时才探索快照。无 Key 时可显式使用文字、语义、类型、祖先范围或快照引用；不静默更换定位方式。完整步骤与失败处理见 [Scene 联调流程](scene-authoring.md)。
+指南明确由 Agent 文件工具增量编辑规则，先通过 `get_network_status` 获取准确路径并保留已有规则。HTTP Mock 响应正文必须序列化为字符串。原始 JSON 请求体可通过 `match.bodyJson` 完全匹配字段，通过 `match.bodyRegex` 对字符串字段做整值正则匹配，配置见[规则格式](scene-storage.md#匹配-json-请求体)；WS 规则针对业务连接，连接临时规则不能写入持久文件。保存后调用 `reload_rules`，检查所需域加载及客户端接入，再用 `activate_scene` 激活目标场景并验证本次新记录。先通过 `list_scenes` / `list_scene_actions` 复用已有操作；只有首次编写、Key 失效或起始页不匹配时才探索快照。无 Key 时可显式使用文字、语义、类型、祖先范围或快照引用；不静默更换定位方式。完整步骤与失败处理见 [Scene 联调流程](scene-authoring.md)。
 
 例如用户要求“模拟订单列表空数据并验证页面”，Agent 应先读取 `http`／`workflow` 指南，选择对应项目会话，读取并编辑规则，再完成重载、Mock、Key 操作和结果验证。具体是否主动调用仍由客户端 Agent 根据任务和上下文决定；MCP 说明提供发现与操作指引，不替代用户授权和客户端审批。
 

@@ -1,5 +1,15 @@
 # Flutter Pilot 项目记忆
 
+## HTTP Mock 请求体匹配（2026-11-25）
+
+- Web 托管 Chromium、Flutter Dio 和 HTTP 代理复用 Scene HTTP 规则。`match.bodyJson` 完全比较已指定顶层字段的 JSON 值和类型，`match.bodyRegex` 对顶层字符串字段做整值正则匹配。两种条件可组合，匹配原始且完整可读的 JSON 对象。登录账号规则按优先级选择，同一路径可配置低优先级失败响应。
+
+## MCP 网络记录查阅与清理（2026-11-25）
+
+- MCP 读取 HTTP 详情用 get_requests 取 ID 后 get_request 返回完整可用请求/响应快照及截断标记；WS 查询 includeBodies:true。读取当前目标下所有服务端推送时省略 connectionId，指定 direction=inbound 并按 total/limit/offset 分页。
+- 新增 clear_network_history，只清当前 session/target 项目工作区的 HTTP、WS 或两者记录，必须 confirm:true；proxy 目标不支持 ws/all。清 WS 历史不关闭在线连接，会清消息及已关闭连接元数据，保留在线连接。
+- API 目录统计、Mock 规则、Scene、项目配置与其他项目数据保留。HTTP/WS 历史继续存 IDE 私有 storage 并按工作区路径隔离，不写进工作树；无需新增 Git ignore 规则。采集开始前内容无法补录，正文受大小/保留策略限制。
+
 ## 侧栏状态与启动入口（2026-11-17）
 
 - 0.0.24 安装包激活失败：esbuild 打进了 jsonc-parser 的 UMD 入口，扩展宿主加载时仍执行 `require("./impl/format")`，`flutterPilot.open` 没有注册。侧栏“打开工作台”因此没有反应。生产打包必须解析到该包的 ESM 入口。
@@ -30,9 +40,9 @@
 - 沿用本地 VSIX 发布方式；扩展商店发布不属于此默认约定。活动 Cursor 窗口由用户在调试方便时 Reload Window，不自动重载。将当次版本、验证、安装和推送结果记录到 `IMPLEMENTATION.md` 与验收文档；失败时明确未完成步骤，不将历史验收作为本轮结果。
 - 本约定覆盖下方历史章节对未来发布授权的限制；历史“仅本地安装”“未提交 / 未推送”仍只描述当时状态。
 
-## 当前发布版本（2026-11-17）
+## 当前发布版本（2026-11-25）
 
-- 当前发布版本为 0.0.25。修复 jsonc-parser 打包导致的扩展激活失败，活动栏侧栏显示连接状态和项目启动入口。保留 0.0.24 的项目启动与浏览器准备、Flutter / Web 统一运行时、61 个工具、69 个 Prompts 与 Scene v2。发布、Cursor 安装、验证与远端引用证据见 `IMPLEMENTATION.md` 同版本条目。
+- 当前发布版本为 0.0.26。HTTP Mock 支持 JSON 请求体字段完全匹配和整值正则匹配，覆盖托管 Chromium、Flutter Dio 和 HTTP 代理。MCP 新增网络历史清理，现有 62 个工具和 70 个 Prompts。发布验证见 `IMPLEMENTATION.md` 和 `docs/validation.md`。
 - 当前仓库自动生成的 `.flutter-pilot/` 是本地项目状态，保留但不提交、不进入 VSIX；可复用分发示例仍位于 `resources/`。
 
 ## Cursor MCP 适配（2026-11-14，0.0.21 已发布）

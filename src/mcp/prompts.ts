@@ -18,6 +18,7 @@ const templates = {
       '根据任务确定请求 method、host、path、预期响应和触发方式；先用 get_network_status 查看 files.scenes、采集与 Dio Mock 状态，必要时查询已有请求确认接口，不能猜测业务字段。',
       '任务包含多种状态时，按实际业务协议列出本次需要的场景，例如下单成功、业务失败、余额不足或不同资产信息；区分 HTTP 错误与 HTTP 200 中的业务失败码，逐个切换场景并验证，不同时启用互相冲突的规则。',
       '使用 Agent 文件工具读取 files.scenes，在目标场景的 httpRules 中按 ID 增量修改或追加规则，保留其他场景和规则。核对匹配范围、priority 与 enabled；JSON 正文序列化为字符串，避免空 match 意外匹配全部请求。',
+      '用 match.bodyJson 完全匹配原始 JSON 的顶层字段，用 match.bodyRegex 对字符串字段做整值正则匹配。组合条件须全部命中。Web 托管、Flutter Dio 和 HTTP 代理共用规则。使用测试凭证，为错误密码明确配置低优先级失败响应。',
       '保存后调用 reload_rules，检查 loaded 和 status.scene.runtime.http。校验失败时修正规则；pending 表示仍待应用，不能据此宣称 Mock 已生效。',
       '调用 list_scenes 取得目标 sceneId，再 activate_scene；它统一开启场景所需采集和 Mock。检查 runtime.http、attachedDioInstances 及 coverageMessage，确认本流程所需客户端接入，不要求无关 WS 就绪；以新记录验证实际覆盖。',
       '需要修改API后从应用入口展示新状态时，读取workflow指南并调用hot_restart；它重置内存并重跑入口，不会代替reload_rules。检查返回的network和新请求，启动首请求可能早于重新注入，必要时待Mock已接入再按Key触发。仅源码变更且需保留页面状态时使用hot_reload。',
@@ -142,7 +143,14 @@ export const toolPromptPlans = {
   get_request: {
     topics: ['http'],
     steps: [
-      '先通过 get_requests 取得真实请求 id，再调用 get_request；检查实际请求、response.status/body、mocked、requestRuleId/responseRuleId，区分 HTTP 状态与业务错误码。记录证据与 UI 对应。',
+      '先通过 get_requests 取得真实请求 id，再调用 get_request 读取 originalRequest/request/originalResponse/response 的 headers、body、状态、编码、字节数与 truncated；检查 mocked、requestRuleId/responseRuleId，区分 HTTP 状态与业务错误码。正文若 truncated=true 或受限制，明确说明不是完整正文。',
+    ],
+  },
+  clear_network_history: {
+    topics: ['http', 'ws'],
+    steps: [
+      '先确认用户明确要求清理，并从 list_sessions 选择当前项目/worktree 的准确 target；该工具不可恢复，只允许清理当前网络目标。按需求选 domain=http、ws 或 all，必须传 confirm:true。',
+      'HTTP 代理不支持 ws/all；不支持时工具应在任何删除前拒绝。根据返回的 cleared/errors 逐域报告结果；部分失败时不得声称全部完成。成功清理保留 API 目录、Mock 规则、Scene、项目配置、在线 WS 连接与其他目标历史。',
     ],
   },
   get_ws_connections: {
@@ -154,7 +162,7 @@ export const toolPromptPlans = {
   get_ws_messages: {
     topics: ['ws'],
     steps: [
-      '先选准确 connectionId，调用 get_ws_messages 并按方向、search、limit/offset 筛选；需要正文时 includeBodies=true。核对新消息的 original/effective、outcome 和 ruleId，再验证业务响应；采集前消息不可补抓。',
+      '先调用 get_ws_connections 确认当前目标的业务连接。若任务要求读取目标下全部服务端推送，调用 get_ws_messages 时省略 connectionId、设置 direction=inbound 与 includeBodies:true，并按 total/limit/offset 遍历所有页；若只查特定连接再传准确 connectionId。逐条读取 original/effective、encoding、bytes、truncated、outcome 和 ruleId。超大/二进制/被截断消息要如实标记，采集前消息不可补抓。需要清理当前目标时仅用 clear_network_history，明确选择 http/ws/all 并传 confirm:true；不得声称能清理其他项目。',
     ],
   },
   inject_ws_message: {
@@ -211,6 +219,7 @@ const networkTargetTools = new Set([
   'get_network_status',
   'get_requests',
   'get_request',
+  'clear_network_history',
   'get_ws_connections',
   'get_ws_messages',
   'inject_ws_message',

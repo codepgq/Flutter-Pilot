@@ -47,6 +47,50 @@
   }
   Map<String, dynamic> request(dynamic options) => <String, dynamic>{'method': options.method, 'url': options.uri.toString(), 'headers': headers(options.headers), ...body(options.data, options.contentType)};
   Map<String, dynamic> response(dynamic value) => <String, dynamic>{'status': value.statusCode ?? 0, 'headers': headers(value.headers.map), ...body(value.data, value.headers.value('content-type'))};
+  bool jsonEquals(dynamic actual, dynamic expected) {
+    if (expected is List) {
+      if (actual is! List || actual.length != expected.length) return false;
+      for (var index = 0; index < expected.length; index++) {
+        if (!jsonEquals(actual[index], expected[index])) return false;
+      }
+      return true;
+    }
+    if (expected is Map) {
+      if (actual is! Map || actual.length != expected.length) return false;
+      for (final key in expected.keys) {
+        if (!actual.containsKey(key) || !jsonEquals(actual[key], expected[key])) return false;
+      }
+      return true;
+    }
+    if (actual is num && expected is num) return actual.toDouble() == expected.toDouble();
+    return actual == expected;
+  }
+  bool matchesBody(dynamic original, Map match) {
+    final expected = match['bodyJson'] as Map?;
+    final patterns = match['bodyRegex'] as Map?;
+    if (expected == null && patterns == null) return true;
+    if (original['editable'] != true || original['truncated'] == true || original['bodyEncoding'] != 'text') return false;
+    final json = (original['headers'] as List).any((dynamic header) {
+      if (header[0].toString().toLowerCase() != 'content-type') return false;
+      final mime = header[1].toString().split(';').first.trim().toLowerCase();
+      return mime == 'application/json' || mime == 'text/json' || mime.endsWith('+json');
+    });
+    if (!json) return false;
+    try {
+      final actual = jsonDecode(original['body'] as String);
+      if (actual is! Map) return false;
+      for (final entry in (expected ?? const {}).entries) {
+        if (!actual.containsKey(entry.key) || !jsonEquals(actual[entry.key], entry.value)) return false;
+      }
+      for (final entry in (patterns ?? const {}).entries) {
+        final value = actual[entry.key];
+        if (value is! String || !RegExp('^(?:${entry.value})' r'(?![\s\S])', unicode: true).hasMatch(value)) return false;
+      }
+      return true;
+    } on FormatException {
+      return false;
+    }
+  }
   bool matches(dynamic rule, dynamic original) {
     final scenario = rule['scenario'];
     if (scenario != null && (state['scenarioStates'][scenario['id']] ?? scenario['initial']) != scenario['when']) return false;
@@ -63,7 +107,7 @@
     for (final key in wantedHeaders.keys) {
       if (!(original['headers'] as List).any((dynamic item) => item[0].toString().toLowerCase() == key.toString().toLowerCase() && item[1] == wantedHeaders[key])) return false;
     }
-    return true;
+    return matchesBody(original, match as Map);
   }
   dynamic select(dynamic original, String stage) {
     for (final rule in state['rules']) {

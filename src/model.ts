@@ -1,3 +1,5 @@
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
 export type HeaderPatch = Record<string, string | null>;
 export interface Match {
   method?: string;
@@ -5,6 +7,8 @@ export interface Match {
   path?: string;
   query?: Record<string, string>;
   headers?: Record<string, string>;
+  bodyJson?: Record<string, JsonValue>;
+  bodyRegex?: Record<string, string>;
 }
 export interface RequestPatch {
   method?: string;
@@ -226,6 +230,21 @@ function stringMap(value: unknown, label: string, nullable = false) {
     if (typeof v === 'string') assert(!/[\r\n]/.test(v), `${label}.${key} 不能包含换行`);
   }
 }
+/** Anchor both ends, including when a pattern contains alternation or the value ends in a newline. */
+export function fullBodyRegex(pattern: string) {
+  return new RegExp(`^(?:${pattern})(?![\\s\\S])`, 'u');
+}
+function validJson(value: unknown, depth = 0): boolean {
+  if (depth > 32) return false;
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every((item) => validJson(item, depth + 1));
+  return (
+    object(value) &&
+    [Object.prototype, null].includes(Object.getPrototypeOf(value)) &&
+    Object.values(value).every((item) => validJson(item, depth + 1))
+  );
+}
 function url(value: unknown, label: string) {
   assert(typeof value === 'string' && !/\s/.test(value), `${label} 必须是不含空白字符的字符串`);
   let parsed: URL;
@@ -308,12 +327,31 @@ export function validateRuleDocument(input: unknown): RuleDocument {
     assert(typeof item.enabled === 'boolean', 'enabled 必须是布尔值');
     assert(typeof item.priority === 'number' && Number.isSafeInteger(item.priority), 'priority 必须是整数');
     assert(object(item.match), 'match 必须为对象');
-    fields(item.match, ['method', 'host', 'path', 'query', 'headers'], 'match');
+    fields(item.match, ['method', 'host', 'path', 'query', 'headers', 'bodyJson', 'bodyRegex'], 'match');
     for (const key of ['method', 'host', 'path'])
       if (item.match[key] !== undefined)
         assert(typeof item.match[key] === 'string', `match.${key} 必须是字符串`);
     if (item.match.query !== undefined) stringMap(item.match.query, 'match.query');
     if (item.match.headers !== undefined) stringMap(item.match.headers, 'match.headers');
+    if (item.match.bodyJson !== undefined) {
+      const body = item.match.bodyJson;
+      assert(
+        object(body) && Object.keys(body).length > 0 && validJson(body),
+        'match.bodyJson 必须是非空 JSON 对象，最多嵌套 32 层，数字必须有限',
+      );
+    }
+    if (item.match.bodyRegex !== undefined) {
+      const patterns = item.match.bodyRegex;
+      assert(object(patterns) && Object.keys(patterns).length > 0, 'match.bodyRegex 必须是非空 JSON 对象');
+      for (const pattern of Object.values(patterns)) {
+        assert(typeof pattern === 'string', 'match.bodyRegex 的值必须是正则字符串');
+        try {
+          new RegExp(pattern, 'u');
+        } catch {
+          throw new Error('match.bodyRegex 包含无效正则');
+        }
+      }
+    }
     if (item.request !== undefined) patch(item.request, 'request');
     if (item.response !== undefined) patch(item.response, 'response');
     if (item.redirect !== undefined) {

@@ -123,6 +123,15 @@ describe('WS history using private system SQLite', () => {
     expect((await store.list()).items.map((row) => row.id)).toEqual(['b']);
     expect((await store.connections())[0].received).toBe(3);
   });
+  it('clears all message history and closed connection rows while preserving live connections', async () => {
+    await store.putConnection(connection('live'));
+    await store.putConnection(connection('closed', { status: 'closed', closedAt: now + 1 }));
+    await store.putMessage(message('a', { connectionId: 'live' }));
+    await store.putMessage(message('b', { connectionId: 'closed' }));
+    await store.clear();
+    expect((await store.list()).total).toBe(0);
+    expect((await store.connections()).map((row) => row.id)).toEqual(['live']);
+  });
   it('uses private permissions and a separate database', async () => {
     const other = join(folder, 'vm-history.sqlite3');
     await writeFile(other, 'untouched');

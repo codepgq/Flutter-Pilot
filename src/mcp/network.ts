@@ -11,6 +11,8 @@ export interface NetworkHost {
   status(): Record<string, unknown>;
   listHttp(query: HistoryQuery): Promise<HistoryResult>;
   getHttp(id: string): Promise<HistoryEntry>;
+  clearHttp(): Promise<unknown>;
+  clearWs(): Promise<unknown>;
   connections(): Promise<unknown>;
   messages(query: WsMessageQuery): Promise<WsMessageResult>;
   setCapture(domain: 'http' | 'ws', enabled: boolean): Promise<void>;
@@ -66,6 +68,34 @@ export class McpNetworkController {
         return this.host.listHttp(query);
       case 'get_request':
         return this.host.getHttp(args.id);
+      case 'clear_network_history': {
+        if (args.confirm !== true) throw new Error('清理历史必须显式传 confirm:true。');
+        const domain = args.domain as 'http' | 'ws' | 'all';
+        const state = this.host.status();
+        if (domain !== 'http' && (state.ws as { supported?: boolean } | undefined)?.supported === false)
+          throw new Error('当前运行目标不支持 WS 历史清理；未清理任何记录。');
+        signal?.throwIfAborted();
+        const requested = domain === 'all' ? (['http', 'ws'] as const) : ([domain] as const);
+        const operations = await Promise.allSettled(
+          requested.map((item) => (item === 'http' ? this.host.clearHttp() : this.host.clearWs())),
+        );
+        const cleared = requested.filter((_, index) => operations[index].status === 'fulfilled');
+        const errors = operations.flatMap((result, index) =>
+          result.status === 'rejected'
+            ? [{ domain: requested[index], message: (result.reason as Error)?.message ?? '清理失败' }]
+            : [],
+        );
+        return {
+          ok: errors.length === 0,
+          cleared,
+          ...(errors.length ? { errors } : {}),
+          scope: 'current-target',
+          message:
+            errors.length === 0
+              ? '指定运行目标的网络历史已清理；API 目录、规则、Scene、配置和在线连接均保留。'
+              : '部分网络历史未能清理；请根据 errors 核对结果，已完成的删除不可恢复。',
+        };
+      }
       case 'get_ws_connections':
         return this.host.connections();
       case 'get_ws_messages':

@@ -315,6 +315,28 @@ class ProxyIntegrationTests(unittest.TestCase):
         self.assertEqual(Origin.calls, [])
         self.assertTrue(self.latest()["mocked"])
 
+    def test_json_login_selects_exact_and_regex_rules_before_upstream(self):
+        match = {"method": "POST", "path": "/fixture-sessions"}
+        headers = {"Content-Type": "application/json"}
+        self.sync([
+            self.rule(id="admin-login", priority=10, match={
+                **match,
+                "bodyJson": {"email": "aaaa@example.test"},
+                "bodyRegex": {"password": "Demo[0-9]{3}"},
+            }, mock={"status": 200, "headers": headers, "body": '{"role":"ADMIN"}'}),
+            self.rule(id="invalid-login", match=match, mock={"status": 401, "headers": headers, "body": "{}"}),
+        ])
+        payload = {"email": "aaaa@example.test", "password": "Demo123", "extra": True}
+        status, _, body = self.request("/fixture-sessions", "POST", json.dumps(payload).encode(), headers)
+        self.assertEqual((status, json.loads(body)), (200, {"role": "ADMIN"}))
+        self.assertEqual(self.latest()["requestRuleId"], "admin-login")
+        self.control.rpc("history.clear")
+        payload["password"] += "\n"
+        status, _, _ = self.request("/fixture-sessions", "POST", json.dumps(payload).encode(), headers)
+        self.assertEqual(status, 401)
+        self.assertEqual(self.latest()["requestRuleId"], "invalid-login")
+        self.assertEqual(Origin.calls, [])
+
     def test_redirect_preserves_credentials_and_matches_original_path(self):
         target = "http://localhost:%s/redirected?target=1" % self.origin.server_port
         rule = self.rule(match={"path": "/original"}, redirect={"url": target}, response={"status": 202})

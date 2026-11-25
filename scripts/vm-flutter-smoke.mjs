@@ -215,6 +215,42 @@ try {
   await waitFor(async () => (await session.store.list({ mocked: true })).items.length);
   checks.push('Existing Flutter Dio HTTPS mock without network or CA');
   console.log('PASS', checks.at(-1));
+  const loginPath = '/fixture-sessions';
+  const loginAction = (status, body) => ({
+    mock: { status, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+  });
+  const loginMatch = { method: 'POST', path: loginPath };
+  await session.updateRules([
+    rule(
+      'admin-login',
+      {
+        ...loginMatch,
+        bodyJson: { email: 'aaaa@example.test' },
+        bodyRegex: { password: 'Demo[0-9]{3}' },
+      },
+      loginAction(200, { role: 'ADMIN' }),
+    ),
+    { ...rule('invalid-login', loginMatch, loginAction(401, { denied: true })), priority: 1 },
+  ]);
+  result = await request(base + loginPath, 'POST', {
+    password: 'Demo123',
+    extra: true,
+    email: 'aaaa@example.test',
+  });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.data, { role: 'ADMIN' });
+  result = await request(base + loginPath, 'POST', { password: 'Demo123\n', email: 'aaaa@example.test' });
+  assert.equal(result.status, 401);
+  await waitFor(async () => {
+    const { items } = await session.store.list({ path: loginPath }, false);
+    return (
+      items.some((item) => item.requestRuleId === 'admin-login') &&
+      items.some((item) => item.requestRuleId === 'invalid-login')
+    );
+  });
+  assert.equal(hits, previousHits);
+  checks.push('Flutter Dio uses exact and full regex JSON body conditions with a fallback');
+  console.log('PASS', checks.at(-1));
   rules = [
     rule(
       'vm-edit',

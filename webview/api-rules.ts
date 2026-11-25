@@ -15,11 +15,11 @@ export interface ApiRuleTag {
   title: string;
 }
 
-/** Catalog entries have no query or headers, so describe configuration, not historical hits. */
+/** Catalog entries describe rule configuration without per-request data. */
 export function apiRuleTags(api: ApiCatalogEntry, rules: Rule[]): ApiRuleTag[] {
   const tags = new Map<string, ApiRuleTag>();
   for (const rule of [...rules].sort((a, b) => b.priority - a.priority)) {
-    const { method, host, path, query, headers } = rule.match;
+    const { method, host, path, query, headers, bodyJson, bodyRegex } = rule.match;
     if (!rule.enabled) continue;
     if (method && method !== '*' && method.toUpperCase() !== api.method.toUpperCase()) continue;
     if (host && host !== '*' && host.toLowerCase() !== api.host.toLowerCase()) continue;
@@ -27,6 +27,8 @@ export function apiRuleTags(api: ApiCatalogEntry, rules: Rule[]): ApiRuleTag[] {
     const conditions = [
       ...(Object.keys(query ?? {}).length ? [`查询参数：${Object.keys(query!).join('、')}`] : []),
       ...(Object.keys(headers ?? {}).length ? [`请求头：${Object.keys(headers!).join('、')}`] : []),
+      ...(bodyJson ? [`请求体完全匹配：${Object.keys(bodyJson).join('、')}`] : []),
+      ...(bodyRegex ? [`请求体正则匹配：${Object.keys(bodyRegex).join('、')}`] : []),
     ];
     const conditional = conditions.length > 0;
     const description = `${rule.name}（优先级 ${rule.priority}）${conditional ? `；需满足${conditions.join('；')}` : ''}`;

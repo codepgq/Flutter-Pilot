@@ -166,11 +166,17 @@ test('v2 switches reject stale details, fetch rule bodies and preserve the edito
   await respondRule(page, 'http', '正文来自独立资源', 'body-fingerprint');
   await expect(page.getByLabel('Body · JSON / 文本')).toHaveValue('正文来自独立资源');
   await page.getByLabel('Body · JSON / 文本').fill('新正文');
+  await page.getByText('更多匹配条件', { exact: true }).click();
+  await page.getByLabel('请求体字段完全匹配 JSON').fill('{"email":"aaaa@example.test"}');
+  await page.getByLabel('请求体字段正则匹配 JSON').fill('{"password":"Demo[0-9]{3}"}');
   await page.getByRole('button', { name: '保存规则', exact: true }).click();
   expect(await last(page, 'rules.save')).toMatchObject({
     expectedHash: 'body-fingerprint',
     targetSceneId: 'b',
-    rule: { mock: { body: '新正文' } },
+    rule: {
+      mock: { body: '新正文' },
+      match: { bodyJson: { email: 'aaaa@example.test' }, bodyRegex: { password: 'Demo[0-9]{3}' } },
+    },
   });
   await post(page, { type: 'scene.saved', sceneId: 'b', id: 'http' });
   await expect(page.getByRole('button', { name: '保存规则', exact: true })).toHaveCount(0);

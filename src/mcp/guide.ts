@@ -97,7 +97,7 @@ export const runtimeTargetGuide = {
   selection:
     '网络工具可传 target:{runtimeId,generation}。同项目多个连接目标必须明确选择，不采用焦点、最近目标或第一个目标；只有唯一连接目标时保留旧 sessionId 调用兼容。离线 Scene 查阅/配置可指定目标，旧调用使用原默认目标；读取说明不创建项目状态、不下载依赖或启动进程。',
   routing:
-    '同一 target 的 HTTP 工作台、get_requests 和 get_request 使用相同后端；flutter 读取 VM 历史，proxy 读取代理历史。错误不回退另一库，请求 ID 只在原目标中查详情。Flutter UI 也可显式 target:{runtimeId,generation} 固定代次，proxy UI 在执行前拒绝。采集、激活、临时状态和执行快照按运行目标隔离；切换工作台不会重定向已启动操作。',
+    '同一 target 的 HTTP 工作台、get_requests 和 get_request 使用相同后端；get_request 返回完整可用的原始/生效请求响应快照及截断标记。clear_network_history 仅清理当前目标的 HTTP/WS 历史，不影响 API 目录、规则或其他项目。flutter 读取 VM 历史，proxy 读取代理历史。错误不回退另一库，请求 ID 只在原目标中查详情。Flutter UI 也可显式 target:{runtimeId,generation} 固定代次，proxy UI 在执行前拒绝。采集、激活、临时状态和执行快照按运行目标隔离；切换工作台不会重定向已启动操作。',
   invalidation:
     'generation 来自发现结果，不自行递增。目标断开或代次失效时运行时副作用在执行前拒绝；迟到结果不能复活旧目标。重新发现并核对业务结果后再决定下一步，不自动重放。',
   support:
@@ -176,8 +176,8 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
     },
     scenarios: [
       '当前 Flutter App 的截图、截屏、screenshot、长截图或布局对比：优先 take_screenshot，读取 screenshot；无需先探索 Key、激活 Mock 或准备 Appium。',
-      '需要测试下单成功/失败、余额不足、不同资产信息或接口空数据等业务状态，或改请求/响应/目标地址时，读取 http。',
-      '需要替换/丢弃业务 WebSocket 消息、向App注入订单或资产事件、通过真实连接发送topic/data、检查双向消息时，读取 ws。',
+      '需要查阅详细 HTTP 请求/响应、排查接口问题、清理当前目标 HTTP/WS 历史，或构造 Mock 状态时，读取 http。',
+      '需要查阅当前目标所有 WS 服务端推送正文、检查双向消息、清理当前 WS 历史或模拟业务事件时，读取 ws。',
       '需要按Key快速精确定位组件并点击/输入/滚动，减少截图识别的耗时和token，或检查Key缺陷时，读取 ui。',
       '需要完成 Mock 配置 → 页面操作 → 网络与界面验证时，读取 workflow。',
       '登录、填表、下单确认等固定操作需要加速时，读取 workflow：探索一次保存 Scene 操作，后续参数化执行，无需逐步模型判断。',
@@ -238,6 +238,23 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       '先 get_network_status 取得 files.scenes 根清单路径，用 list_scenes 定位 Scene 目录，再按 scene.json 的 http 映射编辑单条规则。正文可用 bodyFile 引用 bodies/ 文件；exampleDocument 是 v2 自包含交换包，导入会拆分落盘。',
     exampleDocument: sceneExample,
     httpRuleFragment: httpExample,
+    bodyMatchExample: {
+      ...httpExample.rules[0],
+      id: 'fixture-admin-login',
+      name: '测试管理员登录',
+      match: {
+        method: 'POST',
+        host: 'api.example.test',
+        path: '/v1/sessions',
+        bodyJson: { email: 'aaaa@example.test' },
+        bodyRegex: { password: 'Demo[0-9]{3}' },
+      },
+      mock: {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role: 'ADMIN' }),
+      },
+    },
     businessScenarios: [
       '依据真实接口契约构造下单成功、下单失败、余额不足或资产信息等状态，HTTP状态与业务code分别核对，不能假设业务失败一定返回HTTP 4xx/5xx。',
       '任务需要多种状态时逐个激活目标场景、触发请求并验证，避免同一接口的多个场景规则同时命中；使用新记录和当前页面判断结果。',
@@ -248,7 +265,11 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       enabled: '规则开关。示例默认false；需要执行此场景时将目标规则设true，再保存和重载。',
       priority: '安全整数，较大者优先，每阶段首条匹配规则执行；避免依赖相同优先级的顺序。',
       match:
-        'method/host/path/query/headers均可选，组合条件同时满足；按原始请求匹配。method建议大写，host不带协议，path不带query，支持路径glob；不要用空match无意拦截所有请求。',
+        'method/host/path/query/headers/bodyJson/bodyRegex 均可选，组合条件同时满足；按原始请求匹配。method建议大写，host不带协议，path不带query，支持路径glob；不要用空match无意拦截所有请求。',
+      bodyJson:
+        '非空 JSON 对象。对原始请求体的顶层字段按值和类型完全匹配，忽略未指定的顶层字段。例如匹配测试账号 {"email":"admin@example.test","password":"demo-only"}。',
+      bodyRegex:
+        '非空 JSON 对象，值是正则字符串。字段必须是字符串，整个值必须匹配。可与 bodyJson 合用。两者都要求完整可读的 JSON 对象正文和 JSON Content-Type。无效正则保存失败。',
       mock: '直接返回响应，status为200..599，headers为字符串字典，body必须是字符串；JSON正文先序列化，不可直接放对象。',
       request: '可修改method/url/headers/query/body；headers和query以null删除项，正文为字符串。',
       response: '可修改status/headers/body；正文为字符串。',
@@ -345,7 +366,7 @@ const guides: Record<GuideTopic, Record<string, unknown>> = {
       sendMeaning:
         '通过App已有真实WS连接发往服务端，经过当前outbound规则，可能被替换或丢弃。工具成功不等于服务端收到或业务成功；检查消息outcome、effective、ruleId和业务响应。',
       verification:
-        '调用get_ws_messages并includeBodies=true核对本次消息与页面变化；超时、取消或断线后先查询结果，不自动重试发送或注入，避免重复业务事件。',
+        '调用get_ws_connections查看连接；若需目标下全部服务端推送，调用get_ws_messages时省略connectionId，设置direction=inbound、includeBodies=true，按total/limit/offset遍历所有页面，读取original/effective正文及truncated标记；单页结果过大时减小limit继续分页，再核对页面变化；超时、取消或断线后先查询结果，不自动重试发送或注入，避免重复业务事件。',
     },
   },
   ui: {

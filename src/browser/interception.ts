@@ -36,22 +36,27 @@ export async function installHttp(
       const headers = Object.entries(event.request.headers).map(
         ([key, value]) => [key, String(value)] as [string, string],
       );
-      const data = event.request.postDataEntries?.length
-        ? Buffer.concat(
-            event.request.postDataEntries.map((item: any) => Buffer.from(item.bytes ?? '', 'base64')),
-          )
-        : Buffer.from(event.request.postData ?? '');
+      const data =
+        event.request.postDataEntries?.length &&
+        event.request.postDataEntries.every((item: { bytes?: string }) => item.bytes !== undefined)
+          ? Buffer.concat(
+              event.request.postDataEntries.map((item: any) => Buffer.from(item.bytes ?? '', 'base64')),
+            )
+          : Buffer.from(event.request.postData ?? '');
+      const bodyUnavailable =
+        (event.request.hasPostData &&
+          !event.request.postDataEntries?.length &&
+          event.request.postData === undefined) ||
+        (event.request.postData === undefined &&
+          event.request.postDataEntries?.some((item: { bytes?: string }) => item.bytes === undefined));
       const original = {
-        ...bodySnapshot(headers, data),
+        ...bodySnapshot(headers, data, bodyUnavailable ? 'Request body is unavailable.' : undefined),
         method: event.request.method,
         url: event.request.url,
       };
       const record = entry(original, clock());
       requests.set(requestId, record);
       const unsupported =
-        (event.request.hasPostData &&
-          !event.request.postDataEntries?.length &&
-          event.request.postData === undefined) ||
         !original.editable ||
         headers.some(
           ([name, value]) => name.toLowerCase() === 'content-type' && /multipart|octet-stream/.test(value),

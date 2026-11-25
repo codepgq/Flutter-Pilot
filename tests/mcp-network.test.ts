@@ -8,9 +8,11 @@ function fixture() {
     listScenes: vi.fn(() => ({ version: 1, activeSceneId: null, scenes: [] })),
     activateScene: vi.fn(async () => {}),
     reloadScenes: vi.fn(async () => {}),
-    status: () => ({ http: { mockEnabled: false }, ws: { mockEnabled: false } }),
+    status: vi.fn(() => ({ http: { mockEnabled: false }, ws: { mockEnabled: false } })),
     listHttp: vi.fn(async () => ({ items: [], total: 0 })),
     getHttp: vi.fn(),
+    clearHttp: vi.fn(async () => ({ ok: true })),
+    clearWs: vi.fn(async () => ({ ok: true })),
     connections: vi.fn(async () => []),
     messages: vi.fn(async () => ({ items: [], total: 0 })),
     setCapture: vi.fn(async () => {}),
@@ -83,6 +85,43 @@ describe('MCP file-backed network workflow', () => {
     expect(host.injectWs).not.toHaveBeenCalled();
   });
 
+  it('clears only explicitly confirmed history for the selected domain and preflights unsupported WS', async () => {
+    const { host, controller } = fixture();
+    expect(() => parseTool('clear_network_history', { sessionId: 'project', domain: 'http' })).toThrow();
+    expect(() =>
+      parseTool('clear_network_history', { sessionId: 'project', domain: 'all', confirm: false }),
+    ).toThrow();
+    expect(
+      await controller.execute(
+        'clear_network_history',
+        parseTool('clear_network_history', {
+          sessionId: 'project',
+          domain: 'all',
+          confirm: true,
+        }),
+      ),
+    ).toMatchObject({ ok: true, cleared: ['http', 'ws'], scope: 'current-target' });
+    expect(host.clearHttp).toHaveBeenCalledOnce();
+    expect(host.clearWs).toHaveBeenCalledOnce();
+
+    vi.mocked(host.clearWs).mockRejectedValueOnce(new Error('store unavailable'));
+    const partial = await controller.execute('clear_network_history', {
+      domain: 'all',
+      confirm: true,
+    });
+    expect(partial).toMatchObject({ ok: false, cleared: ['http'], errors: [{ domain: 'ws' }] });
+
+    vi.mocked(host.status).mockReturnValue({ ws: { supported: false } });
+    await expect(
+      controller.execute('clear_network_history', {
+        domain: 'all',
+        confirm: true,
+      }),
+    ).rejects.toThrow(/未清理任何记录/);
+    expect(host.clearHttp).toHaveBeenCalledTimes(2);
+    expect(host.clearWs).toHaveBeenCalledTimes(2);
+  });
+
   it('invalid scene file preserves the previous document and does not activate anything', async () => {
     const { host, controller } = fixture();
     vi.mocked(host.reloadScenes).mockRejectedValue(new Error('场景 JSON 无效'));
@@ -117,5 +156,31 @@ describe('MCP file-backed network workflow', () => {
       search: 'orders',
     });
     expect(host.listHttp).toHaveBeenCalledWith({ limit: 20, search: 'orders' });
+    await controller.execute('get_ws_messages', {
+      connectionId: 'conn',
+      direction: 'inbound',
+      includeBodies: true,
+      limit: 100,
+      offset: 100,
+    });
+    expect(host.messages).toHaveBeenCalledWith({
+      connectionId: 'conn',
+      direction: 'inbound',
+      includeBodies: true,
+      limit: 100,
+      offset: 100,
+    });
+    await controller.execute('get_ws_messages', {
+      direction: 'inbound',
+      includeBodies: true,
+      limit: 100,
+      offset: 0,
+    });
+    expect(host.messages).toHaveBeenLastCalledWith({
+      direction: 'inbound',
+      includeBodies: true,
+      limit: 100,
+      offset: 0,
+    });
   });
 });

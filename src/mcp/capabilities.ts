@@ -82,6 +82,7 @@ export const capabilityRoutes = [
       'get_network_status',
       'get_requests',
       'get_request',
+      'clear_network_history',
       'reload_rules',
       'set_capture_enabled',
       'list_scenes',
@@ -91,17 +92,26 @@ export const capabilityRoutes = [
     prompt: 'http_mock',
     topics: ['http'],
     workflow:
-      '先从 list_sessions.runtimeTargets 选择运行目标，网络工具可传 target:{runtimeId,generation}；多连接目标必须显式选择，HTTP 查询失败不回退另一库。VM 与代理的历史、采集和 Mock 分别路由。只查请求无需开启 Mock。需要模拟时按实际接口契约增量编辑 files.scenes，reload_rules 后激活所需场景；检查相关 Dio 接入，以本轮新请求、规则命中与页面验证，不能从 applied 推断命中。',
+      '先从 list_sessions.runtimeTargets 选择运行目标，网络工具可传 target:{runtimeId,generation}；多连接目标必须显式选择，HTTP 查询失败不回退另一库。VM 与代理的历史、采集和 Mock 分别路由。查 HTTP 详情需先 get_requests 再 get_request；清理当前目标历史须 clear_network_history 并传 confirm:true。只查请求无需开启 Mock。需要模拟时按实际接口契约增量编辑 files.scenes，请求体条件见 http.fields.bodyJson/bodyRegex，reload_rules 后激活所需场景；检查相关 Dio 接入，以本轮新请求、规则命中与页面验证，不能从 applied 推断命中。',
   },
   {
     id: 'ws',
     title: 'WebSocket 消息与业务事件',
-    requests: ['查 WS 消息', '模拟推送', '订单状态变化', '注入消息', '向服务端发送', 'WebSocket Mock'],
+    requests: [
+      '查 WS 消息',
+      '查看所有 WS 推送正文',
+      '清理当前网络历史',
+      '模拟推送',
+      '订单状态变化',
+      '注入消息',
+      '向服务端发送',
+      'WebSocket Mock',
+    ],
     tools: ['get_ws_connections', 'get_ws_messages', 'inject_ws_message', 'send_ws_message'],
     prompt: 'websocket_mock',
     topics: ['ws'],
     workflow:
-      '从 list_sessions.runtimeTargets 选择 Flutter 目标并固定 target:{runtimeId,generation}；代理 WS 不支持，不切换 VM 重试。确认准确业务连接及 WS 采集。inject_ws_message 向 App 注入模拟服务端消息，send_ws_message 经 App 当前真实连接向服务端发送；text 与 topic/data 二选一，仅收发无需激活场景。规则替换/丢弃按场景配置，以本轮消息和业务结果验证。',
+      '从 list_sessions.runtimeTargets 选择 Flutter 目标并固定 target:{runtimeId,generation}；代理 WS 不支持，不切换 VM 重试。确认准确业务连接及 WS 采集。查阅目标下所有服务端推送时省略 connectionId、设置 direction=inbound/includeBodies:true 并按 total/limit/offset 遍历所有页，读取 original/effective；清理须调用 clear_network_history 并明确确认。inject_ws_message 向 App 注入模拟服务端消息，send_ws_message 经 App 当前真实连接向服务端发送；text 与 topic/data 二选一，仅收发无需激活场景。规则替换/丢弃按场景配置，以本轮消息和业务结果验证。',
   },
   {
     id: 'ui',

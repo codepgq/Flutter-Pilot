@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import copy
 import fnmatch
+import json
 import math
+import re
 from urllib.parse import parse_qs, urlsplit
 
 SCHEMA_VERSION = 1
@@ -38,6 +40,21 @@ def validate_rules(document):
         for key in ("headers", "query"):
             if key in match:
                 _string_map(match[key], nullable=False)
+        if "bodyJson" in match:
+            body = match["bodyJson"]
+            if not isinstance(body, dict) or not body or not _valid_json(body):
+                raise ValueError("match.bodyJson 必须是非空 JSON 对象，最多嵌套 32 层，数字必须有限")
+        if "bodyRegex" in match:
+            patterns = match["bodyRegex"]
+            if not isinstance(patterns, dict) or not patterns:
+                raise ValueError("match.bodyRegex 必须是非空 JSON 对象")
+            for key, pattern in patterns.items():
+                if not isinstance(key, str) or not isinstance(pattern, str):
+                    raise ValueError("match.bodyRegex 的键和值必须是字符串")
+                try:
+                    _compile_regex(pattern)
+                except re.error:
+                    raise ValueError("match.bodyRegex 包含无效或代理不支持的正则") from None
         if not any(key in rule for key in ("request", "redirect", "mock", "response", "breakpoint")):
             raise ValueError("规则必须至少包含一个动作")
         for stage in ("request", "response"):
@@ -101,6 +118,69 @@ def validate_rules(document):
             raise ValueError("同一 scenario 的 initial 必须一致")
         initial_states[scenario["id"]] = scenario["initial"]
     return copy.deepcopy(rules)
+
+
+def _valid_json(value, depth=0):
+    if depth > 32:
+        return False
+    if value is None or isinstance(value, (str, bool)):
+        return True
+    if isinstance(value, (float, int)):
+        try:
+            return math.isfinite(value)
+        except OverflowError:
+            return False
+    if isinstance(value, list):
+        return all(_valid_json(item, depth + 1) for item in value)
+    return isinstance(value, dict) and all(
+        isinstance(key, str) and _valid_json(item, depth + 1) for key, item in value.items()
+    )
+
+
+def _compile_regex(pattern):
+    # JavaScript and Dart use ASCII character classes for \d and \w.
+    return re.compile(pattern, re.ASCII)
+
+
+def _json_equal(actual, expected):
+    if isinstance(expected, dict):
+        return isinstance(actual, dict) and actual.keys() == expected.keys() and all(
+            _json_equal(actual[key], value) for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return isinstance(actual, list) and len(actual) == len(expected) and all(
+            _json_equal(item, value) for item, value in zip(actual, expected)
+        )
+    if type(expected) in (int, float):
+        return type(actual) in (int, float) and float(actual) == float(expected)
+    return type(actual) is type(expected) and actual == expected
+
+
+def _reject_json_constant(_):
+    raise ValueError("Invalid JSON number")
+
+
+def _matches_body(match, snapshot):
+    exact = match.get("bodyJson")
+    patterns = match.get("bodyRegex")
+    if exact is None and patterns is None:
+        return True
+    if not snapshot.get("editable") or snapshot.get("truncated") or snapshot.get("bodyEncoding") != "text":
+        return False
+    mime = next((value for name, value in snapshot.get("headers", []) if name.lower() == "content-type"), "")
+    mime = mime.split(";", 1)[0].strip().lower()
+    if mime not in ("application/json", "text/json") and not mime.endswith("+json"):
+        return False
+    try:
+        actual = json.loads(snapshot["body"], parse_int=float, parse_constant=_reject_json_constant)
+    except (ValueError, RecursionError):
+        return False
+    if not isinstance(actual, dict):
+        return False
+    return all(key in actual and _json_equal(actual[key], value) for key, value in (exact or {}).items()) and all(
+        isinstance(value := actual.get(key), str) and _compile_regex(pattern).fullmatch(value) is not None
+        for key, pattern in (patterns or {}).items()
+    )
 
 
 def _string_map(value, nullable):
@@ -175,7 +255,7 @@ def matches(rule, snapshot, scenario_states=None):
     for key, value in match.get("headers", {}).items():
         if value not in headers.get(key.lower(), []):
             return False
-    return True
+    return _matches_body(match, snapshot)
 
 
 def select_rule(rules, snapshot, stage, scenario_states=None):

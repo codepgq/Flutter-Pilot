@@ -20,6 +20,32 @@ class RuleTests(unittest.TestCase):
                 snap = dict(self.snapshot, **{key: value})
                 self.assertFalse(matches(self.rule, snap))
 
+    def test_json_body_exact_and_full_regex_select_the_same_rule_in_each_stage(self):
+        rule = copy.deepcopy(self.rule)
+        rule["match"].update(
+            bodyJson={"identity": {"admin": True}, "optional": None, "codes": [1, 2]},
+            bodyRegex={"password": "Sample[0-9]+|Other"},
+        )
+        rule["response"] = {"status": 201}
+        rule = validate_rules({"version": 1, "rules": [rule]})[0]
+        snap = dict(self.snapshot, bodyEncoding="text", editable=True, truncated=False)
+        snap["headers"] = [*snap["headers"], ["Content-Type", "Application/Vnd.Test+Json; charset=utf-8"]]
+        valid = '{"password":"Sample123","optional":null,"codes":[1,2],"identity":{"admin":true},"extra":true}'
+        for stage in ("request", "response"):
+            self.assertEqual(select_rule([rule], dict(snap, body=valid), stage)["id"], "one")
+        for invalid in (
+            valid.replace("Sample123", "Sample123\\n"),
+            valid.replace("Sample123", "prefixOther"),
+            valid.replace('"optional":null,', ""),
+            valid.replace('"admin":true', '"admin":1'),
+            valid.replace('[1,2]', '[2,1]'),
+            valid[:-1],
+        ):
+            self.assertFalse(matches(rule, dict(snap, body=invalid)))
+        for overrides in ({"truncated": True}, {"editable": False}, {"bodyEncoding": "base64"}):
+            self.assertFalse(matches(rule, dict(snap, body=valid, **overrides)))
+        self.assertFalse(matches(rule, dict(snap, body=valid, headers=self.snapshot["headers"])))
+
     def test_priority_is_descending_and_equal_priority_is_stable(self):
         lower = dict(self.rule, id="lower", priority=0)
         equal = dict(self.rule, id="equal")
@@ -73,6 +99,8 @@ class RuleTests(unittest.TestCase):
             lambda rule: rule.update(breakpoint={"request": True, "timeout": 1}),
             lambda rule: rule.update(mock={"status": 200, "body": {}}),
             lambda rule: rule.update(match={"headers": None}),
+            lambda rule: rule.update(match={"bodyJson": {}}),
+            lambda rule: rule.update(match={"bodyRegex": {"email": "["}}),
             lambda rule: rule.update(request={"query": None}),
         ]
         for mutate in mutations:

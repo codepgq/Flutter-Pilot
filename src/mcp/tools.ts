@@ -105,7 +105,7 @@ export const mcpTools = {
   },
   get_requests: {
     description:
-      '分页查询指定运行目标已采集 HTTP 请求；VM 与代理读取各自历史，与同目标工作台一致，查询失败不回退另一来源。多连接目标须传 target:{runtimeId,generation}。',
+      '分页查询指定运行目标已采集 HTTP 请求摘要；VM、代理或浏览器读取各自历史，与同目标工作台一致。使用返回的 id 调用 get_request 可读取可用的原始/生效请求响应完整详情。多连接目标须传 target:{runtimeId,generation}；查询失败不回退另一来源。',
     schema: z
       .object({
         ...networkSession,
@@ -119,8 +119,15 @@ export const mcpTools = {
   },
   get_request: {
     description:
-      '读取指定运行目标的 HTTP 请求详情；id 取自同一 target 的 get_requests，找不到或查询失败不回退其他历史库。',
+      '读取指定运行目标的一条完整 HTTP 历史记录；id 取自同一 target 的 get_requests。返回可用的原始/生效请求与响应快照（方法、URL、headers、body、状态、编码、字节数及截断标记），以及 Mock/规则命中详情；正文受采集和存储上限限制，truncated=true 时并非完整正文。找不到或查询失败不回退其他历史库。',
     schema: z.object({ ...networkSession, id: z.string().min(1).max(512) }).strict(),
+  },
+  clear_network_history: {
+    description:
+      '清理当前 sessionId 和可选 target 对应项目/worktree 的网络历史；domain 选择 http、ws 或 all，必须显式传 confirm:true。仅清理 HTTP 请求历史及 WS 消息/已关闭连接历史，不关闭在线连接、不清 API 目录统计、规则、Scene、项目配置或其他项目；HTTP 代理不支持 ws/all。此操作不可恢复。',
+    schema: z
+      .object({ ...networkSession, domain: z.enum(['http', 'ws', 'all']), confirm: z.literal(true) })
+      .strict(),
   },
   get_ws_connections: {
     description:
@@ -129,7 +136,7 @@ export const mcpTools = {
   },
   get_ws_messages: {
     description:
-      '分页查询指定 Flutter 或托管浏览器运行目标已采集 WebSocket 消息；使用同目标 connectionId，代理目标不支持 WS。',
+      '分页查询指定 Flutter 或托管浏览器运行目标已采集的全部方向 WebSocket 消息；不传 connectionId 可查询该 target 下所有连接，传 includeBodies:true 返回每条消息 original/effective 正文，配合 limit/offset 遍历 total 条记录。direction=inbound 可只查所有服务端推送。检查 truncated、encoding 和 bytes 判断内容边界；采集关闭前/开启前的消息无法补查，HTTP 代理目标不支持 WS。',
     schema: z
       .object({
         ...networkSession,

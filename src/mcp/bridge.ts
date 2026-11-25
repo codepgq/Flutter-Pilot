@@ -93,6 +93,7 @@ export function createMcpBridge(options: BridgeOptions): { server: Server; close
           'get_ws_messages',
         ].includes(name),
         openWorldHint: name !== 'get_usage_guide',
+        ...(name === 'clear_network_history' ? { destructiveHint: true, idempotentHint: false } : {}),
       },
     })),
   }));

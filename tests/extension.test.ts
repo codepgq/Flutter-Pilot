@@ -2889,6 +2889,69 @@ describe('runtime target routing through production Host and authenticated MCP I
       ).rejects.toHaveProperty('code', 'TARGET_STALE');
     });
   });
+  it('clears only confirmed HTTP history on the selected current target', async () => {
+    await withTargets(async ({ call, flutter, proxy, vm, engine }: any) => {
+      const entry = {
+        id: 'vm-clear-target',
+        startedAt: Date.now(),
+        duration: 1,
+        method: 'GET',
+        host: 'fixture.test',
+        path: '/clear',
+        url: 'https://fixture.test/clear',
+        targetUrl: 'https://fixture.test/clear',
+        originalRequest: {
+          method: 'GET',
+          url: 'https://fixture.test/clear',
+          headers: [],
+          body: '',
+          bodyEncoding: 'text',
+          bodyBytes: 0,
+          truncated: false,
+          editable: true,
+        },
+        request: {
+          method: 'GET',
+          url: 'https://fixture.test/clear',
+          headers: [],
+          body: '',
+          bodyEncoding: 'text',
+          bodyBytes: 0,
+          truncated: false,
+          editable: true,
+        },
+        mocked: false,
+        note: '',
+        tags: [],
+      };
+      await vm.store.put(entry);
+      const original = engine.rpc.bind(engine);
+      const calls: string[] = [];
+      engine.rpc = async (method: string, args: any) => {
+        if (method === 'history.clear') {
+          calls.push(method);
+          return { ok: true };
+        }
+        return original(method, args);
+      };
+      await expect(call('clear_network_history', { target: flutter, domain: 'http' })).rejects.toThrow();
+      expect(await vm.store.list()).toMatchObject({ total: 1 });
+      await expect(
+        call('clear_network_history', { target: flutter, domain: 'http', confirm: true }),
+      ).resolves.toMatchObject({
+        ok: true,
+        cleared: ['http'],
+        scope: 'current-target',
+      });
+      expect(await vm.store.list()).toMatchObject({ total: 0 });
+      await call('clear_network_history', { target: proxy, domain: 'http', confirm: true });
+      expect(calls).toEqual(['history.clear']);
+      await expect(
+        call('clear_network_history', { target: proxy, domain: 'all', confirm: true }),
+      ).rejects.toHaveProperty('code', 'TARGET_UNSUPPORTED');
+      expect(calls).toEqual(['history.clear']);
+    });
+  });
   it('isolates activation, proxy capture, VM state, and legacy activation ownership across IDE restoration', async () => {
     await withTargets(async ({ call, flutter, proxy, capture, mock, engine }: any) => {
       await message('rules.save', { rule });

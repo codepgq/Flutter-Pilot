@@ -6,9 +6,59 @@ import { BrowserDependencies } from '../src/browser/dependencies';
 import { BrowserController } from '../src/browser/controller';
 import { BrowserError, browserMcpTools, browserUrl } from '../src/browser/protocol';
 import { matchesHttp, patchRequest, selectHttp, bodySnapshot } from '../src/browser/http';
+import { BrowserSockets } from '../src/browser/websocket';
 let root: string;
 afterEach(async () => {
   if (root) await rm(root, { recursive: true, force: true });
+});
+
+it('clears browser WS message bodies without closing live sockets and prunes closed connection history', async () => {
+  const sockets = new BrowserSockets(() => {});
+  sockets.capture = true;
+  let route!: (socket: any) => void;
+  let outbound!: (message: string | Buffer) => void;
+  let inbound!: (message: string | Buffer) => void;
+  let close!: (code?: number, reason?: string) => void;
+  const server = {
+    onMessage: (callback: typeof inbound) => {
+      inbound = callback;
+    },
+    onClose: () => {},
+    send: vi.fn(),
+    close: vi.fn(),
+  };
+  const page = {
+    routeWebSocket: (_pattern: string, callback: typeof route) => {
+      route = callback;
+    },
+    once: vi.fn(),
+  };
+  await sockets.install(page as any, 'page', 'runtime', 1);
+  const client = {
+    url: () => 'wss://example.test/events',
+    protocols: () => [],
+    connectToServer: () => server,
+    onMessage: (callback: typeof outbound) => {
+      outbound = callback;
+    },
+    onClose: (callback: typeof close) => {
+      close = callback;
+    },
+    send: vi.fn(),
+    close: vi.fn(),
+  };
+  route(client);
+  inbound('push-1');
+  expect(sockets.history({ includeBodies: true } as any)).toMatchObject({
+    total: 1,
+    items: [{ original: 'push-1', direction: 'inbound' }],
+  });
+  expect(sockets.clearHistory()).toMatchObject({ ok: true, cleared: 1 });
+  expect(sockets.list()).toHaveLength(1);
+  expect(sockets.history({} as any).total).toBe(0);
+  close(1000, 'done');
+  expect(sockets.clearHistory()).toMatchObject({ ok: true, cleared: 0 });
+  expect(sockets.list()).toHaveLength(0);
 });
 it('status and construction never create dependency state or start a Worker', async () => {
   root = await mkdtemp(join(tmpdir(), 'pilot-browser-unit-'));

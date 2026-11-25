@@ -246,7 +246,8 @@ export class WsHistoryStore {
     await this.init();
     await this.enqueue(async () => {
       await this.sql(
-        `DELETE FROM ws_messages${connectionId ? ` WHERE connection_id=${sqlText(connectionId)}` : ''};`,
+        `DELETE FROM ws_messages${connectionId ? ` WHERE connection_id=${sqlText(connectionId)}` : ''};
+         ${connectionId ? '' : `DELETE FROM ws_connections WHERE json_extract(payload,'$.status')!='open';`}`,
       );
     });
   }

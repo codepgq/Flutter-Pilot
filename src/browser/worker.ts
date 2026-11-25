@@ -196,9 +196,16 @@ async function dispatch(method: string, args: any, signal: AbortSignal) {
   }
   if (method === 'ws.connections') return c.sockets.list();
   if (method === 'ws.messages') return c.sockets.history(args.query);
+  if (method === 'ws.clear') return c.sockets.clearHistory();
   if (method === 'ws.message') return c.sockets.get(args.id);
   if (method === 'ws.send' || method === 'ws.inject')
     return c.sockets.deliver(args.connectionId, args.text, method === 'ws.send' ? 'outbound' : 'inbound');
+  if (method === 'history.clear') {
+    const cleared = c.history.length;
+    c.history = [];
+    c.historyBytes = 0;
+    return { ok: true, cleared };
+  }
   if (method === 'history.list') {
     const q = args.query as HistoryQuery;
     const rows = c.history.filter(

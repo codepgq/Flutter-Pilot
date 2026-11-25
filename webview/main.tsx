@@ -2323,6 +2323,8 @@ function RuleEditor({
   const [query, setQuery] = useState(JSON.stringify(rule.request?.query ?? {}, null, 2));
   const [matchHeaders, setMatchHeaders] = useState(JSON.stringify(rule.match.headers ?? {}, null, 2));
   const [matchQuery, setMatchQuery] = useState(JSON.stringify(rule.match.query ?? {}, null, 2));
+  const [matchBodyJson, setMatchBodyJson] = useState(JSON.stringify(rule.match.bodyJson, null, 2) ?? '');
+  const [matchBodyRegex, setMatchBodyRegex] = useState(JSON.stringify(rule.match.bodyRegex, null, 2) ?? '');
   const [error, setError] = useState('');
   const [pendingSave, setPendingSave] = useState<Rule>();
   useEffect(() => {
@@ -2351,6 +2353,10 @@ function RuleEditor({
     if (d.breakpoint && !d.breakpoint.request && !d.breakpoint.response) delete d.breakpoint;
     d.match.headers = parseMap(matchHeaders, false) as Record<string, string>;
     d.match.query = parseMap(matchQuery, false) as Record<string, string>;
+    if (matchBodyJson.trim()) d.match.bodyJson = JSON.parse(matchBodyJson);
+    else delete d.match.bodyJson;
+    if (matchBodyRegex.trim()) d.match.bodyRegex = JSON.parse(matchBodyRegex);
+    else delete d.match.bodyRegex;
     const h = parseMap(headers, kind !== 'mock');
     if (kind === 'mock') d.mock = { ...d.mock!, headers: h as Record<string, string> };
     if (kind === 'request') d.request = { ...d.request, headers: h, query: parseMap(query) };
@@ -2401,6 +2407,8 @@ function RuleEditor({
                   setQuery(JSON.stringify(d.request?.query ?? {}, null, 2));
                   setMatchHeaders(JSON.stringify(d.match.headers ?? {}, null, 2));
                   setMatchQuery(JSON.stringify(d.match.query ?? {}, null, 2));
+                  setMatchBodyJson(JSON.stringify(d.match.bodyJson, null, 2) ?? '');
+                  setMatchBodyRegex(JSON.stringify(d.match.bodyRegex, null, 2) ?? '');
                   setAdvanced(false);
                   setError('');
                 } catch (e) {
@@ -2526,6 +2534,17 @@ function RuleEditor({
                 <summary>更多匹配条件</summary>
                 <BodyEditor label="匹配查询参数 JSON" value={matchQuery} onChange={setMatchQuery} />
                 <BodyEditor label="匹配请求头 JSON" value={matchHeaders} onChange={setMatchHeaders} />
+                <BodyEditor
+                  label="请求体字段完全匹配 JSON"
+                  value={matchBodyJson}
+                  onChange={setMatchBodyJson}
+                />
+                <BodyEditor
+                  label="请求体字段正则匹配 JSON"
+                  value={matchBodyRegex}
+                  onChange={setMatchBodyRegex}
+                />
+                <p>填写顶层字段。完全匹配比较 JSON 值，正则匹配整个字符串。留空可跳过该条件。</p>
               </details>
               <div className="form-section-title">{kindLabels[kind]}</div>
               {kind === 'response' && (

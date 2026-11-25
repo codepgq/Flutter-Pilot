@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.26 — HTTP 请求体匹配与网络记录（2026-11-25）
+
+- HTTP Mock 规则支持 `match.bodyJson` 精确匹配指定 JSON 字段和 `match.bodyRegex` 对字符串字段做整值正则匹配，覆盖托管 Chromium、Flutter Dio 与 HTTP 代理。工作台可直接编辑两种条件。
+- MCP 补充 HTTP 请求详情与 WS 推送正文的查询指引，新增 `clear_network_history`，可显式清理指定目标的 HTTP 或 WS 历史并保留在线连接。
+
 ## 0.0.25 — 侧栏状态、启动入口与激活修复（2026-11-17）
 
 - 修复扩展无法激活：打包后的 `jsonc-parser` 不再在扩展宿主里 `require("./impl/format")`，侧栏“打开工作台”可以再次打开工作台。

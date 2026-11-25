@@ -1,5 +1,9 @@
 # 问题与验证记录
 
+## Flutter VM 冒烟偶发的采集开关恢复断言（2026-11-25）
+
+- 请求体匹配通过后，首次 Flutter 全量冒烟在同一 VM 重连后断开时读到 SDK HTTP 采集开关仍为 true。未改动的 HEAD 基线和当前源码各独立复跑一次均通过，暂未复现。再次出现时记录同一 VM 重连及 SDK 采集开关恢复的诊断，单独验证该问题。
+
 ## 侧栏打不开工作台（2026-11-17）
 
 - 现象：0.0.24 安装后，活动栏“打开工作台”点击无反应。扩展宿主日志是 `Cannot find module './impl/format'`，随后 `command 'flutterPilot.open' not found`。

@@ -23,6 +23,20 @@ const check = (name, result) => {
 const server = http.createServer((req, res) => {
   calls.push(req.url);
   requestHeaders.push({ url: req.url, method: req.method, cookie: req.headers.cookie });
+  if (req.url === '/login-fixture') {
+    res.setHeader('content-type', 'text/html');
+    res.end(`<script>
+      const submit = async (password) => {
+        const response = await fetch('/fixture-sessions', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ password, extra: true, email: 'aaaa@example.test' }),
+        });
+        await response.json();
+      };
+      submit('Demo123').then(() => submit('Demo123\\n'));
+    </script>`);
+    return;
+  }
   if (req.url === '/events') {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     res.write('data: alive\n\n');
@@ -113,6 +127,20 @@ try {
           httpRules: [
             rule('a', 'context-a'),
             rule('low', 'wrong', 1),
+            {
+              ...rule('admin-login', 'ADMIN'),
+              match: {
+                method: 'POST',
+                path: '/fixture-sessions',
+                bodyJson: { email: 'aaaa@example.test' },
+                bodyRegex: { password: 'Demo[0-9]{3}' },
+              },
+            },
+            {
+              ...rule('invalid-login', 'denied', 1),
+              match: { method: 'POST', path: '/fixture-sessions' },
+              mock: { status: 401, headers: { 'content-type': 'application/json' }, body: '{}' },
+            },
             {
               id: 'failed',
               name: 'failed',
@@ -222,6 +250,20 @@ try {
     (error) => error.code === 'PAGE_STALE',
   );
   check('foreign page rejected', true);
+  await invoke('open_browser_page', { target: a, url: url + '/login-fixture' });
+  await until(
+    () => seen.filter((event) => event.entry.path === '/fixture-sessions').length === 2,
+    'body-based login responses missing',
+  );
+  const loginRows = (await read(a)).items.filter((row) => row.path === '/fixture-sessions');
+  check(
+    'JSON body fields select the login response, rejecting an extra trailing newline',
+    loginRows.some(
+      (row) => row.requestRuleId === 'admin-login' && JSON.parse(row.response.body).owner === 'ADMIN',
+    ) &&
+      loginRows.some((row) => row.requestRuleId === 'invalid-login' && row.response.status === 401) &&
+      !calls.includes('/fixture-sessions'),
+  );
   await invoke('navigate_browser_page', { target: { ...a, pageId: pageA.pageId }, url: url + '/normal' });
   check('normal requests forwarded', calls.includes('/normal'));
   await invoke('reload_browser_page', { target: { ...a, pageId: pageA.pageId } });

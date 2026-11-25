@@ -800,6 +800,12 @@ class Workbench {
         listHttp: (query) =>
           this.historyCall<HistoryResult>('history.list', query as Record<string, unknown>, mode),
         getHttp: (id) => this.historyCall<HistoryEntry>('history.get', { id }, mode),
+        clearHttp: () => this.historyCall('history.clear', {}, mode),
+        clearWs: () => {
+          if (mode !== 'vm')
+            throw new McpToolError('TARGET_UNSUPPORTED', 'HTTP 代理目标不支持 WS 历史清理。');
+          return this.vm.websocket.store.clear();
+        },
         connections: () => this.vm.websocket.store.connections(),
         messages: async (query) => {
           const { includeBodies, ...filters } = query as typeof query & { includeBodies?: boolean };
@@ -1182,7 +1188,9 @@ class Workbench {
       throw new McpToolError('TARGET_DISCONNECTED', '运行目标已断开，请重新发现并连接目标。');
     if (
       mode === 'proxy' &&
-      (tool.includes('_ws_') || (tool === 'set_capture_enabled' && args.domain === 'ws'))
+      (tool.includes('_ws_') ||
+        (tool === 'set_capture_enabled' && args.domain === 'ws') ||
+        (tool === 'clear_network_history' && args.domain !== 'http'))
     )
       throw new McpToolError('TARGET_UNSUPPORTED', 'HTTP 代理不支持 WS，请明确选择 Flutter 目标。');
   }
@@ -2368,6 +2376,7 @@ class Workbench {
               'get_network_status',
               'get_requests',
               'get_request',
+              'clear_network_history',
               'get_ws_connections',
               'get_ws_messages',
               'inject_ws_message',
@@ -2509,6 +2518,7 @@ class Workbench {
                     'activate_scene',
                     'deactivate_scene',
                     'set_capture_enabled',
+                    'clear_network_history',
                     'inject_ws_message',
                     'send_ws_message',
                   ].includes(tool)
@@ -2517,6 +2527,7 @@ class Workbench {
                 if (!networkMode || !networkTarget) throw new McpToolError('UNKNOWN_TOOL', '未知工具');
                 this.assertNetworkTarget(networkTarget, tool, args);
                 const result = await this.networks[networkMode].execute(tool, args, context.signal);
+                if (tool === 'clear_network_history') await this.reloadHistory();
                 this.assertNetworkTarget(networkTarget, tool, args);
                 return result;
               } finally {

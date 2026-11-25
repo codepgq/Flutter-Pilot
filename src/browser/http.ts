@@ -1,7 +1,62 @@
 import { globRegex } from '../glob';
-import type { Rule, RequestSnapshot, ResponseSnapshot, HistoryEntry, HeaderPatch } from '../model';
+import {
+  fullBodyRegex,
+  type Rule,
+  type RequestSnapshot,
+  type ResponseSnapshot,
+  type HistoryEntry,
+  type HeaderPatch,
+} from '../model';
 import { randomUUID } from 'node:crypto';
 export const bodyLimit = 1024 * 1024;
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+function jsonEquals(actual: unknown, expected: unknown): boolean {
+  if (Array.isArray(expected)) {
+    return (
+      Array.isArray(actual) &&
+      actual.length === expected.length &&
+      expected.every((value, index) => jsonEquals(actual[index], value))
+    );
+  }
+  if (isObject(expected)) {
+    return (
+      isObject(actual) &&
+      Object.keys(actual).length === Object.keys(expected).length &&
+      matchesFields(actual, expected)
+    );
+  }
+  return actual === expected;
+}
+function matchesFields(actual: Record<string, unknown>, expected: Record<string, unknown>): boolean {
+  return Object.entries(expected).every(
+    ([key, value]) => Object.hasOwn(actual, key) && jsonEquals(actual[key], value),
+  );
+}
+function matchesBody(request: RequestSnapshot, { bodyJson, bodyRegex }: Rule['match']) {
+  if (!bodyJson && !bodyRegex) return true;
+  if (!request.editable || request.truncated || request.bodyEncoding !== 'text') return false;
+  const mime = request.headers
+    .find(([name]) => name.toLowerCase() === 'content-type')?.[1]
+    .split(';')[0]
+    .trim()
+    .toLowerCase();
+  if (!mime || !(mime === 'application/json' || mime === 'text/json' || mime.endsWith('+json'))) return false;
+  try {
+    const actual: unknown = JSON.parse(request.body);
+    return (
+      isObject(actual) &&
+      matchesFields(actual, bodyJson ?? {}) &&
+      Object.entries(bodyRegex ?? {}).every(([key, pattern]) => {
+        const value = actual[key];
+        return Object.hasOwn(actual, key) && typeof value === 'string' && fullBodyRegex(pattern).test(value);
+      })
+    );
+  } catch {
+    return false;
+  }
+}
 export function matchesHttp(rule: Rule, request: RequestSnapshot, states: Map<string, string>) {
   const match = rule.match,
     url = new URL(request.url);
@@ -14,7 +69,8 @@ export function matchesHttp(rule: Rule, request: RequestSnapshot, states: Map<st
     Object.entries(match.query ?? {}).every(([key, value]) => url.searchParams.getAll(key).includes(value)) &&
     Object.entries(match.headers ?? {}).every(([key, value]) =>
       request.headers.some(([name, text]) => name.toLowerCase() === key.toLowerCase() && text === value),
-    )
+    ) &&
+    matchesBody(request, match)
   );
 }
 export function selectHttp(
@@ -41,7 +97,7 @@ export function patchHeaders(headers: [string, string][], patch: HeaderPatch = {
 }
 export function bodySnapshot(headers: [string, string][], body: Buffer, limitation?: string) {
   const type = headers.find(([name]) => name.toLowerCase() === 'content-type')?.[1] ?? '';
-  const binary = !!type && !/json|text|xml|javascript|x-www-form-urlencoded/.test(type);
+  const binary = !!type && !/json|text|xml|javascript|x-www-form-urlencoded/i.test(type);
   const truncated = body.length > bodyLimit;
   return {
     headers,

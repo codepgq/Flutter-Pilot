@@ -1,5 +1,11 @@
 # 验收记录
 
+## 0.0.26 发布、Cursor 安装与推送（2026-11-25）
+
+- 版本、lockfile、README / CHANGELOG 与 VSIX 路径同步至 0.0.26。发布内容包含 HTTP JSON 请求体匹配、工作台配置，以及 MCP 网络正文查询指引与目标历史清理。
+- 发布回归包括 886 项 Vitest、109 项工作台 Playwright、32 项托管 Chromium HTTP、32 项 Dart Dio VM，以及类型、格式和打包检查。开发期另验证 iOS Flutter 和真实 mitmproxy 集成，详见请求体匹配记录。
+- Cursor CLI 使用 `--force` 安装 `artifacts/flutter-pilot-0.0.26.vsix`，包和安装文件比对与离线 MCP 发现见 `artifacts/v0.0.26-install-report.json`。远端 main 与附注标签 `v0.0.26` 的核验见 `artifacts/v0.0.26-release-report.txt`。活动窗口可在调试方便时重载并重连 MCP。
+
 ## 0.0.25 发布、Cursor 安装与推送（2026-11-17）
 
 - 按默认发布约定交付侧栏连接状态、项目启动入口，以及 jsonc-parser 打包导致扩展无法激活的修复。发布前远端 main、最新 tag 与 Cursor 安装版为 0.0.24；版本、lockfile、README / CHANGELOG 与 VSIX 路径同步为 0.0.25。

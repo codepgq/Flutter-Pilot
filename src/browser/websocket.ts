@@ -120,6 +120,14 @@ export class BrowserSockets {
       capture: this.capture ? 'attached' : 'unsupported',
     }));
   }
+  clearHistory() {
+    const cleared = this.messages.length;
+    this.messages = [];
+    this.bytes = 0;
+    for (const [id, connection] of this.connections)
+      if (connection.info.status !== 'open') this.connections.delete(id);
+    return { ok: true, cleared };
+  }
   history(query: WsMessageQuery) {
     const rows = this.messages.filter(
       (r) =>
