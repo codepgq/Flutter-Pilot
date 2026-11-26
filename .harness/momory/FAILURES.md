@@ -1,5 +1,11 @@
 # 问题与验证记录
 
+## Web 启动受项目 Node.js 版本约束（2026-11-26）
+
+- Admin 的 Cursor 启动日志记录 `ERR_PNPM_UNSUPPORTED_ENGINE`。项目启用 pnpm `engine-strict`，要求 `>=22.22.2 <23`，IDE 环境实际使用 `v26.8.1`。侧栏只显示退出码 1。
+- Web 启动独立校验 `engines.node`，在 IDE 的 `PATH` 中选择兼容版本，也可通过机器级用户设置 `flutterPilot.webNodePath` 指定。版本预检和子进程使用同一启动环境。pnpm 的脚本参数直接跟在脚本名后，避免把 `--` 传给开发服务器。
+- 用真实 Admin 启动项的临时端口副本复验。默认 PATH 给出版本诊断，指定 Node `22.22.2` 后服务进入 `running`，首页及有状态 Mock 收件箱均返回 HTTP 200。停止后临时端口释放，Admin 已有的 `3001` 监听仍在运行。
+
 ## 普通 Chrome 与托管浏览器的 Mock 归属（2026-11-25，已解决）
 
 Admin 默认 `3102` 只提供前端，未进入托管 Context 的登录 POST 对该 Context 不可见，直连返回 404；正向代理还受 Chromium 默认绕过本机地址限制。0.0.29 使用显式本机专用入口复用有状态规则，但用户通过原 Web 启动按钮仍只看到开发服务器地址。0.0.30 以 `mockSceneId` 将入口与启动项绑定，同时在卡片显示实际 Mock 地址。验收必须从正常启动入口进入用户现有 Chrome，并查看实际命中日志。Chrome 冒烟脚本等待的是请求路径 `/admin/v1/expert-applications`，不是前端路由 `/applications`；验收同时核对页面、真实 HTTP 状态和命中头。

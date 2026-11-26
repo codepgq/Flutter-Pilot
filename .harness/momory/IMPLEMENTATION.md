@@ -1,5 +1,10 @@
 # 实现与验证结论
 
+## 0.0.31 Web 启动 Node.js 兼容性修复（2026-11-26）
+
+- Web 启动读取 `engines.node` 并使用匹配版本，支持机器级用户设置 `flutterPilot.webNodePath`。pnpm 脚本参数直接传递。
+- 用 Admin 的 `dev:mock` 和真实 Node 22.22.2 验证启动、首页和原生 Mock 收件箱。发布和 Cursor 安装的核验记录见 `docs/validation.md`。
+
 ## 0.0.30 Web 启动项接入普通浏览器 HTTP Mock（2026-11-25）
 
 - `mockSceneId` 显式绑定已有 HTTP Scene，启动器在服务器就绪后创建专用 Mock 地址，工作台及侧栏可打开或复制；停止、退出及关闭会话时关闭入口。

@@ -47,10 +47,11 @@ MCP 只读指南与 Prompts 无在线会话前提，入口为 `capabilities`、`
 
 - `web.root` 必须是工作区内普通相对目录；`script` 必须存在于该目录 `package.json`。
 - Web 启动只调用固定 package manager 的 `run` 子命令，不经过 shell，不执行 launch.json 中任意可执行路径。
+- `package.json` 声明 `engines.node` 时，插件在 IDE 的 `PATH` 中按顺序选择兼容的 Node.js。也可在 IDE 的用户设置中用 `flutterPilot.webNodePath` 指定本机 Node.js 可执行文件的绝对路径。版本不兼容时，启动器在运行脚本前提示项目要求与检测到的版本。插件使用已有的本机安装，不下载 Node.js。
 - Flutter `configuration` 必须来自当前工作区命名且唯一的 Dart Debug 启动配置；省略时要求当前只有一个可用配置。
 - 侧栏和工作台会检查 Web `url` 的本机 TCP 端口。Flutter 从对应 Debug 配置的 `toolArgs` 读取固定的本机调试端口，支持 `--host-vmservice-port`、`--dds-port` 和旧版 `--vm-service-port`。端口 `0` 由系统动态分配，`--device-vmservice-port` 属于设备侧。
 - 启动遇到端口冲突且能确认唯一监听进程时，点击「结束进程并重新启动」，核对弹窗里的地址、进程名和 PID。确认后，插件会重新核对进程身份，等端口释放后再运行原启动项。macOS 和 Linux 使用 `lsof` 查询监听进程，Windows 使用系统 PowerShell。查询失败或进程身份不明确时，启动卡片会保留端口冲突提示。
-- 工作台「项目启动」会等待 Web URL 就绪，展示有界日志并支持停止；手动编辑后点击「重新读取」。
+- 工作台「项目启动」会等待 Web URL 就绪，展示有界日志并支持停止；脚本提前退出时也可在 IDE 的「输出 → Flutter Pilot」查看日志。手动编辑后点击「重新读取」。
 
 ## 操作与测试
 

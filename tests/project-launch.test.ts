@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { createServer } from 'node:net';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
@@ -15,6 +15,18 @@ import {
 } from '../src/project-launch';
 
 let root: string;
+
+async function availablePort() {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (!address || typeof address === 'string') throw new Error('缺少测试端口');
+  return address.port;
+}
 
 async function occupyPort(port = 0, host = '127.0.0.1') {
   const fixture = join(root, 'listener.cjs');
@@ -155,11 +167,112 @@ describe('project launch configuration', () => {
   });
 
   it('builds package-manager commands without a shell', () => {
-    expect(launchCommand({ ...webProfile, args: ['--host', '127.0.0.1'] })).toEqual({
+    const profile = { ...webProfile, args: ['--host', '127.0.0.1'] };
+    expect(launchCommand(profile)).toEqual({
       command: 'pnpm',
+      args: ['run', 'dev:pilot', '--host', '127.0.0.1'],
+    });
+    expect(launchCommand({ ...profile, packageManager: 'npm' })).toEqual({
+      command: 'npm',
       args: ['run', 'dev:pilot', '--', '--host', '127.0.0.1'],
     });
   });
+
+  it('reports an incompatible project Node engine before starting the package manager', async () => {
+    const file = join(root, 'launch.json');
+    const port = await availablePort();
+    await writeFile(
+      join(root, 'package.json'),
+      JSON.stringify({
+        engines: { node: '>=0.0.0 <1.0.0' },
+        scripts: { 'dev:pilot': 'vite' },
+      }),
+    );
+    await writeFile(
+      file,
+      JSON.stringify({ version: 1, profiles: [{ ...webProfile, url: `http://127.0.0.1:${port}/` }] }),
+    );
+    const controller = new ProjectLaunchController({
+      workspace: root,
+      file,
+      assertMutable: vi.fn(),
+      flutterConfigurations: () => [],
+      flutterSessions: () => [],
+      startFlutter: vi.fn(),
+      stopFlutter: vi.fn(),
+    });
+    await controller.initialize();
+    await expect(controller.start('web-dev')).rejects.toThrow('项目需要 Node.js >=0.0.0 <1.0.0');
+    expect(controller.snapshot().status).toBe('failed');
+    expect(controller.snapshot().output).toBeUndefined();
+    await controller.dispose();
+  });
+
+  it.skipIf(process.platform === 'win32').each(['PATH', 'settings'])(
+    'launches the package script with a compatible Node found via %s',
+    async (source) => {
+      const port = await availablePort();
+      const url = `http://127.0.0.1:${port}/`;
+      const file = join(root, 'launch.json');
+      const realNode = `'${process.execPath.replaceAll("'", "'\\''")}'`;
+      const makeNode = async (directory: string, version: string) => {
+        await mkdir(directory);
+        const binary = join(directory, 'node');
+        await writeFile(
+          binary,
+          `#!/bin/sh\nif [ "$1" = "--version" ]; then echo ${version}; else exec ${realNode} "$@"; fi\n`,
+        );
+        await chmod(binary, 0o700);
+        return binary;
+      };
+      const wrong = join(root, 'wrong');
+      const right = join(root, 'right');
+      await makeNode(wrong, 'v26.8.1');
+      const preferred = await makeNode(right, 'v22.22.2');
+      const path = [wrong, ...(source === 'PATH' ? [right] : []), process.env.PATH].join(delimiter);
+      await writeFile(
+        file,
+        JSON.stringify({
+          version: 1,
+          profiles: [{ ...webProfile, packageManager: 'npm', url, readyTimeoutMs: 6000 }],
+        }),
+      );
+      await writeFile(
+        join(root, 'package.json'),
+        JSON.stringify({
+          engines: { node: '>=22.22.2 <23' },
+          scripts: { [webProfile.script]: 'node --version && node server.cjs' },
+        }),
+      );
+      await writeFile(
+        join(root, 'server.cjs'),
+        `require('node:http').createServer((q,r)=>r.end('ready')).listen(${port},'127.0.0.1');`,
+      );
+      const controller = new ProjectLaunchController({
+        workspace: root,
+        file,
+        webNodePath: () => (source === 'settings' ? preferred : undefined),
+        assertMutable: vi.fn(),
+        flutterConfigurations: () => [],
+        flutterSessions: () => [],
+        startFlutter: vi.fn(),
+        stopFlutter: vi.fn(),
+      });
+      vi.stubEnv('PATH', path);
+      try {
+        await expect(controller.start('web-dev')).resolves.toMatchObject({
+          status: 'running',
+          output: expect.stringContaining('v22.22.2'),
+        });
+        expect(await (await fetch(url)).text()).toBe('ready');
+        expect(process.env.PATH).toBe(path);
+      } finally {
+        await controller.dispose();
+        vi.unstubAllEnvs();
+      }
+    },
+    12000,
+  );
 
   it('reuses an existing Flutter IDE session instead of launching a duplicate', async () => {
     const file = join(root, 'launch.json');
@@ -199,15 +312,7 @@ describe('project launch configuration', () => {
   });
 
   it.each([false, true])('starts and stops a Web script (ordinary browser Mock: %s)', async (withMock) => {
-    const port = await new Promise<number>((resolve, reject) => {
-      const server = createServer();
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', () => {
-        const address = server.address();
-        const value = typeof address === 'object' && address ? address.port : 0;
-        server.close(() => resolve(value));
-      });
-    });
+    const port = await availablePort();
     await writeFile(join(root, 'package.json'), JSON.stringify({ scripts: { dev: 'node server.cjs' } }));
     await writeFile(
       join(root, 'server.cjs'),

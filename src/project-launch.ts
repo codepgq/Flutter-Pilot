@@ -1,13 +1,14 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { access, lstat, readFile, realpath } from 'node:fs/promises';
-import { delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { lstat, readFile, realpath } from 'node:fs/promises';
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { parse as parseJsonc } from 'jsonc-parser';
+import semver from 'semver';
 import { appLaunchConfigurations, validLaunchDeviceId } from './mcp/app-launch';
 import type { WebProject } from './discovery';
-import { detectNodeRuntime } from './mcp/adapters';
 import {
   findPortOwner,
   portOccupied,
@@ -81,6 +82,7 @@ export interface ProjectLaunchOptions {
   workspace: string;
   file: string;
   assertMutable: () => void;
+  webNodePath?: () => string | undefined;
   startWebMock?: (profile: WebLaunchProfile) => Promise<{ url: string; stop: () => Promise<void> }>;
   assertFlutterLaunchable?: (configurationName: string, deviceId?: string) => void;
   flutterConfigurations: () => { name: string }[];
@@ -96,6 +98,7 @@ const object = (value: unknown): value is Record<string, unknown> =>
 const profileId = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const scriptName = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/;
 const packageManagers = ['npm', 'pnpm', 'yarn', 'bun'] as const;
+const execute = promisify(execFile);
 
 function invalid(message: string): never {
   throw new Error(`项目启动配置无效：${message}。请检查 .flutter-pilot/launch.json`);
@@ -265,8 +268,58 @@ async function selectedRoot(workspace: string, root: string): Promise<string> {
 }
 
 export function launchCommand(profile: WebLaunchProfile): { command: string; args: string[] } {
-  const forwarded = profile.args?.length ? ['--', ...profile.args] : [];
+  const args = profile.args ?? [];
+  // pnpm forwards everything after the script name, including a literal separator.
+  const forwarded = args.length && profile.packageManager !== 'pnpm' ? ['--', ...args] : args;
   return { command: profile.packageManager, args: ['run', profile.script, ...forwarded] };
+}
+
+async function webLaunchEnvironment(root: string, range: string | undefined, configuredPath?: string) {
+  const env = { ...process.env };
+  const nodePath = configuredPath?.trim();
+  if (!range && !nodePath) return env;
+
+  const windows = process.platform === 'win32';
+  const nodeName = windows ? 'node.exe' : 'node';
+  const isNode = (path: string) => (windows ? basename(path).toLowerCase() : basename(path)) === nodeName;
+  if (nodePath && (!isAbsolute(nodePath) || !isNode(nodePath))) {
+    throw new Error(`flutterPilot.webNodePath 必须是本机 ${nodeName} 可执行文件的绝对路径。`);
+  }
+  if (range && semver.validRange(range) === null) {
+    throw new Error('package.json 的 engines.node 不是有效的 Node.js 版本范围。');
+  }
+
+  const pathKey = (windows ? Object.keys(env).find((key) => key.toUpperCase() === 'PATH') : 'PATH') ?? 'PATH';
+  const directories = (env[pathKey] ?? '').split(delimiter).filter((directory) => isAbsolute(directory));
+  const candidates = nodePath ? [nodePath] : directories.map((directory) => join(directory, nodeName));
+  if (!nodePath && isNode(process.execPath)) candidates.push(process.execPath);
+  const versions = new Set<string>();
+  for (const candidate of new Set(candidates)) {
+    try {
+      const { stdout } = await execute(candidate, ['--version'], {
+        cwd: root,
+        env,
+        timeout: 3000,
+        maxBuffer: 1024,
+      });
+      const version = semver.valid(stdout.trim());
+      if (!version) continue;
+      versions.add(`v${version}`);
+      if (!range || semver.satisfies(version, range)) {
+        env[pathKey] = [dirname(candidate), env[pathKey]].filter(Boolean).join(delimiter);
+        return env;
+      }
+    } catch {
+      // A missing or unusable executable cannot supply the project's Node runtime.
+    }
+  }
+
+  if (nodePath && !versions.size)
+    throw new Error('无法运行 flutterPilot.webNodePath 指定的 Node.js，请检查该路径。');
+  const found = versions.size ? [...versions].join('、') : '无';
+  throw new Error(
+    `项目需要 Node.js ${range}，检测到的版本：${found}。请调整 IDE 的 PATH，或在用户设置中配置兼容的 flutterPilot.webNodePath。`,
+  );
 }
 
 function packageManagerFor(root: string): WebPackageManager {
@@ -493,6 +546,7 @@ export class ProjectLaunchController extends EventEmitter {
 
   private async performStart(profileId: string, conflict?: NonNullable<ProjectLaunchController['conflict']>) {
     let plan = await this.loadPlan(profileId);
+    let webEnv: NodeJS.ProcessEnv | undefined;
     if (conflict) {
       const assertSamePlan = () => {
         if (JSON.stringify(plan) !== JSON.stringify(conflict.plan) || this.runningFlutter(plan))
@@ -504,7 +558,7 @@ export class ProjectLaunchController extends EventEmitter {
       this.assertMutable();
       plan = await this.loadPlan(profileId);
       assertSamePlan();
-      if (plan.profile.type === 'web') await this.checkWebScript(plan.profile, plan.root!);
+      if (plan.profile.type === 'web') webEnv = await this.prepareWebLaunch(plan.profile, plan.root!);
       await terminatePortOwner(conflict.display, conflict.owner, () => {
         this.assertMutable();
         assertSamePlan();
@@ -535,8 +589,10 @@ export class ProjectLaunchController extends EventEmitter {
       );
     }
     this.assertMutable();
-    if (plan.profile.type === 'web') await this.startWeb(plan.profile, plan.root!);
-    else await this.options.startFlutter(plan.configuration!, plan.profile.deviceId);
+    if (plan.profile.type === 'web') {
+      webEnv ??= await this.prepareWebLaunch(plan.profile, plan.root!);
+      await this.startWeb(plan.profile, plan.root!, webEnv);
+    } else await this.options.startFlutter(plan.configuration!, plan.profile.deviceId);
   }
 
   private assertMutable() {
@@ -573,8 +629,8 @@ export class ProjectLaunchController extends EventEmitter {
     return { profile, configuration, flutterConfig, endpoints: flutterEndpoints(flutterConfig?.toolArgs) };
   }
 
-  private async checkWebScript(profile: WebLaunchProfile, root: string) {
-    let pkg: { scripts?: Record<string, unknown> };
+  private async prepareWebLaunch(profile: WebLaunchProfile, root: string) {
+    let pkg: { scripts?: Record<string, unknown>; engines?: { node?: unknown } };
     try {
       pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
     } catch {
@@ -582,12 +638,12 @@ export class ProjectLaunchController extends EventEmitter {
     }
     if (typeof pkg.scripts?.[profile.script] !== 'string')
       throw new Error(`package.json 中不存在启动脚本“${profile.script}”`);
+    const range = typeof pkg.engines?.node === 'string' ? pkg.engines.node.trim() : undefined;
+    return webLaunchEnvironment(root, range, this.options.webNodePath?.());
   }
 
-  private async startWeb(profile: WebLaunchProfile, root: string) {
-    await this.checkWebScript(profile, root);
+  private async startWeb(profile: WebLaunchProfile, root: string, env: NodeJS.ProcessEnv) {
     const command = launchCommand(profile);
-    const nodePath = await detectNodeRuntime();
     this.assertMutable();
     const generation = ++this.generation;
     this.webState = 'starting';
@@ -597,10 +653,7 @@ export class ProjectLaunchController extends EventEmitter {
     this.stopping = false;
     const child = spawn(command.command, command.args, {
       cwd: root,
-      env: {
-        ...process.env,
-        ...(nodePath ? { PATH: `${dirname(nodePath)}${delimiter}${process.env.PATH ?? ''}` } : {}),
-      },
+      env,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
       shell: false,
@@ -632,7 +685,7 @@ export class ProjectLaunchController extends EventEmitter {
         this.stopping = false;
       } else {
         this.webState = 'failed';
-        this.error = `Web 启动进程已退出（${signal ?? `退出码 ${code ?? '未知'}`}）`;
+        this.error = `Web 启动进程已退出（${signal ?? `退出码 ${code ?? '未知'}`}）。请查看「输出 → Flutter Pilot」中的启动日志。`;
       }
       this.emit('changed');
     });

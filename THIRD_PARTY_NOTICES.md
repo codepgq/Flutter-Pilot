@@ -34,6 +34,30 @@ THE SOFTWARE.
 
 完整 npm 依赖锁定在 package-lock.json。构建时 esbuild 保留上游法律注释；开发和测试依赖不打包进 VSIX。
 
+## node-semver
+
+- 版本：7.8.6（以 package-lock.json 锁定版本为准）
+- 许可：ISC
+- 用途：校验 Web 项目的 Node.js 版本范围，随扩展构建产物打包。
+
+```text
+The ISC License
+
+Copyright (c) Isaac Z. Schlueter and Contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
+IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
 ## ws
 
 - 项目：https://github.com/websockets/ws

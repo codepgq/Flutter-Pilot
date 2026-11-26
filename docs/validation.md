@@ -1,5 +1,10 @@
 # 验收记录
 
+## 0.0.31 Web 启动 Node.js 兼容性修复（2026-11-26）
+
+- Cursor 启动日志记录 Admin 使用 Node 26.8.1 时被 pnpm 拒绝。用新版启动器和 Node 22.22.2 在临时端口复验，`dev:mock` 就绪，首页和 `/__mock/inbox` 均返回 HTTP 200，停止后临时端口释放。
+- 907 项 Vitest、111 项 Playwright、类型检查、格式检查和构建通过。分发包为 `artifacts/flutter-pilot-0.0.31.vsix`。Cursor 安装、文件一致性及离线 MCP 记录见 `artifacts/v0.0.31-install-report.json`。远端分支及附注标签记录见 `artifacts/v0.0.31-release-report.txt`。
+
 ## 0.0.30 Web 启动项接入普通浏览器 HTTP Mock（2026-11-25）
 
 - Admin 的 Cursor 工作台加载 v0.0.30 并使用 `admin-pilot-api-dev`（`mockSceneId: admin-stateful`）启动。用户已打开的日常 Chrome 标签页切换到专用 Mock 地址，登录后到达 `/applications`，显示 4 条待审核申请。IDE 输出 `admin-stateful-login-admin → 200`、`admin-stateful-application-list → 200`、`admin-stateful-application-detail → 200`。直连 3102 登录 POST 为 404。

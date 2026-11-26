@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.31 — Web 启动 Node.js 兼容性修复（2026-11-26）
+
+- Web 启动器按项目 `engines.node` 选择兼容的 Node.js，也可在 IDE 用户设置中配置 `flutterPilot.webNodePath`。版本不匹配时，启动前显示项目要求和检测到的版本。
+- 修正 pnpm 脚本参数转发。Web 进程退出时，启动错误提示可在 Flutter Pilot 输出中查阅日志。
+
 ## 0.0.30 — Web 启动项接入普通浏览器 HTTP Mock（2026-11-25）
 
 - Web profile 支持可选 `mockSceneId`。启动项目会创建对应 Scene 的普通浏览器 HTTP Mock 地址，侧栏和工作台支持打开及复制。

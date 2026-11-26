@@ -922,6 +922,7 @@ class Workbench {
       workspace: this.folder.uri.fsPath,
       file: this.project.launchFile,
       assertMutable: () => this.ensureEnvironmentMutable(),
+      webNodePath: () => vscode.workspace.getConfiguration('flutterPilot').get<string>('webNodePath'),
       startWebMock: (profile) => this.startBrowserMock(profile.url, profile.mockSceneId!),
       assertFlutterLaunchable: (name, deviceId) => this.mcpAppLaunch.checkLaunch(name, deviceId),
       flutterConfigurations: () => this.mcpAppLaunch.status().configurations,

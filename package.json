@@ -3,7 +3,7 @@
   "displayName": "Flutter Pilot",
   "icon": "resources/icons/plugin.png",
   "description": "Flutter 运行时调试与 Agent 联调工作台：HTTP/WebSocket 采集与 Mock、UI 精确操作、热重载和 MCP。",
-  "version": "0.0.30",
+  "version": "0.0.31",
   "publisher": "flutter-pilot",
   "license": "MIT",
   "engines": {
@@ -104,6 +104,12 @@
     "configuration": {
       "title": "Flutter Pilot",
       "properties": {
+        "flutterPilot.webNodePath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "可选：Web 项目启动使用的 Node.js 可执行文件绝对路径。留空时从 IDE 进程的 PATH 查找符合项目 engines.node 的版本。"
+        },
         "flutterPilot.enginePath": {
           "type": "string",
           "default": "",
@@ -166,7 +172,7 @@
     "test:proxy": "python3 -m unittest discover -s tests/proxy -v",
     "test:ui": "playwright test",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-pilot-0.0.30.vsix",
+    "package": "vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links --out artifacts/flutter-pilot-0.0.31.vsix",
     "test:ide": "node scripts/ide-test.mjs",
     "format:check": "prettier --check \"src/**/*.ts\" \"webview/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/*.{mjs,cjs}\" \"*.{json,ts,mts}\"",
     "test:vm": "node scripts/vm-injection-smoke.mjs",
@@ -198,6 +204,7 @@
     "pngjs": "^7.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "semver": "^7.8.6",
     "smol-toml": "^1.9.1",
     "ws": "^8.22.1",
     "zod": "^4.6.7"
@@ -208,6 +215,7 @@
     "@types/pngjs": "^6.0.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/semver": "^7.7.1",
     "@types/vscode": "^1.96.0",
     "@types/ws": "^8.18.2",
     "@vscode/test-electron": "^2.5.2",
